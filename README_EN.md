@@ -10,7 +10,7 @@
 
 ---
 
-A cyberpunk-styled AI image generation workstation. Type a prompt, get an image. Upload references, iterate on them. Powered by Google Gemini multimodal models, with a React frontend and Flask backend — ready to run out of the box.
+A coding ide-styled AI image generation workstation. Type a prompt, get an image. Upload references, iterate on them. Powered by Google Gemini multimodal models, with a React frontend and Flask backend — ready to run out of the box.
 
 ## Features
 
