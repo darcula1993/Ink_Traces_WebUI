@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gemini 视觉工作室</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Import Sci-Fi Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Rajdhani', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            backgroundImage: {
+              'cyber-grid': "linear-gradient(to right, rgba(6, 182, 212, 0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(6, 182, 212, 0.05) 1px, transparent 1px)",
+              'cyber-grid-light': "linear-gradient(to right, rgba(6, 182, 212, 0.08) 1px, transparent 1px), linear-gradient(to bottom, rgba(6, 182, 212, 0.08) 1px, transparent 1px)",
+            },
+            animation: {
+              'spin-slow': 'spin 3s linear infinite',
+              'reverse-spin': 'reverse-spin 4s linear infinite',
+              'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'scan': 'scan 4s linear infinite',
+              'fade-in': 'fadeIn 0.5s ease-in-out',
+              'slide-in-right': 'slideInRight 0.5s ease-out',
+            },
+            keyframes: {
+              scan: {
+                '0%': { transform: 'translateY(-100%)' },
+                '100%': { transform: 'translateY(100%)' },
+              },
+              'reverse-spin': {
+                from: { transform: 'rotate(360deg)' },
+                to: { transform: 'rotate(0deg)' },
+              },
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+              slideInRight: {
+                '0%': { transform: 'translateX(20px)', opacity: '0' },
+                '100%': { transform: 'translateX(0)', opacity: '1' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Dark Theme */
+      body {
+        background-color: #030712;
+        transition: background-color 0.3s ease;
+      }
+
+      /* Light Theme */
+      body.light-theme {
+        background-color: #f8fafc;
+      }
+
+      .bg-cyber-grid {
+        background-size: 40px 40px;
+        -webkit-mask-image: linear-gradient(to bottom, transparent, 10%, white, 90%, transparent);
+                mask-image: linear-gradient(to bottom, transparent, 10%, white, 90%, transparent);
+      }
+
+      /* Dark Theme Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #0f172a;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #0891b2;
+        border-radius: 0px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #06b6d4;
+        box-shadow: 0 0 10px #06b6d4;
+      }
+
+      /* Light Theme Scrollbar */
+      body.light-theme ::-webkit-scrollbar-track {
+        background: #e2e8f0;
+      }
+      body.light-theme ::-webkit-scrollbar-thumb {
+        background: #0891b2;
+      }
+      body.light-theme ::-webkit-scrollbar-thumb:hover {
+        background: #06b6d4;
+      }
+
+      /* Dark Theme Glass Panel */
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(34, 211, 238, 0.1);
+        transition: background 0.3s ease, border 0.3s ease;
+      }
+
+      /* Light Theme Glass Panel */
+      body.light-theme .glass-panel {
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(6, 182, 212, 0.15);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      }
+
+      .tech-border-bottom {
+        position: relative;
+      }
+      .tech-border-bottom::after {
+        content: '';
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.5), transparent);
+      }
+
+      /* Light Theme Border */
+      body.light-theme .tech-border-bottom::after {
+        background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.3), transparent);
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-DNMkCknG.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-XEKMt9jG.css">
+  </head>
+  <body class="text-cyan-50 antialiased selection:bg-cyan-500/30 selection:text-cyan-200 overflow-x-hidden dark">
+    <div id="root"></div>
+  </body>
+</html>

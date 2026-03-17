@@ -1,0 +1,43 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000
+  },
+  "client": {
+    "host": "0.0.0.0",
+    "port": 4545
+  },
+  "api": {
+    "default_provider": "vertex",
+    "default_model": "gemini-3.1-flash-image-preview",
+    "available_models": [
+      {
+        "id": "gemini-3.1-flash-image-preview",
+        "name": "Gemini 3.1 Flash",
+        "description": "快速响应，适合快速迭代"
+      },
+      {
+        "id": "gemini-3-pro-image-preview",
+        "name": "Gemini 3 Pro",
+        "description": "高质量生成，更强的理解能力"
+      }
+    ],
+    "vertex": {
+      "key": "",
+      "model_id": "gemini-3.1-flash-image-preview",
+      "endpoint": "aiplatform.googleapis.com",
+      "project_id": ""
+    },
+    "ai_studio": {
+      "key": "",
+      "model_id": "gemini-3.1-flash-image-preview",
+      "endpoint": "generativelanguage.googleapis.com"
+    }
+  },
+  "safety": {
+    "hate_speech": "BLOCK_NONE",
+    "dangerous_content": "BLOCK_NONE",
+    "sexually_explicit": "BLOCK_NONE",
+    "harassment": "BLOCK_NONE"
+  }
+}

@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --color-nexus-bg: #0a0a0a;
+  --color-nexus-panel: #111111;
+  --color-nexus-border: #222222;
+  --color-nexus-border-hover: #333333;
+  --color-nexus-green: #10b981;
+  --color-nexus-green-dim: rgba(16, 185, 129, 0.1);
+  --color-nexus-green-hover: #059669;
+  --color-nexus-text: #888888;
+  --color-nexus-text-light: #cccccc;
+  
+  --font-mono: "JetBrains Mono", Menlo, Monaco, "Courier New", monospace;
+  --font-sans: Inter, system-ui, sans-serif;
+}
+
+@layer base {
+  :root {
+    background-color: var(--color-nexus-bg);
+    color: var(--color-nexus-text-light);
+  }
+  
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background-color: var(--color-nexus-bg);
+    color: var(--color-nexus-text-light);
+    -webkit-font-smoothing: antialiased;
+  }
+  
+  /* Custom Scrollbar for IDE feel */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 0px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #444;
+  }
+}
+
+@layer utilities {
+  .panel-border {
+    @apply border border-nexus-border rounded-xl bg-nexus-panel shadow-sm;
+  }
+  
+  .btn-base {
+    @apply flex items-center justify-center gap-2 rounded-lg font-mono text-xs font-medium transition-all;
+  }
+  
+  .btn-outline {
+    @apply border border-nexus-border text-nexus-text hover:border-nexus-border-hover hover:text-nexus-text-light hover:bg-white/5;
+  }
+  
+  .btn-active {
+    @apply border border-nexus-green text-nexus-green bg-nexus-green-dim;
+  }
+}
