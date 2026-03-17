@@ -10,7 +10,7 @@
 
 ---
 
-一个赛博朋克风格的 AI 图片生成工作站。输入 prompt 生成图片，上传参考图迭代修改。底层调用 Google Gemini 多模态大模型，前端 React，后端 Flask，开箱即用。
+一个coding ide风格的 AI 图片生成工作站。输入 prompt 生成图片，上传参考图迭代修改。底层调用 Google Gemini 多模态大模型，前端 React，后端 Flask，开箱即用。
 
 ## 核心特性
 
