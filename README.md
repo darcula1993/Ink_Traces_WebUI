@@ -83,6 +83,7 @@ Only templates are committed. Local runtime files are ignored by Git.
 |---|---|---|
 | `config.json.example` | Public config template with empty credentials | Committed |
 | `config.json` | Local credentials, ports, provider settings, auth settings | Ignored |
+| `.flask_secret_key` | Auto-generated local Flask session secret when not set in config | Ignored |
 | `server/prompts.json.example` | Sample Prompt Vault data | Committed |
 | `server/prompts.json` | Local Prompt Vault data created by the app | Ignored |
 
@@ -102,6 +103,8 @@ Minimal image provider setup:
 ```
 
 For video reference uploads through Ark, set `server.public_host`, `server.public_port`, and `server.public_scheme` so external services can fetch uploaded reference files.
+
+Set `auth.secret_key` or `INK_TRACES_SECRET_KEY` for controlled deployments. If neither is set, the backend creates an ignored local `.flask_secret_key` file so browser sessions survive restarts without committing secrets.
 
 ## Project Layout
 
@@ -151,6 +154,7 @@ Ink_Traces_WebUI/
 These paths are intentionally ignored:
 
 - `config.json`
+- `.flask_secret_key`
 - `server/prompts.json`
 - `tasks.db`, `tasks.db-shm`, `tasks.db-wal`
 - `output/`
@@ -167,6 +171,7 @@ This keeps API keys, prompt collections, generated media, logs, uploaded referen
 - Chat sessions are stored in memory and are lost when the Flask process restarts.
 - Video generation is asynchronous; the backend polls provider task status in background threads.
 - Ark reference-video workflows require a public URL that the provider can download.
+- The Flask backend restricts CORS to configured/local origins by default; set `server.cors_origins` when serving the UI from another host.
 - The Flask backend is intended for local or controlled deployments, not high-concurrency production traffic.
 - Safety filters can be configured in `config.json`, but provider-side baseline safety enforcement may still apply.
 

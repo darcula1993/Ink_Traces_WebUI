@@ -83,6 +83,7 @@ http://localhost:4545
 |---|---|---|
 | `config.json.example` | 公开配置模板，所有凭据为空 | 已提交 |
 | `config.json` | 本地密钥、端口、Provider、认证配置 | 已忽略 |
+| `.flask_secret_key` | 未在配置中设置 secret 时自动生成的本地 Flask session 密钥 | 已忽略 |
 | `server/prompts.json.example` | Prompt Vault 示例数据 | 已提交 |
 | `server/prompts.json` | 应用运行时生成的本地 Prompt Vault 数据 | 已忽略 |
 
@@ -102,6 +103,8 @@ http://localhost:4545
 ```
 
 如果使用 Ark 视频参考素材上传，需要配置 `server.public_host`、`server.public_port` 和 `server.public_scheme`，确保外部服务能够下载参考视频文件。
+
+受控部署时建议设置 `auth.secret_key` 或环境变量 `INK_TRACES_SECRET_KEY`。如果都未设置，后端会自动创建已忽略的 `.flask_secret_key`，避免重启后浏览器 session 失效，也不会把密钥提交进仓库。
 
 ## 项目结构
 
@@ -151,6 +154,7 @@ Ink_Traces_WebUI/
 以下路径会被 Git 忽略：
 
 - `config.json`
+- `.flask_secret_key`
 - `server/prompts.json`
 - `tasks.db`、`tasks.db-shm`、`tasks.db-wal`
 - `output/`
@@ -167,6 +171,7 @@ Ink_Traces_WebUI/
 - Chat 会话存储在后端内存中，Flask 进程重启后会丢失。
 - 视频生成是异步流程，后端会用后台线程轮询 Provider 任务状态。
 - Ark 参考视频工作流要求 Provider 能访问你的公网下载 URL。
+- 后端默认只允许配置内或本机前端 Origin 跨域访问；如果前端部署在其他域名，需要设置 `server.cors_origins`。
 - Flask 后端适合本地或受控部署，不建议直接用于高并发生产环境。
 - `config.json` 可以调整安全过滤级别，但 Provider 侧仍可能有不可关闭的底线过滤。
 

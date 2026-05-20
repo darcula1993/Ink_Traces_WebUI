@@ -11,9 +11,15 @@ NC='\033[0m'
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$PROJECT_ROOT/config.json"
 
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+else
+    PYTHON_CMD="python"
+fi
+
 if [ -f "$CONFIG_FILE" ]; then
-    SERVER_PORT=$(grep -o '"port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | grep -o '[0-9]*')
-    CLIENT_PORT=$(grep -o '"port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | tail -1 | grep -o '[0-9]*')
+    SERVER_PORT=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("port", 5000))' "$CONFIG_FILE")
+    CLIENT_PORT=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("client", {}).get("port", 4545))' "$CONFIG_FILE")
 else
     SERVER_PORT=5000
     CLIENT_PORT=4545

@@ -10,6 +10,7 @@ server/.env
 # Local configuration and user data
 config.json
 server/prompts.json
+.flask_secret_key
 
 # Build output
 client/dist/

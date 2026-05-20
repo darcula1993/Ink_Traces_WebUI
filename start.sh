@@ -18,16 +18,6 @@ CLIENT_DIR="$PROJECT_ROOT/client"
 SERVER_DIR="$PROJECT_ROOT/server"
 CONFIG_FILE="$PROJECT_ROOT/config.json"
 
-# 读取配置文件端口
-if [ -f "$CONFIG_FILE" ]; then
-    SERVER_PORT=$(grep -o '"port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | head -1 | grep -o '[0-9]*')
-    CLIENT_PORT=$(grep -o '"port"[[:space:]]*:[[:space:]]*[0-9]*' "$CONFIG_FILE" | tail -1 | grep -o '[0-9]*')
-else
-    echo -e "${YELLOW}Warning: config.json not found, using default ports${NC}"
-    SERVER_PORT=5000
-    CLIENT_PORT=4545
-fi
-
 echo -e "${CYAN}================================${NC}"
 echo -e "${CYAN}   Nanobanana 项目启动器${NC}"
 echo -e "${CYAN}================================${NC}\n"
@@ -51,6 +41,16 @@ if command -v python3 &> /dev/null; then
     PYTHON_CMD="python3"
 else
     PYTHON_CMD="python"
+fi
+
+# 读取配置文件端口
+if [ -f "$CONFIG_FILE" ]; then
+    SERVER_PORT=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("port", 5000))' "$CONFIG_FILE")
+    CLIENT_PORT=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("client", {}).get("port", 4545))' "$CONFIG_FILE")
+else
+    echo -e "${YELLOW}Warning: config.json not found, using default ports${NC}"
+    SERVER_PORT=5000
+    CLIENT_PORT=4545
 fi
 
 # 检查依赖是否安装
@@ -106,7 +106,7 @@ fi
 # 启动后端服务
 echo -e "\n${YELLOW}[3/4] 启动后端服务...${NC}"
 cd "$SERVER_DIR"
-nohup $PYTHON_CMD app.py > "$PROJECT_ROOT/server.log" 2>&1 &
+setsid $PYTHON_CMD app.py > "$PROJECT_ROOT/server.log" 2>&1 < /dev/null &
 SERVER_PID=$!
 echo -e "${GREEN}✓ 后端服务已启动 (PID: $SERVER_PID)${NC}"
 echo -e "${CYAN}  后端地址: http://0.0.0.0:$SERVER_PORT${NC}"
@@ -128,7 +128,7 @@ done
 # 启动前端服务
 echo -e "\n${YELLOW}[4/4] 启动前端服务...${NC}"
 cd "$CLIENT_DIR"
-nohup npm run dev > "$PROJECT_ROOT/client.log" 2>&1 &
+setsid npm run dev > "$PROJECT_ROOT/client.log" 2>&1 < /dev/null &
 CLIENT_PID=$!
 echo -e "${GREEN}✓ 前端服务已启动 (PID: $CLIENT_PID)${NC}"
 echo -e "${CYAN}  前端地址: http://0.0.0.0:$CLIENT_PORT${NC}"

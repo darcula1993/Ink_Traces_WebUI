@@ -1,14 +1,19 @@
 {
   "auth": {
     "username": "",
-    "password": ""
+    "password": "",
+    "secret_key": ""
   },
   "server": {
     "host": "0.0.0.0",
     "port": 5000,
     "public_host": "",
     "public_port": 5000,
-    "public_scheme": "http"
+    "public_scheme": "http",
+    "cors_origins": [],
+    "request_timeout_seconds": 120,
+    "poll_timeout_seconds": 30,
+    "download_timeout_seconds": 120
   },
   "client": {
     "host": "0.0.0.0",
@@ -54,6 +59,8 @@
   },
   "video": {
     "default_provider": "ark",
+    "poll_interval_seconds": 4,
+    "poll_max_attempts": 1800,
     "jiekou": {
       "api_key": "",
       "endpoint": ""

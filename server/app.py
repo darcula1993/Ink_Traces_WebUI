@@ -7,54 +7,179 @@ import requests
 import io
 import json
 import threading
+import copy
+import secrets
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PIL import Image
 import uuid
 from datetime import datetime
 import tasks as task_db
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
 
 # Flask配置 - 文件上传限制
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
-app.config['SECRET_KEY'] = os.urandom(24).hex()
 
 # 加载配置文件
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+CONFIG_EXAMPLE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json.example')
+SECRET_KEY_FILE = os.path.join(PROJECT_ROOT, '.flask_secret_key')
+
+BUILTIN_DEFAULT_CONFIG = {
+    'auth': {'username': '', 'password': '', 'secret_key': ''},
+    'server': {
+        'host': '0.0.0.0',
+        'port': 5000,
+        'public_host': '',
+        'public_port': 5000,
+        'public_scheme': 'http',
+        'cors_origins': [],
+        'request_timeout_seconds': 120,
+        'poll_timeout_seconds': 30,
+        'download_timeout_seconds': 120,
+    },
+    'client': {'host': '0.0.0.0', 'port': 4545},
+    'api': {
+        'default_provider': 'ai_studio',
+        'default_model': 'gemini-3.1-flash-image-preview',
+        'available_models': [
+            {
+                'id': 'gemini-3.1-flash-image-preview',
+                'name': 'Gemini 3.1 Flash',
+                'description': '快速响应，适合快速迭代',
+            },
+            {
+                'id': 'gemini-3-pro-image-preview',
+                'name': 'Gemini 3 Pro',
+                'description': '高质量生成，更强的理解能力',
+            },
+        ],
+        'vertex': {
+            'key': '',
+            'model_id': 'gemini-3.1-flash-image-preview',
+            'endpoint': 'aiplatform.googleapis.com',
+            'project_id': '',
+        },
+        'ai_studio': {
+            'key': '',
+            'model_id': 'gemini-3.1-flash-image-preview',
+            'endpoint': 'generativelanguage.googleapis.com',
+        },
+        'ark': {
+            'api_key': '',
+            'model': '',
+            'endpoint': 'https://ark.ap-southeast.bytepluses.com',
+        },
+    },
+    'safety': {
+        'hate_speech': 'BLOCK_NONE',
+        'dangerous_content': 'BLOCK_NONE',
+        'sexually_explicit': 'BLOCK_NONE',
+        'harassment': 'BLOCK_NONE',
+    },
+    'video': {
+        'default_provider': 'ark',
+        'poll_interval_seconds': 4,
+        'poll_max_attempts': 1800,
+        'jiekou': {'api_key': '', 'endpoint': ''},
+        'ark': {
+            'api_key': '',
+            'endpoint': 'https://ark.ap-southeast.bytepluses.com',
+            'model': '',
+        },
+    },
+}
+
+
+def deep_merge(defaults, overrides):
+    """Recursively merge user config over defaults without mutating either."""
+    merged = copy.deepcopy(defaults)
+    for key, value in (overrides or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 def load_config():
     """加载配置文件"""
+    defaults = copy.deepcopy(BUILTIN_DEFAULT_CONFIG)
+    if os.path.exists(CONFIG_EXAMPLE_FILE):
+        try:
+            with open(CONFIG_EXAMPLE_FILE, 'r', encoding='utf-8') as f:
+                defaults = deep_merge(defaults, json.load(f))
+        except Exception as e:
+            print(f"Warning: Failed to load config.json.example: {e}")
+
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            return deep_merge(defaults, json.load(f))
     except Exception as e:
         print(f"Warning: Failed to load config.json: {e}")
-        print("Using default configuration")
-        return {
-            'server': {'host': '0.0.0.0', 'port': 5000},
-            'client': {'host': '0.0.0.0', 'port': 4545},
-            'api': {
-                'key': '',
-                'model_id': 'gemini-3-pro-image-preview',
-                'endpoint': 'aiplatform.googleapis.com'
-            },
-            'safety': {
-                'hate_speech': 'BLOCK_NONE',
-                'dangerous_content': 'BLOCK_NONE',
-                'sexually_explicit': 'BLOCK_NONE',
-                'harassment': 'BLOCK_NONE'
-            }
-        }
+        print("Using example/default configuration")
+        return defaults
+
+
+def ensure_secret_key(auth_config):
+    """Use config/env/local ignored file so sessions survive restarts."""
+    configured = auth_config.get('secret_key') or os.environ.get('INK_TRACES_SECRET_KEY')
+    if configured:
+        return configured
+
+    try:
+        if os.path.exists(SECRET_KEY_FILE):
+            with open(SECRET_KEY_FILE, 'r', encoding='utf-8') as f:
+                key = f.read().strip()
+                if key:
+                    return key
+        key = secrets.token_urlsafe(48)
+        with open(SECRET_KEY_FILE, 'w', encoding='utf-8') as f:
+            f.write(key)
+        try:
+            os.chmod(SECRET_KEY_FILE, 0o600)
+        except OSError:
+            pass
+        return key
+    except Exception as e:
+        print(f"Warning: Failed to persist Flask secret key: {e}")
+        return secrets.token_urlsafe(48)
+
+
+def get_cors_origins(cfg):
+    configured = cfg.get('server', {}).get('cors_origins') or []
+    if configured:
+        return configured
+
+    client_port = cfg.get('client', {}).get('port', 4545)
+    origins = [
+        f'http://localhost:{client_port}',
+        f'http://127.0.0.1:{client_port}',
+    ]
+    public_host = cfg.get('server', {}).get('public_host', '')
+    public_scheme = cfg.get('server', {}).get('public_scheme', 'http')
+    public_port = cfg.get('server', {}).get('public_port')
+    if public_host:
+        origins.append(f'{public_scheme}://{public_host}')
+        if public_port:
+            origins.append(f'{public_scheme}://{public_host}:{public_port}')
+    return origins
 
 config = load_config()
+CORS(app, supports_credentials=True, origins=get_cors_origins(config))
 
 # 认证配置
 AUTH_CONFIG = config.get('auth', {})
+app.config['SECRET_KEY'] = ensure_secret_key(AUTH_CONFIG)
 
 # 登录接口
 @app.route('/api/login', methods=['POST'])
 def login():
+    if not AUTH_CONFIG.get('username'):
+        session['logged_in'] = True
+        return jsonify({'success': True, 'auth_enabled': False})
+
     data = request.get_json(silent=True) or {}
     username = data.get('username', '')
     password = data.get('password', '')
@@ -65,8 +190,10 @@ def login():
 
 @app.route('/api/auth/check', methods=['GET'])
 def auth_check():
+    if not AUTH_CONFIG.get('username'):
+        return jsonify({'success': True, 'auth_enabled': False})
     if session.get('logged_in'):
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'auth_enabled': True})
     return jsonify({'success': False}), 401
 
 @app.route('/api/logout', methods=['POST'])
@@ -112,10 +239,38 @@ AVAILABLE_MODELS = config['api'].get('available_models', [
 ])
 CURRENT_MODEL = config['api'].get('default_model', 'gemini-3.1-flash-image-preview')
 
+
+def get_session_image_provider():
+    provider = session.get('image_provider', CURRENT_PROVIDER)
+    return provider if provider in API_PROVIDERS else CURRENT_PROVIDER
+
+
+def get_session_image_model():
+    model = session.get('image_model', CURRENT_MODEL)
+    valid_models = {m['id'] for m in AVAILABLE_MODELS}
+    return model if model in valid_models else CURRENT_MODEL
+
 # 动态获取当前 provider 的配置
 def get_current_api_config():
     """获取当前 API provider 的配置"""
     return API_PROVIDERS.get(CURRENT_PROVIDER, API_PROVIDERS['vertex'])
+
+
+def get_image_provider_config(provider):
+    provider = provider if provider in API_PROVIDERS else CURRENT_PROVIDER
+    return provider, API_PROVIDERS.get(provider, API_PROVIDERS['vertex'])
+
+
+def get_provider_key(provider, provider_config):
+    if provider == 'ark':
+        return provider_config.get('api_key', '')
+    return provider_config.get('key', '')
+
+
+def get_provider_default_model(provider, provider_config):
+    if provider == 'ark':
+        return provider_config.get('model') or 'seedream-5-0-lite'
+    return provider_config.get('model_id') or CURRENT_MODEL
 
 # 初始化 API 配置（使用默认 provider）
 current_api = get_current_api_config()
@@ -134,9 +289,15 @@ PUBLIC_PORT = config['server'].get('public_port', SERVER_PORT)
 PUBLIC_SCHEME = config['server'].get('public_scheme', 'http')
 
 # 上传视频目录（供外部服务下载的公网可访问视频参考文件）
-UPLOAD_VIDEO_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'upload_video')
+UPLOAD_VIDEO_DIR = os.path.join(PROJECT_ROOT, 'upload_video')
 if not os.path.exists(UPLOAD_VIDEO_DIR):
     os.makedirs(UPLOAD_VIDEO_DIR)
+
+REQUEST_TIMEOUT = int(config.get('server', {}).get('request_timeout_seconds', 120) or 120)
+POLL_TIMEOUT = int(config.get('server', {}).get('poll_timeout_seconds', 30) or 30)
+DOWNLOAD_TIMEOUT = int(config.get('server', {}).get('download_timeout_seconds', 120) or 120)
+ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.webm'}
+ALLOWED_VIDEO_MIMES = {'video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm'}
 
 def build_public_url(path):
     """根据 config 中的 public_host/port/scheme 构建公网可访问的 URL"""
@@ -152,7 +313,12 @@ def save_temp_file(file_storage, suffix='.mp4'):
     """保存上传文件到 upload_video 目录，返回 (本地路径, 公网 URL)"""
     file_id = str(uuid.uuid4())
     orig_name = getattr(file_storage, 'filename', '') or ''
-    ext = os.path.splitext(orig_name)[1] or suffix
+    ext = (os.path.splitext(orig_name)[1] or suffix).lower()
+    mime = (getattr(file_storage, 'content_type', '') or '').split(';', 1)[0].lower()
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        raise ValueError('不支持的视频文件类型')
+    if mime and mime not in ALLOWED_VIDEO_MIMES:
+        raise ValueError('不支持的视频 MIME 类型')
     fname = f'{file_id}{ext}'
     filepath = os.path.join(UPLOAD_VIDEO_DIR, fname)
     file_storage.seek(0)
@@ -185,23 +351,23 @@ def build_safety_settings():
         }
     ]
 
-def build_api_url(model_id, endpoint=None):
+def build_api_url(model_id, endpoint=None, provider=None, api_key=None):
     """
     根据当前 provider 构建 API URL
 
     Vertex AI: https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={key}
     AI Studio: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}
     """
-    global CURRENT_PROVIDER, API_KEY, API_ENDPOINT
-
+    provider = provider or CURRENT_PROVIDER
+    api_key = API_KEY if api_key is None else api_key
     endpoint = endpoint or API_ENDPOINT
 
-    if CURRENT_PROVIDER == 'vertex':
+    if provider == 'vertex':
         # Vertex AI format
-        return f"https://{endpoint}/v1/publishers/google/models/{model_id}:generateContent?key={API_KEY}"
+        return f"https://{endpoint}/v1/publishers/google/models/{model_id}:generateContent?key={api_key}"
     else:
         # Google AI Studio format - also uses query parameter for key
-        return f"https://{endpoint}/v1beta/models/{model_id}:generateContent?key={API_KEY}"
+        return f"https://{endpoint}/v1beta/models/{model_id}:generateContent?key={api_key}"
 
 def build_api_headers():
     """
@@ -210,6 +376,41 @@ def build_api_headers():
     Both providers only need Content-Type header
     """
     return {'Content-Type': 'application/json'}
+
+
+SENSITIVE_KEYS = {'key', 'apikey', 'api_key', 'authorization', 'password', 'prompt', 'secret', 'secret_key', 'token'}
+
+
+def redact_url(url):
+    try:
+        split = urlsplit(url)
+        query = urlencode([
+            (key, '***REDACTED***' if key.lower() in SENSITIVE_KEYS else value)
+            for key, value in parse_qsl(split.query, keep_blank_values=True)
+        ])
+        return urlunsplit((split.scheme, split.netloc, split.path, query, split.fragment))
+    except Exception:
+        return url
+
+
+def redact_sensitive(value):
+    """Remove keys and bearer values before persisting local diagnostics."""
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_lower = str(key).lower()
+            if key_lower in SENSITIVE_KEYS or any(part in key_lower for part in ('api_key', 'secret', 'password', 'token')):
+                redacted[key] = '***REDACTED***'
+            elif key_lower in ('api_url', 'url') and isinstance(item, str):
+                redacted[key] = redact_url(item)
+            else:
+                redacted[key] = redact_sensitive(item)
+        return redacted
+    if isinstance(value, list):
+        return [redact_sensitive(item) for item in value]
+    if isinstance(value, str) and value.lower().startswith('bearer '):
+        return 'Bearer ***REDACTED***'
+    return value
 
 # Chat会话存储 (内存中存储，重启后会丢失)
 # 格式: {session_id: {'history': [contents], 'created_at': timestamp, 'last_used': timestamp}}
@@ -245,8 +446,8 @@ def save_error_log(error_type, request_data, response_data, error_message=None):
             'timestamp': datetime.now().isoformat(),
             'error_type': error_type,
             'error_message': error_message,
-            'request': request_data,
-            'response': response_data
+            'request': redact_sensitive(request_data),
+            'response': redact_sensitive(response_data)
         }
 
         # 保存到文件
@@ -439,10 +640,11 @@ def health():
 @app.route('/api/provider', methods=['GET'])
 def get_provider():
     """获取当前 API provider 信息"""
-    global CURRENT_PROVIDER
+    current_provider = get_session_image_provider()
     return jsonify({
         'success': True,
-        'current_provider': CURRENT_PROVIDER,
+        'current_provider': current_provider,
+        'current_model': get_provider_default_model(current_provider, API_PROVIDERS.get(current_provider, {})),
         'providers': {
             'vertex': {
                 'name': 'Vertex AI',
@@ -465,8 +667,6 @@ def get_provider():
 @app.route('/api/provider', methods=['POST'])
 def switch_provider():
     """切换 API provider"""
-    global CURRENT_PROVIDER, API_KEY, MODEL_ID, API_ENDPOINT, PROJECT_ID
-
     try:
         data = request.get_json()
         new_provider = data.get('provider')
@@ -489,21 +689,9 @@ def switch_provider():
                 'error': f'Provider "{new_provider}" is not configured'
             }), 400
 
-        # 切换 provider
-        CURRENT_PROVIDER = new_provider
+        session['image_provider'] = new_provider
         current_api = API_PROVIDERS[new_provider]
-
-        # 更新全局变量
-        if new_provider == 'ark':
-            API_KEY = current_api.get('api_key', '')
-            MODEL_ID = current_api.get('model', 'seedream-4-5')
-            API_ENDPOINT = current_api.get('endpoint', '')
-            PROJECT_ID = ''
-        else:
-            API_KEY = current_api.get('key', '')
-            MODEL_ID = current_api.get('model_id', '')
-            API_ENDPOINT = current_api.get('endpoint', '')
-            PROJECT_ID = current_api.get('project_id', '')
+        model_id = get_provider_default_model(new_provider, current_api)
 
         provider_names = {'vertex': 'Vertex AI', 'ai_studio': 'Google AI Studio', 'ark': 'BytePlus Ark'}
         provider_name = provider_names.get(new_provider, new_provider)
@@ -512,7 +700,7 @@ def switch_provider():
             'success': True,
             'message': f'Switched to {provider_name}',
             'provider': new_provider,
-            'model': MODEL_ID
+            'model': model_id
         })
 
     except Exception as e:
@@ -526,18 +714,15 @@ def switch_provider():
 @app.route('/api/model', methods=['GET'])
 def get_model():
     """获取当前模型和可用模型列表"""
-    global CURRENT_MODEL
     return jsonify({
         'success': True,
-        'current_model': CURRENT_MODEL,
+        'current_model': get_session_image_model(),
         'available_models': AVAILABLE_MODELS
     })
 
 @app.route('/api/model', methods=['POST'])
 def switch_model():
     """切换模型"""
-    global CURRENT_MODEL, MODEL_ID
-
     try:
         data = request.get_json()
         new_model = data.get('model')
@@ -556,9 +741,7 @@ def switch_model():
                 'error': f'Invalid model. Must be one of: {", ".join(valid_models)}'
             }), 400
 
-        # 切换模型
-        CURRENT_MODEL = new_model
-        MODEL_ID = new_model
+        session['image_model'] = new_model
 
         # 获取模型信息
         model_info = next((m for m in AVAILABLE_MODELS if m['id'] == new_model), None)
@@ -567,7 +750,7 @@ def switch_model():
         return jsonify({
             'success': True,
             'message': f'Switched to {model_name}',
-            'model': CURRENT_MODEL
+            'model': new_model
         })
 
     except Exception as e:
@@ -693,8 +876,13 @@ def get_chat_session(session_id):
         })
     return jsonify({'success': False, 'error': '会话不存在'}), 404
 
-def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level='minimal'):
+def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level='minimal', provider=None, model_id=None):
     """统一的 Gemini API 调用和响应解析"""
+    provider, provider_config = get_image_provider_config(provider)
+    model_id = model_id or get_provider_default_model(provider, provider_config)
+    api_key = get_provider_key(provider, provider_config)
+    endpoint = provider_config.get('endpoint') or API_ENDPOINT
+
     # Chat模式：获取或创建会话
     current_session_id = None
     history = []
@@ -709,7 +897,7 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
         contents = [{"role": "user", "parts": parts}]
 
     # 根据 provider 构建 imageConfig
-    if CURRENT_PROVIDER == 'vertex':
+    if provider == 'vertex':
         image_config = {
             "aspectRatio": aspect_ratio, "imageSize": resolution,
             "imageOutputOptions": {"mimeType": "image/png"},
@@ -735,11 +923,20 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     if use_search:
         request_body['tools'] = [{"google_search": {}}]
 
-    api_url = build_api_url(MODEL_ID)
+    api_url = build_api_url(model_id, endpoint=endpoint, provider=provider, api_key=api_key)
     headers = build_api_headers()
-    print(f'Using API: {CURRENT_PROVIDER.upper()}, URL: {api_url}')
+    print(f'Using API: {provider.upper()}, URL: {redact_url(api_url)}')
 
-    response = requests.post(api_url, headers=headers, json=request_body)
+    try:
+        response = requests.post(api_url, headers=headers, json=request_body, timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as e:
+        req_info = {
+            'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
+            'use_search': use_search, 'enable_chat': enable_chat, 'session_id': session_id,
+            'provider': provider, 'model_id': model_id, 'api_url': api_url
+        }
+        save_error_log('api_request_error', req_info, {}, str(e))
+        return jsonify({'success': False, 'error': f'API 请求失败: {e}', 'error_type': 'request_error'}), 500
 
     response_data = None
     if response.text:
@@ -748,7 +945,8 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
 
     req_info = {
         'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
-        'use_search': use_search, 'enable_chat': enable_chat, 'session_id': session_id
+        'use_search': use_search, 'enable_chat': enable_chat, 'session_id': session_id,
+        'provider': provider, 'model_id': model_id
     }
 
     if response.status_code != 200:
@@ -853,12 +1051,12 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     return jsonify(response_payload)
 
 
-def _generate_ark_image(prompt, aspect_ratio, resolution, parts):
+def _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config=None, model_id=None):
     """调用 BytePlus Ark Seedream API 生成图片"""
-    ark_cfg = API_PROVIDERS.get('ark', {})
+    ark_cfg = provider_config or API_PROVIDERS.get('ark', {})
     api_key = ark_cfg.get('api_key', '')
     endpoint = ark_cfg.get('endpoint', '').rstrip('/')
-    model = ark_cfg.get('model', 'seedream-5-0-lite')
+    model = model_id or ark_cfg.get('model', 'seedream-5-0-lite')
 
     # seedream-5-0-lite 只支持 2K / 3K
     SIZE_MAP = {
@@ -955,6 +1153,8 @@ def generate():
             enable_chat = request.form.get('enable_chat', 'false').lower() == 'true'
             session_id = request.form.get('session_id', None)
             think_level = request.form.get('think_level', 'minimal')
+            provider = request.form.get('provider', get_session_image_provider())
+            model_id = request.form.get('model', None)
         else:
             data = request.json or {}
             prompt = data.get('prompt')
@@ -964,9 +1164,20 @@ def generate():
             enable_chat = data.get('enable_chat', False)
             session_id = data.get('session_id', None)
             think_level = data.get('think_level', 'minimal')
+            provider = data.get('provider', get_session_image_provider())
+            model_id = data.get('model')
 
         if not prompt:
             return jsonify({'success': False, 'error': '请提供图片描述'}), 400
+        if provider not in API_PROVIDERS:
+            return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
+        provider, provider_config = get_image_provider_config(provider)
+        if not get_provider_key(provider, provider_config):
+            return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
+        if provider == 'ark':
+            model_id = get_provider_default_model(provider, provider_config)
+        else:
+            model_id = model_id or get_provider_default_model(provider, provider_config)
 
         print(f'Generating image with prompt: {prompt}')
         print(f'Chat mode: {enable_chat}, Session ID: {session_id}')
@@ -990,14 +1201,16 @@ def generate():
 
         # 记录任务
         params = {'aspect_ratio': aspect_ratio, 'resolution': resolution, 'use_search': use_search, 'think_level': think_level, 'enable_chat': enable_chat}
-        db_task_id = task_db.create_task('image', prompt, params, provider=CURRENT_PROVIDER)
+        params['provider'] = provider
+        params['model'] = model_id
+        db_task_id = task_db.create_task('image', prompt, params, provider=provider)
         task_db.update_task(db_task_id, status='processing')
 
         # Ark 走独立的 Seedream API
-        if CURRENT_PROVIDER == 'ark':
-            resp = _generate_ark_image(prompt, aspect_ratio, resolution, parts)
+        if provider == 'ark':
+            resp = _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config, model_id)
         else:
-            resp = _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level)
+            resp = _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level, provider, model_id)
         if isinstance(resp, tuple):
             resp_obj, status_code = resp
             resp_data = resp_obj.get_json()
@@ -1059,26 +1272,35 @@ VIDEO_PROVIDERS = {
     'ark': VIDEO_CONFIG.get('ark', {})
 }
 
+
+def get_session_video_provider():
+    provider = session.get('video_provider', CURRENT_VIDEO_PROVIDER)
+    return provider if provider in VIDEO_PROVIDERS else CURRENT_VIDEO_PROVIDER
+
 def get_video_provider():
-    return VIDEO_PROVIDERS.get(CURRENT_VIDEO_PROVIDER, {})
+    return VIDEO_PROVIDERS.get(get_session_video_provider(), {})
+
+
+def get_video_provider_config(provider=None):
+    provider = provider if provider in VIDEO_PROVIDERS else get_session_video_provider()
+    return provider, VIDEO_PROVIDERS.get(provider, {})
 
 
 @app.route('/api/video/provider', methods=['GET'])
 def get_video_provider_info():
-    return jsonify({'success': True, 'current': CURRENT_VIDEO_PROVIDER, 'providers': list(VIDEO_PROVIDERS.keys())})
+    return jsonify({'success': True, 'current': get_session_video_provider(), 'providers': list(VIDEO_PROVIDERS.keys())})
 
 
 @app.route('/api/video/provider', methods=['POST'])
 def switch_video_provider():
-    global CURRENT_VIDEO_PROVIDER
     data = request.json or {}
     p = data.get('provider', '')
     if p not in VIDEO_PROVIDERS:
         return jsonify({'success': False, 'error': f'未知 provider: {p}'}), 400
     if not VIDEO_PROVIDERS[p].get('api_key'):
         return jsonify({'success': False, 'error': f'{p} 未配置 API Key'}), 400
-    CURRENT_VIDEO_PROVIDER = p
-    return jsonify({'success': True, 'current': CURRENT_VIDEO_PROVIDER})
+    session['video_provider'] = p
+    return jsonify({'success': True, 'current': p})
 
 
 def _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data):
@@ -1103,9 +1325,9 @@ def _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio
     return body
 
 
-def _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data):
+def _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data, provider_config=None):
     """构建 Ark (BytePlus) 请求体"""
-    prov = get_video_provider()
+    prov = provider_config or get_video_provider()
     model = prov.get('model', 'dreamina-seedance-2-0-260128')
     if fast and not model.endswith('-fast'):
         model = model.replace('260128', '260128-fast') if '260128' in model else model
@@ -1140,7 +1362,7 @@ def _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, r
     return body
 
 
-def _parse_files(has_files, video_mode):
+def _parse_files(has_files, video_mode, provider=None):
     """从请求中提取文件数据，统一为 base64 data URI"""
     files_data = {}
     if not has_files:
@@ -1178,7 +1400,7 @@ def _parse_files(has_files, video_mode):
             files_data['ref_videos'] = []
             files_data['ref_video_paths'] = []
             for f in ref_vids[:3]:
-                if CURRENT_VIDEO_PROVIDER == 'ark':
+                if provider == 'ark':
                     filepath, public_url = save_temp_file(f, suffix='.mp4')
                     if not public_url:
                         raise ValueError('视频参考需要在 config.json 中配置 server.public_host')
@@ -1220,6 +1442,7 @@ def video_generate():
             return_last_frame = request.form.get('return_last_frame', 'false').lower() == 'true'
             web_search = request.form.get('web_search', 'false').lower() == 'true'
             video_mode = request.form.get('video_mode', 'keyframe')
+            provider = request.form.get('provider', get_session_video_provider())
         else:
             data = request.json or {}
             prompt = data.get('prompt', '')
@@ -1231,11 +1454,15 @@ def video_generate():
             return_last_frame = data.get('return_last_frame', False)
             web_search = data.get('web_search', False)
             video_mode = data.get('video_mode', 'keyframe')
+            provider = data.get('provider', get_session_video_provider())
 
-        app.logger.warning(f'Video generate [{CURRENT_VIDEO_PROVIDER}]: ratio={ratio}, duration={duration}, resolution={resolution}, fast={fast}, audio={generate_audio}, return_last_frame={return_last_frame}, mode={video_mode}')
+        if provider not in VIDEO_PROVIDERS:
+            return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
+        provider, prov = get_video_provider_config(provider)
+        app.logger.warning(f'Video generate [{provider}]: ratio={ratio}, duration={duration}, resolution={resolution}, fast={fast}, audio={generate_audio}, return_last_frame={return_last_frame}, mode={video_mode}')
 
         try:
-            files_data = _parse_files(has_files, video_mode)
+            files_data = _parse_files(has_files, video_mode, provider)
         except ValueError as ve:
             return jsonify({'success': False, 'error': str(ve)}), 400
 
@@ -1249,18 +1476,19 @@ def video_generate():
         if not prompt and not files_data:
             return jsonify({'success': False, 'error': '请提供 prompt 或参考素材'}), 400
 
-        prov = get_video_provider()
         api_key = prov.get('api_key', '')
         endpoint = prov.get('endpoint', '')
+        if not api_key:
+            return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
 
-        if CURRENT_VIDEO_PROVIDER == 'ark':
-            body = _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data)
+        if provider == 'ark':
+            body = _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data, prov)
             url = f'{endpoint}/api/v3/contents/generations/tasks'
         else:
             body = _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data)
             url = f'{endpoint}/v3/async/seedance-2.0'
 
-        resp = requests.post(url, headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}, json=body)
+        resp = requests.post(url, headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}, json=body, timeout=REQUEST_TIMEOUT)
         resp_data = resp.json() if resp.text else {}
 
         if resp.status_code != 200:
@@ -1285,10 +1513,10 @@ def video_generate():
             params['ref_video_paths'] = ref_video_paths
         if files_data.get('ref_videos'):
             params['ref_video_urls'] = files_data['ref_videos']
-        db_task_id = task_db.create_task('video', prompt, params, provider=CURRENT_VIDEO_PROVIDER, external_task_id=external_id)
-        threading.Thread(target=_poll_video_task_bg, args=(db_task_id, external_id, CURRENT_VIDEO_PROVIDER), daemon=True).start()
+        db_task_id = task_db.create_task('video', prompt, params, provider=provider, external_task_id=external_id)
+        threading.Thread(target=_poll_video_task_bg, args=(db_task_id, external_id, provider), daemon=True).start()
 
-        return jsonify({'success': True, 'task_id': external_id, 'db_task_id': db_task_id, 'provider': CURRENT_VIDEO_PROVIDER})
+        return jsonify({'success': True, 'task_id': external_id, 'db_task_id': db_task_id, 'provider': provider})
 
     except Exception as e:
         print(f'Error submitting video task: {e}')
@@ -1315,7 +1543,7 @@ VIDEO_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'out
 def video_task_status():
     """查询视频生成任务状态"""
     task_id = request.args.get('task_id')
-    provider = request.args.get('provider', CURRENT_VIDEO_PROVIDER)
+    provider = request.args.get('provider', get_session_video_provider())
     if not task_id:
         return jsonify({'success': False, 'error': '缺少 task_id'}), 400
 
@@ -1327,7 +1555,8 @@ def video_task_status():
         if provider == 'ark':
             resp = requests.get(
                 f'{endpoint}/api/v3/contents/generations/tasks/{task_id}',
-                headers={'Authorization': f'Bearer {api_key}'}
+                headers={'Authorization': f'Bearer {api_key}'},
+                timeout=POLL_TIMEOUT
             )
             resp_data = resp.json() if resp.text else {}
             if resp.status_code != 200:
@@ -1354,7 +1583,8 @@ def video_task_status():
             resp = requests.get(
                 f'{endpoint}/v3/async/task-result',
                 headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-                params={'task_id': task_id}
+                params={'task_id': task_id},
+                timeout=POLL_TIMEOUT
             )
             resp_data = resp.json() if resp.text else {}
             if resp.status_code != 200:
@@ -1449,7 +1679,10 @@ def api_task_file(task_id, filename):
     t = task_db.get_task(task_id)
     if not t or not t.get('output_dir'):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
-    filepath = os.path.join(t['output_dir'], filename)
+    output_dir = os.path.abspath(t['output_dir'])
+    filepath = os.path.abspath(os.path.join(output_dir, filename))
+    if os.path.commonpath([output_dir, filepath]) != output_dir:
+        return jsonify({'success': False, 'error': '文件不存在'}), 404
     if not os.path.isfile(filepath):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
     return send_file(filepath)
@@ -1461,7 +1694,10 @@ def api_upload_video():
     f = request.files.get('file')
     if not f:
         return jsonify({'success': False, 'error': '未提供文件'}), 400
-    filepath, public_url = save_temp_file(f, suffix='.mp4')
+    try:
+        filepath, public_url = save_temp_file(f, suffix='.mp4')
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
     if not public_url:
         return jsonify({'success': False, 'error': '未配置 server.public_host，无法生成公网 URL'}), 500
     return jsonify({'success': True, 'url': public_url, 'filepath': filepath})
@@ -1509,17 +1745,24 @@ def _poll_video_task_bg(db_task_id, external_task_id, provider):
     prov = VIDEO_PROVIDERS.get(provider, {})
     api_key = prov.get('api_key', '')
     endpoint = prov.get('endpoint', '')
+    poll_interval = int(VIDEO_CONFIG.get('poll_interval_seconds', 4) or 4)
+    max_attempts = int(VIDEO_CONFIG.get('poll_max_attempts', 1800) or 1800)
 
     task_db.update_task(db_task_id, status='processing')
 
-    while True:
+    for attempt in range(max_attempts):
         try:
             if provider == 'ark':
                 resp = requests.get(
                     f'{endpoint}/api/v3/contents/generations/tasks/{external_task_id}',
-                    headers={'Authorization': f'Bearer {api_key}'}
+                    headers={'Authorization': f'Bearer {api_key}'},
+                    timeout=POLL_TIMEOUT
                 )
                 resp_data = resp.json() if resp.text else {}
+                if resp.status_code >= 400:
+                    reason = resp_data.get('error', {}).get('message', f'查询失败 {resp.status_code}') if isinstance(resp_data.get('error'), dict) else f'查询失败 {resp.status_code}'
+                    task_db.update_task(db_task_id, status='failed', error=reason, completed_at=datetime.now().isoformat())
+                    return
                 ark_status = resp_data.get('status', '')
                 mapped = ARK_STATUS_MAP.get(ark_status, ark_status)
                 content = resp_data.get('content', {})
@@ -1530,9 +1773,13 @@ def _poll_video_task_bg(db_task_id, external_task_id, provider):
                 resp = requests.get(
                     f'{endpoint}/v3/async/task-result',
                     headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-                    params={'task_id': external_task_id}
+                    params={'task_id': external_task_id},
+                    timeout=POLL_TIMEOUT
                 )
                 resp_data = resp.json() if resp.text else {}
+                if resp.status_code >= 400:
+                    task_db.update_task(db_task_id, status='failed', error=resp_data.get('message', f'查询失败 {resp.status_code}'), completed_at=datetime.now().isoformat())
+                    return
                 task_info = resp_data.get('task', {})
                 mapped = task_info.get('status', '')
                 videos = resp_data.get('videos', [])
@@ -1547,7 +1794,7 @@ def _poll_video_task_bg(db_task_id, external_task_id, provider):
                 for i, vid in enumerate(videos):
                     url = vid.get('video_url')
                     if url:
-                        r = requests.get(url, timeout=120)
+                        r = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
                         if r.status_code == 200:
                             fname = 'video.mp4' if i == 0 else f'video_{i}.mp4'
                             with open(os.path.join(output_dir, fname), 'wb') as f:
@@ -1556,7 +1803,7 @@ def _poll_video_task_bg(db_task_id, external_task_id, provider):
                 for i, img in enumerate(images):
                     url = img.get('image_url')
                     if url:
-                        r = requests.get(url, timeout=60)
+                        r = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
                         if r.status_code == 200:
                             fname = 'last_frame.png' if i == 0 else f'last_frame_{i}.png'
                             with open(os.path.join(output_dir, fname), 'wb') as f:
@@ -1573,7 +1820,9 @@ def _poll_video_task_bg(db_task_id, external_task_id, provider):
         except Exception as e:
             print(f'Background poll error for task {db_task_id}: {e}')
 
-        time.sleep(4)
+        time.sleep(poll_interval)
+
+    task_db.update_task(db_task_id, status='failed', error='视频任务轮询超时', completed_at=datetime.now().isoformat())
 
 
 def _recover_processing_tasks():
@@ -1606,18 +1855,17 @@ if __name__ == '__main__':
         print(f'    Endpoint: {API_ENDPOINT}')
         print(f'    Model: {MODEL_ID}')
         print(f'    Project ID: {PROJECT_ID}')
-        print(f'    API Key: {API_KEY[:10]}...{API_KEY[-6:] if len(API_KEY) > 16 else ""}')
+        print(f'    API Key: {"configured" if API_KEY else "missing"}')
     elif CURRENT_PROVIDER == 'ark':
-        ark_key = API_PROVIDERS['ark'].get('api_key', '')
         print(f'    Provider: BytePlus Ark')
         print(f'    Endpoint: {API_PROVIDERS["ark"].get("endpoint", "")}')
         print(f'    Model: {API_PROVIDERS["ark"].get("model", "")}')
-        print(f'    API Key: {ark_key[:10]}...{ark_key[-6:] if len(ark_key) > 16 else ""}')
+        print(f'    API Key: {"configured" if API_PROVIDERS["ark"].get("api_key", "") else "missing"}')
     else:
         print(f'    Provider: Google AI Studio')
         print(f'    Endpoint: {API_ENDPOINT}')
         print(f'    Model: {MODEL_ID}')
-        print(f'    API Key: {API_KEY[:10]}...{API_KEY[-6:] if len(API_KEY) > 16 else ""}')
+        print(f'    API Key: {"configured" if API_KEY else "missing"}')
     print()
     # 显示备用 provider
     for alt_provider in ['vertex', 'ai_studio', 'ark']:
@@ -1630,4 +1878,4 @@ if __name__ == '__main__':
             print(f'  Backup: {alt_provider.upper()} ({alt_names[alt_provider]}) - Available')
     print('=' * 60)
     print(f'Starting server on http://{SERVER_HOST}:{SERVER_PORT}')
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=True)
+    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=False, use_reloader=False)

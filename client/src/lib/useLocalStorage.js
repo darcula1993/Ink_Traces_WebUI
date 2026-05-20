@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react'
 
+const LARGE_DATA_URL_LIMIT = 256 * 1024
+
 function stripNonSerializable(value) {
   return JSON.parse(JSON.stringify(value, (k, v) => {
     if (v instanceof File || v instanceof Blob) return undefined
+    if (typeof v === 'string' && v.startsWith('data:') && v.length > LARGE_DATA_URL_LIMIT) return undefined
     if (v && typeof v === 'object' && v.file instanceof File) {
-      // Keep preview (base64 string) but drop the File object
-      return v.preview ? { preview: v.preview } : undefined
+      const safe = { ...v }
+      delete safe.file
+      if (typeof safe.preview === 'string' && safe.preview.startsWith('data:') && safe.preview.length > LARGE_DATA_URL_LIMIT) {
+        delete safe.preview
+      }
+      return Object.keys(safe).length ? safe : undefined
     }
     return v
   }))

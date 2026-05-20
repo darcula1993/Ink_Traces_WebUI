@@ -8,7 +8,7 @@ import PromptCollection from './components/PromptCollection'
 import TaskHistory from './components/TaskHistory'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Square, Settings, Cpu, HardDrive, Share2, Layers, Grid3X3, ArrowRight, Database, X, Menu, Maximize2, Save, Film, Clock, LogOut } from 'lucide-react'
+import { Play, Square, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, Clock, LogOut } from 'lucide-react'
 import { useLocalStorage } from './lib/useLocalStorage'
 
 axios.defaults.withCredentials = true
@@ -70,7 +70,6 @@ function App({ onLogout }) {
   const [showEditorVault, setShowEditorVault] = useState(false)
 
   const [apiProvider, setApiProvider] = useState('vertex')
-  const [apiProviders, setApiProviders] = useState(null)
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
   const [availableModels, setAvailableModels] = useState([])
 
@@ -134,6 +133,14 @@ function App({ onLogout }) {
   const updateTab = useCallback((id, updates) => {
     setVideoTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t))
   }, [setVideoTabs])
+  const videoPollTimers = useRef(new Map())
+  const unmountedRef = useRef(false)
+
+  useEffect(() => () => {
+    unmountedRef.current = true
+    videoPollTimers.current.forEach(timer => clearTimeout(timer))
+    videoPollTimers.current.clear()
+  }, [])
 
   const addVideoTab = () => {
     const id = nextTabId.current++
@@ -170,8 +177,6 @@ function App({ onLogout }) {
   useEffect(() => {
     fetchProviderInfo()
     fetchModelInfo()
-    // 同步视频 provider 状态到后端
-    axios.post('/api/video/provider', { provider: videoProvider }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -185,7 +190,7 @@ function App({ onLogout }) {
       const response = await axios.get('/api/provider')
       if (response.data.success) {
         setApiProvider(response.data.current_provider)
-        setApiProviders(response.data.providers)
+        if (response.data.current_provider !== 'ark' && response.data.current_model) setCurrentModel(response.data.current_model)
       }
     } catch (error) { console.error('Failed to fetch provider info:', error) }
   }
@@ -201,6 +206,7 @@ function App({ onLogout }) {
   }
 
   const switchModel = async () => {
+    if (apiProvider === 'ark') return
     if (availableModels.length < 2) return
     const currentIndex = availableModels.findIndex(m => m.id === currentModel)
     const nextIndex = (currentIndex + 1) % availableModels.length
@@ -221,6 +227,7 @@ function App({ onLogout }) {
       const response = await axios.post('/api/provider', { provider: newProvider })
       if (response.data.success) {
         setApiProvider(newProvider)
+        if (newProvider !== 'ark' && response.data.model) setCurrentModel(response.data.model)
       }
     } catch (error) { alert('切换失败: ' + (error.response?.data?.error || error.message)) }
   }
@@ -246,6 +253,7 @@ function App({ onLogout }) {
   const handleGenerate = async () => {
     const tab = activeImgTab
     if (!tab.prompt.trim()) return
+    const requestModel = apiProvider === 'ark' ? undefined : currentModel
 
     updateImgTab(tab.id, { loading: true, error: null, errorType: null, errorDetails: null })
     if (!tab.chatMode) {
@@ -256,7 +264,8 @@ function App({ onLogout }) {
       if (tab.uploadedImages.length === 0) {
         const response = await axios.post('/api/generate', {
           prompt: tab.prompt, aspect_ratio: tab.aspectRatio, resolution: tab.resolution,
-          use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId, think_level: tab.thinkLevel
+          use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId,
+          think_level: tab.thinkLevel, provider: apiProvider, model: requestModel
         })
         handleResponse(tab.id, response.data)
       } else {
@@ -267,6 +276,8 @@ function App({ onLogout }) {
         formData.append('use_search', tab.useSearch)
         formData.append('enable_chat', tab.chatMode)
         formData.append('think_level', tab.thinkLevel)
+        formData.append('provider', apiProvider)
+        if (requestModel) formData.append('model', requestModel)
         if (tab.sessionId) formData.append('session_id', tab.sessionId)
         const pendingFetches = []
         tab.uploadedImages.forEach((img) => {
@@ -283,7 +294,7 @@ function App({ onLogout }) {
           } else if (img.preview) {
             // URL reference — fetch and append
             pendingFetches.push(
-              fetch(img.preview).then(r => r.blob()).then(blob => formData.append('images', blob, img.name || 'image.png'))
+              ensureFetchOk(img.preview).then(blob => formData.append('images', blob, img.name || 'image.png'))
             )
           }
         })
@@ -317,10 +328,31 @@ function App({ onLogout }) {
     }
   }
 
+  const ensureFetchOk = async (url) => {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`Failed to fetch asset: ${response.status}`)
+    return response.blob()
+  }
+
+  const videoTabHasInput = (tab) => {
+    const uploadedVideos = tab.refVideos.some(v => v.url && !v.uploading)
+    if (tab.mode === 'keyframe') {
+      return Boolean(tab.prompt.trim() || tab.firstFrame || tab.lastFrame)
+    }
+    return Boolean(tab.prompt.trim() || tab.refImages.length > 0 || uploadedVideos || tab.refAudios.length > 0)
+  }
+
   // 视频生成
   const pollVideoTask = useCallback(async (tabId, taskId, provider) => {
+    const pollProvider = provider || videoProvider
+    const timerKey = `${tabId}:${taskId}`
+    if (videoPollTimers.current.has(timerKey)) {
+      clearTimeout(videoPollTimers.current.get(timerKey))
+      videoPollTimers.current.delete(timerKey)
+    }
     try {
-      const resp = await axios.get('/api/video/task', { params: { task_id: taskId, provider } })
+      const resp = await axios.get('/api/video/task', { params: { task_id: taskId, provider: pollProvider } })
+      if (unmountedRef.current) return
       const d = resp.data
       if (!d.success) { updateTab(tabId, { error: d.error, loading: false }); return }
 
@@ -338,12 +370,14 @@ function App({ onLogout }) {
       } else if (d.status === 'TASK_STATUS_FAILED') {
         updateTab(tabId, { loading: false, taskId: null, taskProvider: null, error: d.reason || '视频生成失败' })
       } else {
-        setTimeout(() => pollVideoTask(tabId, taskId, provider), 3000)
+        const timer = setTimeout(() => pollVideoTask(tabId, taskId, pollProvider), 3000)
+        videoPollTimers.current.set(timerKey, timer)
       }
     } catch (e) {
+      if (unmountedRef.current) return
       updateTab(tabId, { error: e.message, loading: false })
     }
-  }, [updateTab])
+  }, [updateTab, videoProvider])
 
   // 视频模式粘贴上传图片
   useEffect(() => {
@@ -392,13 +426,13 @@ function App({ onLogout }) {
 
   const handleVideoGenerate = async () => {
     const tab = activeTab
-    if (!tab.prompt.trim() && !tab.firstFrame && tab.refImages.length === 0 && tab.refVideos.filter(v => v.url).length === 0) return
+    if (!videoTabHasInput(tab)) return
 
     updateTab(tab.id, { loading: true, error: null, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0 })
 
     try {
       let resp
-      const hasFiles = tab.firstFrame || tab.lastFrame || tab.refImages.length > 0 || tab.refAudios.length > 0
+      const hasFiles = Boolean(tab.firstFrame || tab.lastFrame || tab.refImages.length > 0 || tab.refAudios.length > 0)
 
       // 收集已上传的视频 URL
       const videoUrls = tab.refVideos.filter(v => v.url && !v.uploading).map(v => v.url)
@@ -414,24 +448,25 @@ function App({ onLogout }) {
         formData.append('return_last_frame', tab.returnLastFrame)
         formData.append('web_search', tab.search)
         formData.append('video_mode', tab.mode)
+        formData.append('provider', videoProvider)
         const pendingFetches = []
         if (tab.mode === 'keyframe') {
           if (tab.firstFrame) {
             if (tab.firstFrame.file) formData.append('image', tab.firstFrame.file)
             else if (tab.firstFrame.preview) pendingFetches.push(
-              fetch(tab.firstFrame.preview).then(r => r.blob()).then(blob => formData.append('image', blob, 'first_frame.png'))
+              ensureFetchOk(tab.firstFrame.preview).then(blob => formData.append('image', blob, 'first_frame.png'))
             )
           }
           if (tab.lastFrame) {
             if (tab.lastFrame.file) formData.append('last_image', tab.lastFrame.file)
             else if (tab.lastFrame.preview) pendingFetches.push(
-              fetch(tab.lastFrame.preview).then(r => r.blob()).then(blob => formData.append('last_image', blob, 'last_frame.png'))
+              ensureFetchOk(tab.lastFrame.preview).then(blob => formData.append('last_image', blob, 'last_frame.png'))
             )
           }
         } else {
           const refImgFetches = tab.refImages.map(img => {
             if (img.file) { formData.append('ref_images', img.file); return null }
-            if (img.preview) return fetch(img.preview).then(r => r.blob()).then(blob => formData.append('ref_images', blob, img.name || 'ref.png'))
+            if (img.preview) return ensureFetchOk(img.preview).then(blob => formData.append('ref_images', blob, img.name || 'ref.png'))
             return null
           }).filter(Boolean)
           pendingFetches.push(...refImgFetches)
@@ -446,6 +481,7 @@ function App({ onLogout }) {
           resolution: tab.resolution, fast: tab.fast, generate_audio: tab.audio,
           return_last_frame: tab.returnLastFrame, web_search: tab.search,
           video_mode: tab.mode,
+          provider: videoProvider,
           ref_video_urls: videoUrls.length ? videoUrls : undefined
         }, { timeout: 300000 })
       }
@@ -815,7 +851,7 @@ function App({ onLogout }) {
             <div className="p-4 border-t border-nexus-border bg-nexus-bg z-10">
               <button
                 onClick={handleVideoGenerate}
-                disabled={activeTab.loading || (!activeTab.prompt.trim() && !activeTab.firstFrame)}
+                disabled={activeTab.loading || !videoTabHasInput(activeTab)}
                 className="w-full py-4 px-6 rounded-lg bg-[#1a1a1a] hover:bg-[#222] border border-[#333] hover:border-nexus-green transition-all flex items-center justify-center gap-3 text-sm font-mono tracking-widest disabled:opacity-50 disabled:cursor-not-allowed group"
               >
                 {activeTab.loading ? (
@@ -1048,9 +1084,11 @@ function App({ onLogout }) {
                               const uid = items[fi].uid
                               // 提取首帧缩略图
                               const vidEl = document.createElement('video')
+                              const objectUrl = URL.createObjectURL(f)
+                              const cleanupObjectUrl = () => URL.revokeObjectURL(objectUrl)
                               vidEl.preload = 'metadata'
                               vidEl.muted = true
-                              vidEl.src = URL.createObjectURL(f)
+                              vidEl.src = objectUrl
                               vidEl.onloadeddata = () => { vidEl.currentTime = 0.1 }
                               vidEl.onseeked = () => {
                                 const canvas = document.createElement('canvas')
@@ -1058,9 +1096,10 @@ function App({ onLogout }) {
                                 canvas.height = vidEl.videoHeight
                                 canvas.getContext('2d').drawImage(vidEl, 0, 0)
                                 const thumb = canvas.toDataURL('image/jpeg', 0.6)
-                                URL.revokeObjectURL(vidEl.src)
+                                cleanupObjectUrl()
                                 setVideoTabs(prev => prev.map(t => t.id === tabId ? { ...t, refVideos: t.refVideos.map(v => v.uid === uid ? { ...v, thumbnail: thumb } : v) } : t))
                               }
+                              vidEl.onerror = cleanupObjectUrl
                               // 上传
                               const fd = new FormData()
                               fd.append('file', f)
