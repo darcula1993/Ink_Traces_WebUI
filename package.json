@@ -1,0 +1,14 @@
+{
+  "name": "gemini-image-generator",
+  "version": "1.0.0",
+  "description": "Image generation using Gemini API with React frontend",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "client": "cd client && npm run dev",
+    "server": "cd server && python3 app.py",
+    "install-all": "npm install && cd client && npm install && cd .. && pip install -r server/requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

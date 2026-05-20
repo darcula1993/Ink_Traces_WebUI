@@ -1,0 +1,10 @@
+{
+  "name": "gemini-image-generator-server",
+  "version": "1.0.0",
+  "description": "Legacy npm wrapper for the Flask backend",
+  "private": true,
+  "scripts": {
+    "dev": "python3 app.py",
+    "start": "python3 app.py"
+  }
+}

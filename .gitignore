@@ -1,0 +1,85 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Environment variables
+.env
+server/.env
+
+# Local configuration and user data
+config.json
+server/prompts.json
+
+# Build output
+client/dist/
+client/build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+server.log
+client.log
+
+# Error logs
+error_logs/
+
+# Process ID files
+.server.pid
+.client.pid
+
+# Editor directories and files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Uploads
+server/uploads/
+uploads/
+
+# Generated images
+generated_images/
+
+# Output folders
+output_folder/
+sampleui/
+
+# Large binary files
+*.gif
+# *.png
+sprite*.gif
+sprite# *.png
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+test.PNG
+
+# Config backups (contain keys)
+config.json.backup
+
+# Claude settings (may contain keys)
+.claude/
+
+# Video output
+output/
+
+# Task database
+tasks.db
+
+tasks.db-shm
+tasks.db-wal
+
+# Uploaded video references
+upload_video/
