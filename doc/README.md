@@ -28,7 +28,7 @@ Ink Traces WebUI 是一个本地运行的 AI 图片 / 视频生成工作站。�
 |---|---|
 | 图片生成 | 文生图和图生图共用一个工作流，自动识别是否有参考图 |
 | 视频生成 | 支持首尾帧模式，以及图片、视频、音频参考模式 |
-| Provider | Google Vertex AI、Google AI Studio、BytePlus Ark Seedream、Ark/Jiekou Seedance |
+| Provider | Google Vertex AI、Google AI Studio、BytePlus Ark Seedream 5.0 Pro、Ark/Jiekou Seedance |
 | Prompt 工作流 | Prompt Vault、全屏编辑器、多标签页、收藏复用 |
 | 任务历史 | SQLite 任务队列，支持图片/视频结果记录、恢复和删除 |
 | 参数控制 | 宽高比、分辨率、思考深度、Google 搜索增强、Chat 模式 |
@@ -84,6 +84,8 @@ http://localhost:4545
 | `config.json.example` | 公开配置模板，所有凭据为空 | 已提交 |
 | `config.json` | 本地密钥、端口、Provider、认证配置 | 已忽略 |
 | `.flask_secret_key` | 未在配置中设置 secret 时自动生成的本地 Flask session 密钥 | 已忽略 |
+| `prompts/video_prompt_rewriter.md` | 视频 Prompt 快速一键重写使用的 system prompt | 已提交 |
+| `prompts/video_prompt_optimizer.md` | 交互式视频 Prompt Agent 使用的 skill 风格 system prompt | 已提交 |
 | `server/prompts.json.example` | Prompt Vault 示例数据 | 已提交 |
 | `server/prompts.json` | 应用运行时生成的本地 Prompt Vault 数据 | 已忽略 |
 
@@ -92,11 +94,11 @@ http://localhost:4545
 ```json
 {
   "api": {
-    "default_provider": "ai_studio",
-    "ai_studio": {
-      "key": "<your-ai-studio-key>",
-      "model_id": "gemini-3.1-flash-image-preview",
-      "endpoint": "generativelanguage.googleapis.com"
+    "default_provider": "ark",
+    "ark": {
+      "api_key": "<your-byteplus-ark-key>",
+      "model": "seedream-5-0-pro",
+      "endpoint": "https://ark.ap-southeast.bytepluses.com"
     }
   }
 }
@@ -105,6 +107,8 @@ http://localhost:4545
 如果使用 Ark 视频参考素材上传，需要配置 `server.public_host`、`server.public_port` 和 `server.public_scheme`，确保外部服务能够下载参考视频文件。
 
 受控部署时建议设置 `auth.secret_key` 或环境变量 `INK_TRACES_SECRET_KEY`。如果都未设置，后端会自动创建已忽略的 `.flask_secret_key`，避免重启后浏览器 session 失效，也不会把密钥提交进仓库。
+
+视频 Prompt 优化需要在 `config.json` 中设置 `openai.api_key`，或导出 `OPENAI_API_KEY`。Quick Fix 使用 `prompts/video_prompt_rewriter.md`；Prompt Agent 使用 `prompts/video_prompt_optimizer.md` 中的 skill 风格工作流。
 
 ## 项目结构
 

@@ -16,7 +16,7 @@ GitHub: `darcula1993/Ink_Traces_WebUI`
 Flask 后端 (localhost:5000)
   ↓ REST API (HTTPS)
   ├── Google Gemini API (Vertex AI 或 AI Studio) — 图片生成
-  ├── BytePlus Ark (Seedream 5.0 Lite) — 图片生成
+  ├── BytePlus Ark (Seedream 5.0 Pro) — 图片生成
   └── BytePlus Ark (Seedance 2.0) — 视频生成
 ```
 
@@ -37,7 +37,7 @@ Flask 后端 (localhost:5000)
 | `server/tasks.py` | SQLite 任务队列 CRUD |
 | `client/src/App.jsx` (~1140行) | 主组件，图片/视频双模式、状态管理、API 调用 |
 | `client/src/components/TextToImage.jsx` | Prompt 输入 textarea |
-| `client/src/components/ImageToImage.jsx` | 参考图上传（点击/粘贴），最多14张 |
+| `client/src/components/ImageToImage.jsx` | 参考图上传（点击/粘贴）；Seedream 5.0 Pro 最多10张 |
 | `client/src/components/ResultDisplay.jsx` | 画布输出、全屏灯箱、Runtime Log |
 | `client/src/components/VideoResultDisplay.jsx` | 视频结果展示、last frame 显示 |
 | `client/src/components/PromptCollection.jsx` | Vault 收藏库 CRUD |
@@ -63,7 +63,7 @@ Flask 后端 (localhost:5000)
 三个 Provider 循环切换（前端 NODE 按钮）：
 - `vertex` — Google Vertex AI
 - `ai_studio` — Google AI Studio
-- `ark` — BytePlus Ark (Seedream 5.0 Lite, 0.22元/张)
+- `ark` — BytePlus Ark (Seedream 5.0 Pro)
 
 ### 统一生成接口
 
@@ -74,7 +74,7 @@ POST /api/generate
 - 无文件 → 文生图（JSON body）
 - 有文件 → 图生图（multipart/form-data）
 - Gemini: 支持 14 种宽高比 × 4 种分辨率、思考深度、搜索增强、Chat 模式
-- Ark: 仅支持 2K/3K 分辨率，无 think/search/chat
+- Ark: Seedream 5.0 Pro，支持 1K/2K、PNG/JPEG、watermark；prompt optimization 固定为 standard，无 think/search/chat
 
 ### 图片处理
 

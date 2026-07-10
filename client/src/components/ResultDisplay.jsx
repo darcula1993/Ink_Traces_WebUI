@@ -39,6 +39,8 @@ const ResultDisplay = ({ isLoading, generatedImages, thinkingText, error, errorT
 
   if (generatedImages && generatedImages.length > 0) {
     const currentImage = generatedImages[currentImageIndex]
+    const normalizedImageUrl = String(currentImage || '').toLowerCase().split('?', 1)[0]
+    const downloadExtension = normalizedImageUrl.startsWith('data:image/jpeg') || normalizedImageUrl.endsWith('.jpg') || normalizedImageUrl.endsWith('.jpeg') ? 'jpg' : 'png'
 
     return (
       <>
@@ -54,7 +56,7 @@ const ResultDisplay = ({ isLoading, generatedImages, thinkingText, error, errorT
               <button onClick={() => setIsFullscreen(true)} className="text-nexus-text hover:text-white transition-colors">
                 <Maximize2 size={16} />
               </button>
-              <a href={currentImage} download={`render_${Date.now()}.png`} className="text-nexus-text hover:text-white transition-colors">
+              <a href={currentImage} download={`render_${Date.now()}.${downloadExtension}`} className="text-nexus-text hover:text-white transition-colors">
                 <Download size={16} />
               </a>
             </div>
@@ -128,7 +130,7 @@ const ResultDisplay = ({ isLoading, generatedImages, thinkingText, error, errorT
                     {currentImageIndex + 1} / {generatedImages.length}
                   </div>
                 )}
-                <a href={currentImage} download={`render_${Date.now()}.png`} onClick={e => e.stopPropagation()} className="text-nexus-text hover:text-white transition-colors p-2 bg-[#111] rounded-lg border border-nexus-border hover:border-nexus-green">
+                <a href={currentImage} download={`render_${Date.now()}.${downloadExtension}`} onClick={e => e.stopPropagation()} className="text-nexus-text hover:text-white transition-colors p-2 bg-[#111] rounded-lg border border-nexus-border hover:border-nexus-green">
                   <Download size={20} />
                 </a>
                 <button onClick={() => setIsFullscreen(false)} className="text-nexus-text hover:text-white transition-colors p-2 bg-[#111] rounded-lg border border-nexus-border hover:border-red-500">

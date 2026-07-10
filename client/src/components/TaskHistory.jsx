@@ -87,6 +87,7 @@ function TaskHistory({ onLoadTask }) {
           const isVideo = task.type === 'video'
           const result = task.result || {}
           const hasLocalVideo = result.local_video
+          const videoPreviewImage = result.local_last_frame
           const hasLocalImages = result.local_images && result.local_images.length > 0
 
           return (
@@ -111,8 +112,12 @@ function TaskHistory({ onLoadTask }) {
               {/* Result preview */}
               {task.status === 'succeeded' && (
                 <div className="px-3 pb-2">
-                  {isVideo && hasLocalVideo && (
-                    <video src={result.local_video} className="w-full h-24 object-cover rounded border border-nexus-border" muted preload="none" />
+                  {isVideo && (videoPreviewImage || hasLocalVideo) && (
+                    videoPreviewImage ? (
+                      <img src={videoPreviewImage} loading="lazy" className="w-full h-24 object-cover rounded border border-nexus-border" alt="" />
+                    ) : (
+                      <video src={result.local_video} className="w-full h-24 object-cover rounded border border-nexus-border" muted preload="none" />
+                    )
                   )}
                   {!isVideo && hasLocalImages && (
                     <div className="flex gap-1 overflow-x-auto">

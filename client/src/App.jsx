@@ -8,7 +8,7 @@ import PromptCollection from './components/PromptCollection'
 import TaskHistory from './components/TaskHistory'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Square, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, Clock, LogOut } from 'lucide-react'
+import { Play, Square, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, Clock, LogOut, Bot, Send, Check } from 'lucide-react'
 import { useLocalStorage } from './lib/useLocalStorage'
 
 axios.defaults.withCredentials = true
@@ -68,6 +68,13 @@ function App({ onLogout }) {
   const [showTaskQueue, setShowTaskQueue] = useState(false)
   const [showFullEditor, setShowFullEditor] = useState(false)
   const [showEditorVault, setShowEditorVault] = useState(false)
+  const [optimizingVideoPrompt, setOptimizingVideoPrompt] = useState(false)
+  const [showVideoPromptAgent, setShowVideoPromptAgent] = useState(false)
+  const [videoPromptAgentSessionId, setVideoPromptAgentSessionId] = useState(null)
+  const [videoPromptAgentMessages, setVideoPromptAgentMessages] = useState([])
+  const [videoPromptAgentInput, setVideoPromptAgentInput] = useState('')
+  const [videoPromptAgentLoading, setVideoPromptAgentLoading] = useState(false)
+  const [videoPromptAgentDraft, setVideoPromptAgentDraft] = useState('')
 
   const [apiProvider, setApiProvider] = useState('vertex')
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
@@ -76,7 +83,7 @@ function App({ onLogout }) {
   // 图片多标签页系统
   const makeImgTab = (id) => ({
     id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
-    chatMode: false, sessionId: null, uploadedImages: [],
+    chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', watermark: false,
     loading: false, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null
   })
 
@@ -161,18 +168,21 @@ function App({ onLogout }) {
     })
   }
 
-  // 恢复原来的所有比例和分辨率选项
-  const aspectRatios = ['1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
-  const resolutions = apiProvider === 'ark' ? ['2K', '3K'] : ['0.5K', '1K', '2K', '4K']
   const isArk = apiProvider === 'ark'
+  const standardAspectRatios = ['1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+  const arkAspectRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9']
+  const aspectRatios = isArk ? arkAspectRatios : standardAspectRatios
+  const resolutions = isArk ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
 
-  // 切换 provider 时自动修正不兼容的分辨率
+  // 切换 provider 或标签页时修正不兼容的参数。
   useEffect(() => {
-    const valid = apiProvider === 'ark' ? ['2K', '3K'] : ['0.5K', '1K', '2K', '4K']
-    if (!valid.includes(activeImgTab.resolution)) {
-      updateImgTab(activeImgTab.id, { resolution: '2K' })
-    }
-  }, [apiProvider])
+    const validResolutions = apiProvider === 'ark' ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
+    const validRatios = apiProvider === 'ark' ? arkAspectRatios : standardAspectRatios
+    const updates = {}
+    if (!validResolutions.includes(activeImgTab.resolution)) updates.resolution = '1K'
+    if (!validRatios.includes(activeImgTab.aspectRatio)) updates.aspectRatio = '1:1'
+    if (Object.keys(updates).length > 0) updateImgTab(activeImgTab.id, updates)
+  }, [apiProvider, activeImgTabId])
 
   useEffect(() => {
     fetchProviderInfo()
@@ -265,7 +275,11 @@ function App({ onLogout }) {
         const response = await axios.post('/api/generate', {
           prompt: tab.prompt, aspect_ratio: tab.aspectRatio, resolution: tab.resolution,
           use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId,
-          think_level: tab.thinkLevel, provider: apiProvider, model: requestModel
+          think_level: tab.thinkLevel, provider: apiProvider, model: requestModel,
+          ...(apiProvider === 'ark' ? {
+            output_format: tab.outputFormat || 'png',
+            watermark: Boolean(tab.watermark)
+          } : {})
         })
         handleResponse(tab.id, response.data)
       } else {
@@ -277,6 +291,10 @@ function App({ onLogout }) {
         formData.append('enable_chat', tab.chatMode)
         formData.append('think_level', tab.thinkLevel)
         formData.append('provider', apiProvider)
+        if (apiProvider === 'ark') {
+          formData.append('output_format', tab.outputFormat || 'png')
+          formData.append('watermark', Boolean(tab.watermark))
+        }
         if (requestModel) formData.append('model', requestModel)
         if (tab.sessionId) formData.append('session_id', tab.sessionId)
         const pendingFetches = []
@@ -340,6 +358,25 @@ function App({ onLogout }) {
       return Boolean(tab.prompt.trim() || tab.firstFrame || tab.lastFrame)
     }
     return Boolean(tab.prompt.trim() || tab.refImages.length > 0 || uploadedVideos || tab.refAudios.length > 0)
+  }
+
+  const buildVideoPromptContextPayload = (tab) => {
+    const videoUrls = tab.refVideos.filter(v => v.url && !v.uploading)
+    return {
+      prompt: tab.prompt,
+      mode: tab.mode,
+      ratio: tab.ratio,
+      duration: tab.duration,
+      resolution: tab.resolution,
+      fast: tab.fast,
+      generate_audio: tab.audio,
+      return_last_frame: tab.returnLastFrame,
+      has_first_frame: Boolean(tab.firstFrame),
+      has_last_frame: Boolean(tab.lastFrame),
+      ref_image_count: tab.refImages.length,
+      ref_video_count: videoUrls.length,
+      ref_audio_count: tab.refAudios.length
+    }
   }
 
   // 视频生成
@@ -498,6 +535,84 @@ function App({ onLogout }) {
     }
   }
 
+  const handleOptimizeVideoPrompt = async () => {
+    const tab = activeTab
+    if (!tab.prompt.trim()) return
+    setOptimizingVideoPrompt(true)
+    updateTab(tab.id, { error: null })
+    try {
+      const resp = await axios.post('/api/video/optimize-prompt', buildVideoPromptContextPayload(tab), { timeout: 120000 })
+      if (resp.data.success && resp.data.prompt) {
+        updateTab(tab.id, { prompt: resp.data.prompt })
+      } else {
+        updateTab(tab.id, { error: resp.data.error || 'Prompt 优化失败' })
+      }
+    } catch (e) {
+      updateTab(tab.id, { error: e.response?.data?.error || e.message || 'Prompt 优化失败' })
+    } finally {
+      setOptimizingVideoPrompt(false)
+    }
+  }
+
+  const sendVideoPromptAgentMessage = async (message, startNew = false) => {
+    const tab = activeTab
+    if (!videoTabHasInput(tab) && !message.trim()) return
+
+    const userMessage = message.trim() || '请根据当前视频 prompt 和参数开始优化。'
+    setVideoPromptAgentLoading(true)
+    setShowVideoPromptAgent(true)
+    setVideoPromptAgentInput('')
+    setVideoPromptAgentMessages(prev => [...prev, { role: 'user', content: userMessage }])
+    updateTab(tab.id, { error: null })
+
+    try {
+      const resp = await axios.post('/api/video/prompt-agent/message', {
+        ...buildVideoPromptContextPayload(tab),
+        session_id: startNew ? null : videoPromptAgentSessionId,
+        message: userMessage
+      }, { timeout: 120000 })
+
+      if (resp.data.success) {
+        setVideoPromptAgentSessionId(resp.data.session_id)
+        setVideoPromptAgentMessages(resp.data.history || [
+          { role: 'user', content: userMessage },
+          { role: 'assistant', content: resp.data.message || '' }
+        ])
+        setVideoPromptAgentDraft(resp.data.optimized_prompt || '')
+      } else {
+        updateTab(tab.id, { error: resp.data.error || 'Prompt Agent 失败' })
+      }
+    } catch (e) {
+      updateTab(tab.id, { error: e.response?.data?.error || e.message || 'Prompt Agent 失败' })
+      setVideoPromptAgentMessages(prev => [...prev, { role: 'assistant', content: e.response?.data?.error || e.message || 'Prompt Agent 失败' }])
+    } finally {
+      setVideoPromptAgentLoading(false)
+    }
+  }
+
+  const openVideoPromptAgent = () => {
+    if (!showVideoPromptAgent) setShowVideoPromptAgent(true)
+    if (videoPromptAgentMessages.length === 0) {
+      sendVideoPromptAgentMessage('', true)
+    }
+  }
+
+  const resetVideoPromptAgent = async () => {
+    const oldSessionId = videoPromptAgentSessionId
+    setVideoPromptAgentSessionId(null)
+    setVideoPromptAgentMessages([])
+    setVideoPromptAgentInput('')
+    setVideoPromptAgentDraft('')
+    if (oldSessionId) {
+      axios.delete(`/api/video/prompt-agent/session/${oldSessionId}`).catch(() => {})
+    }
+  }
+
+  const applyVideoPromptAgentDraft = () => {
+    if (!videoPromptAgentDraft.trim()) return
+    updateTab(activeTab.id, { prompt: videoPromptAgentDraft.trim() })
+  }
+
   // 左侧面板拖拽调整宽度
   const [panelWidth, setPanelWidth] = useState(480)
   const isDragging = useRef(false)
@@ -521,6 +636,8 @@ function App({ onLogout }) {
         prompt: task.prompt || '',
         aspectRatio: params.aspect_ratio || '1:1',
         resolution: params.resolution || '1K',
+        outputFormat: params.output_format || 'png',
+        watermark: Boolean(params.watermark),
         useSearch: params.use_search || false,
         thinkLevel: params.think_level || 'minimal',
         uploadedImages: restoredRefs,
@@ -604,7 +721,7 @@ function App({ onLogout }) {
         <div className="flex items-center gap-6 text-sm font-mono">
           <button onClick={switchModel} className="flex items-center gap-2 text-nexus-text hover:text-white transition-colors cursor-pointer group">
             <span className="w-2 h-2 rounded-full bg-nexus-green shadow-[0_0_8px_#10b981]"></span>
-            GPU: <span className="group-hover:text-nexus-green transition-colors">{appMode === 'video' ? 'Seedance_2.0_Cluster' : apiProvider === 'ark' ? 'SEEDREAM_5.0_LITE' : currentModel.includes('flash') ? 'FLASH_3.1_CLUSTER' : 'PRO_3.0_CLUSTER'}</span>
+            GPU: <span className="group-hover:text-nexus-green transition-colors">{appMode === 'video' ? 'Seedance_2.0_Cluster' : apiProvider === 'ark' ? 'SEEDREAM_5.0_PRO' : currentModel.includes('flash') ? 'FLASH_3.1_CLUSTER' : 'PRO_3.0_CLUSTER'}</span>
           </button>
           <button onClick={appMode === 'video' ? switchVideoProvider : switchApiProvider} className="flex items-center gap-2 text-nexus-text hover:text-white transition-colors cursor-pointer group">
             <Database size={12} className="group-hover:text-nexus-green transition-colors" />
@@ -735,7 +852,32 @@ function App({ onLogout }) {
                      ))}
                    </select>
                  </div>
-                 {!isArk && (<>
+                 {isArk ? (<>
+                 <div className="flex items-center justify-between">
+                   <span className="text-sm font-mono text-nexus-text">FORMAT</span>
+                   <select
+                     value={activeImgTab.outputFormat || 'png'}
+                     onChange={e => updateImgTab(activeImgTab.id, { outputFormat: e.target.value })}
+                     className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer"
+                   >
+                     <option value="png" className="bg-nexus-bg">PNG</option>
+                     <option value="jpeg" className="bg-nexus-bg">JPEG</option>
+                   </select>
+                 </div>
+                 <div className="flex items-center justify-between">
+                   <span className="text-sm font-mono text-nexus-text">WATERMARK</span>
+                   <button
+                     onClick={() => updateImgTab(activeImgTab.id, { watermark: !activeImgTab.watermark })}
+                     className={`w-8 h-4 rounded-full relative transition-colors ${activeImgTab.watermark ? 'bg-nexus-green' : 'bg-[#333]'}`}
+                   >
+                     <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeImgTab.watermark ? 'left-[18px]' : 'left-[2px]'}`}></div>
+                   </button>
+                 </div>
+                 <div className="flex items-center justify-between">
+                   <span className="text-sm font-mono text-nexus-text">PROMPT_OPT</span>
+                   <span className="text-xs font-mono text-nexus-green">STANDARD</span>
+                 </div>
+                 </>) : (<>
                  <div className="flex items-center justify-between">
                    <span className="text-sm font-mono text-nexus-text">USE_SEARCH</span>
                    <button 
@@ -774,7 +916,11 @@ function App({ onLogout }) {
                 <HardDrive size={12} /> SOURCE NODE
               </div>
               <div className="flex-grow min-h-0">
-                 <ImageToImage uploadedImages={activeImgTab.uploadedImages} setUploadedImages={v => updateImgTab(activeImgTab.id, { uploadedImages: v })} />
+                 <ImageToImage
+                   uploadedImages={activeImgTab.uploadedImages}
+                   setUploadedImages={v => updateImgTab(activeImgTab.id, { uploadedImages: v })}
+                   maxImages={isArk ? 10 : 14}
+                 />
               </div>
             </div>
 
@@ -849,6 +995,26 @@ function App({ onLogout }) {
               </div>
             </div>
             <div className="p-4 border-t border-nexus-border bg-nexus-bg z-10">
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <button
+                  onClick={handleOptimizeVideoPrompt}
+                  disabled={activeTab.loading || optimizingVideoPrompt || !activeTab.prompt.trim()}
+                  className="py-2.5 px-3 rounded border border-nexus-border hover:border-nexus-green/60 bg-[#111] hover:bg-[#151515] text-nexus-text hover:text-nexus-green transition-all flex items-center justify-center gap-2 text-xs font-mono tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {optimizingVideoPrompt ? (
+                    <><Cpu size={12} className="animate-pulse" /> <span>QUICK...</span></>
+                  ) : (
+                    <><Settings size={12} /> <span>QUICK FIX</span></>
+                  )}
+                </button>
+                <button
+                  onClick={openVideoPromptAgent}
+                  disabled={activeTab.loading || videoPromptAgentLoading || !videoTabHasInput(activeTab)}
+                  className={`py-2.5 px-3 rounded border transition-all flex items-center justify-center gap-2 text-xs font-mono tracking-widest disabled:opacity-40 disabled:cursor-not-allowed ${showVideoPromptAgent ? 'border-nexus-green/60 bg-nexus-green/10 text-nexus-green' : 'border-nexus-border bg-[#111] text-nexus-text hover:border-nexus-green/60 hover:bg-[#151515] hover:text-nexus-green'}`}
+                >
+                  <Bot size={12} /> <span>{videoPromptAgentLoading ? 'AGENT...' : 'AGENT'}</span>
+                </button>
+              </div>
               <button
                 onClick={handleVideoGenerate}
                 disabled={activeTab.loading || !videoTabHasInput(activeTab)}
@@ -1217,6 +1383,105 @@ function App({ onLogout }) {
             <div className="flex-grow overflow-hidden relative">
               <TaskHistory onLoadTask={handleLoadTask} />
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 右侧折叠边栏：Video Prompt Agent */}
+      <AnimatePresence>
+        {showVideoPromptAgent && appMode === 'video' && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 420, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="absolute right-0 top-0 bottom-0 border-l border-nexus-border bg-nexus-bg z-40 flex flex-col"
+          >
+            <div className="p-4 border-b border-nexus-border flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2 font-mono text-sm text-white">
+                <Bot size={14} className="text-nexus-green" /> PROMPT_AGENT
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={resetVideoPromptAgent}
+                  disabled={videoPromptAgentLoading}
+                  className="text-[10px] font-mono text-nexus-text hover:text-nexus-green transition-colors disabled:opacity-40"
+                >
+                  RESET
+                </button>
+                <button onClick={() => setShowVideoPromptAgent(false)} className="text-nexus-text hover:text-white transition-colors">
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-grow min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3">
+              {videoPromptAgentMessages.length === 0 && !videoPromptAgentLoading && (
+                <div className="h-full flex items-center justify-center text-center text-xs font-mono text-nexus-text/60 leading-5 px-6">
+                  Click AGENT to start a skill-backed prompt optimization session.
+                </div>
+              )}
+              {videoPromptAgentMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[88%] rounded border px-3 py-2 text-xs font-mono leading-5 whitespace-pre-wrap break-words ${
+                    msg.role === 'user'
+                      ? 'border-nexus-green/40 bg-nexus-green/10 text-nexus-green'
+                      : 'border-nexus-border bg-[#0f0f0f] text-white'
+                  }`}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {videoPromptAgentLoading && (
+                <div className="flex justify-start">
+                  <div className="border border-nexus-border bg-[#0f0f0f] rounded px-3 py-2 text-xs font-mono text-nexus-text flex items-center gap-2">
+                    <Cpu size={12} className="animate-pulse text-nexus-green" /> THINKING
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {videoPromptAgentDraft && (
+              <div className="border-t border-nexus-border p-3 shrink-0 bg-[#0a0a0a]">
+                <div className="text-[10px] font-mono text-nexus-text mb-2 tracking-widest">DETECTED_FINAL_PROMPT</div>
+                <div className="max-h-28 overflow-y-auto custom-scrollbar text-xs font-mono leading-5 text-[#2ecc71] border border-nexus-border rounded p-2 whitespace-pre-wrap break-words">
+                  {videoPromptAgentDraft}
+                </div>
+                <button
+                  onClick={applyVideoPromptAgentDraft}
+                  className="mt-2 w-full py-2 rounded border border-nexus-green/40 bg-nexus-green/10 text-nexus-green hover:bg-nexus-green/20 transition-colors flex items-center justify-center gap-2 text-xs font-mono tracking-widest"
+                >
+                  <Check size={12} /> APPLY PROMPT
+                </button>
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (!videoPromptAgentInput.trim() || videoPromptAgentLoading) return
+                sendVideoPromptAgentMessage(videoPromptAgentInput)
+              }}
+              className="border-t border-nexus-border p-3 shrink-0 bg-nexus-bg"
+            >
+              <div className="flex gap-2">
+                <textarea
+                  value={videoPromptAgentInput}
+                  onChange={e => setVideoPromptAgentInput(e.target.value)}
+                  disabled={videoPromptAgentLoading}
+                  rows={3}
+                  className="flex-grow min-w-0 bg-[#0f0f0f] border border-nexus-border rounded px-3 py-2 text-xs font-mono leading-5 text-white outline-none resize-none focus:border-nexus-green custom-scrollbar disabled:opacity-50"
+                  placeholder="Reply with choices or extra details..."
+                />
+                <button
+                  type="submit"
+                  disabled={videoPromptAgentLoading || !videoPromptAgentInput.trim()}
+                  className="w-10 rounded border border-nexus-border text-nexus-text hover:text-nexus-green hover:border-nexus-green/60 transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Send size={14} />
+                </button>
+              </div>
+            </form>
           </motion.div>
         )}
       </AnimatePresence>

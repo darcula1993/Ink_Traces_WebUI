@@ -9,6 +9,7 @@ import json
 import threading
 import copy
 import secrets
+import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PIL import Image
 import uuid
@@ -42,7 +43,7 @@ BUILTIN_DEFAULT_CONFIG = {
     },
     'client': {'host': '0.0.0.0', 'port': 4545},
     'api': {
-        'default_provider': 'ai_studio',
+        'default_provider': 'ark',
         'default_model': 'gemini-3.1-flash-image-preview',
         'available_models': [
             {
@@ -69,7 +70,7 @@ BUILTIN_DEFAULT_CONFIG = {
         },
         'ark': {
             'api_key': '',
-            'model': '',
+            'model': 'seedream-5-0-pro',
             'endpoint': 'https://ark.ap-southeast.bytepluses.com',
         },
     },
@@ -89,6 +90,15 @@ BUILTIN_DEFAULT_CONFIG = {
             'endpoint': 'https://ark.ap-southeast.bytepluses.com',
             'model': '',
         },
+    },
+    'openai': {
+        'api_key': '',
+        'endpoint': 'https://api.openai.com',
+        'model': 'gpt-5',
+        'rewriter_prompt_file': 'video_prompt_rewriter.md',
+        'agent_prompt_file': 'video_prompt_optimizer.md',
+        'prompt_file': 'video_prompt_optimizer.md',
+        'max_output_tokens': 1600,
     },
 }
 
@@ -217,7 +227,7 @@ def require_login():
         return jsonify({'success': False, 'error': '未登录'}), 401
 
 # API Provider 配置
-CURRENT_PROVIDER = config['api'].get('default_provider', 'vertex')
+CURRENT_PROVIDER = config['api'].get('default_provider', 'ark')
 API_PROVIDERS = {
     'vertex': config['api'].get('vertex', {}),
     'ai_studio': config['api'].get('ai_studio', {}),
@@ -241,6 +251,9 @@ CURRENT_MODEL = config['api'].get('default_model', 'gemini-3.1-flash-image-previ
 
 
 def get_session_image_provider():
+    if session.get('image_provider_default') != CURRENT_PROVIDER:
+        session['image_provider'] = CURRENT_PROVIDER
+        session['image_provider_default'] = CURRENT_PROVIDER
     provider = session.get('image_provider', CURRENT_PROVIDER)
     return provider if provider in API_PROVIDERS else CURRENT_PROVIDER
 
@@ -253,12 +266,12 @@ def get_session_image_model():
 # 动态获取当前 provider 的配置
 def get_current_api_config():
     """获取当前 API provider 的配置"""
-    return API_PROVIDERS.get(CURRENT_PROVIDER, API_PROVIDERS['vertex'])
+    return API_PROVIDERS.get(CURRENT_PROVIDER, API_PROVIDERS['ark'])
 
 
 def get_image_provider_config(provider):
     provider = provider if provider in API_PROVIDERS else CURRENT_PROVIDER
-    return provider, API_PROVIDERS.get(provider, API_PROVIDERS['vertex'])
+    return provider, API_PROVIDERS.get(provider, API_PROVIDERS['ark'])
 
 
 def get_provider_key(provider, provider_config):
@@ -269,7 +282,7 @@ def get_provider_key(provider, provider_config):
 
 def get_provider_default_model(provider, provider_config):
     if provider == 'ark':
-        return provider_config.get('model') or 'seedream-5-0-lite'
+        return provider_config.get('model') or 'seedream-5-0-pro'
     return provider_config.get('model_id') or CURRENT_MODEL
 
 # 初始化 API 配置（使用默认 provider）
@@ -415,10 +428,13 @@ def redact_sensitive(value):
 # Chat会话存储 (内存中存储，重启后会丢失)
 # 格式: {session_id: {'history': [contents], 'created_at': timestamp, 'last_used': timestamp}}
 chat_sessions = {}
+video_prompt_agent_sessions = {}
 
 # Prompt收藏存储文件路径
 PROMPTS_FILE = os.path.join(os.path.dirname(__file__), 'prompts.json')
 PROMPTS_EXAMPLE_FILE = os.path.join(os.path.dirname(__file__), 'prompts.json.example')
+SYSTEM_PROMPTS_DIR = os.path.join(PROJECT_ROOT, 'prompts')
+OPENAI_CONFIG = config.get('openai', {})
 
 # 错误日志目录
 ERROR_LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'error_logs')
@@ -482,6 +498,139 @@ def save_prompts(prompts):
         print(f"Error saving prompts: {e}")
         return False
 
+
+def load_system_prompt(filename):
+    """Load a versioned system prompt from the repository prompt directory."""
+    safe_name = os.path.basename(filename or '')
+    if not safe_name:
+        raise ValueError('System prompt file is not configured')
+    path = os.path.abspath(os.path.join(SYSTEM_PROMPTS_DIR, safe_name))
+    prompt_dir = os.path.abspath(SYSTEM_PROMPTS_DIR)
+    if os.path.commonpath([prompt_dir, path]) != prompt_dir or not os.path.isfile(path):
+        raise FileNotFoundError('System prompt file not found')
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read().strip()
+
+
+def extract_response_text(response_data):
+    """Extract plain text from the OpenAI Responses API payload."""
+    if isinstance(response_data, dict):
+        text = response_data.get('output_text')
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+
+        chunks = []
+        for item in response_data.get('output', []) or []:
+            for content in item.get('content', []) or []:
+                if content.get('type') in ('output_text', 'text') and isinstance(content.get('text'), str):
+                    chunks.append(content['text'])
+        if chunks:
+            return ''.join(chunks).strip()
+    return ''
+
+
+def openai_config_values():
+    """Return OpenAI client settings without exposing secrets in logs."""
+    api_key = OPENAI_CONFIG.get('api_key') or os.environ.get('OPENAI_API_KEY', '')
+    model = OPENAI_CONFIG.get('model') or 'gpt-5'
+    endpoint = (OPENAI_CONFIG.get('endpoint') or 'https://api.openai.com').rstrip('/')
+    max_output_tokens = int(OPENAI_CONFIG.get('max_output_tokens', 1600) or 1600)
+    return api_key, model, endpoint, max_output_tokens
+
+
+def call_openai_response(system_prompt, input_payload, error_context):
+    """Call the configured OpenAI Responses API and return extracted text."""
+    api_key, model, endpoint, max_output_tokens = openai_config_values()
+    if not api_key:
+        return None, jsonify({'success': False, 'error': 'OpenAI API Key 未配置'}), 400
+
+    body = {
+        'model': model,
+        'instructions': system_prompt,
+        'input': input_payload,
+        'max_output_tokens': max_output_tokens,
+        'store': False,
+    }
+    response = requests.post(
+        f'{endpoint}/v1/responses',
+        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
+        json=body,
+        timeout=REQUEST_TIMEOUT,
+    )
+    response_data = response.json() if response.text else {}
+    if response.status_code >= 400:
+        err = response_data.get('error', {}) if isinstance(response_data, dict) else {}
+        err_msg = err.get('message') if isinstance(err, dict) else ''
+        save_error_log(
+            error_context.get('error_type', 'openai_response_error'),
+            {'model': model, **error_context.get('request', {})},
+            response_data,
+            err_msg or f'OpenAI API 错误 {response.status_code}',
+        )
+        return None, jsonify({'success': False, 'error': err_msg or f'OpenAI API 错误 {response.status_code}'}), response.status_code
+
+    text = extract_response_text(response_data)
+    if not text:
+        save_error_log(
+            error_context.get('empty_type', 'openai_response_empty'),
+            {'model': model, **error_context.get('request', {})},
+            response_data,
+            'Empty OpenAI response',
+        )
+        return None, jsonify({'success': False, 'error': 'OpenAI 未返回有效文本'}), 500
+    return text, None, None
+
+
+def build_video_prompt_context(data, prompt=None):
+    """Build shared context for video prompt rewriter and prompt agent."""
+    return {
+        'current_prompt': (prompt if prompt is not None else data.get('prompt', '')) or '',
+        'video_mode': data.get('mode', ''),
+        'ratio': data.get('ratio', ''),
+        'duration': data.get('duration', ''),
+        'resolution': data.get('resolution', ''),
+        'fast': bool(data.get('fast', False)),
+        'generate_audio': bool(data.get('generate_audio', True)),
+        'return_last_frame': bool(data.get('return_last_frame', False)),
+        'has_first_frame': bool(data.get('has_first_frame', False)),
+        'has_last_frame': bool(data.get('has_last_frame', False)),
+        'ref_image_count': int(data.get('ref_image_count', 0) or 0),
+        'ref_video_count': int(data.get('ref_video_count', 0) or 0),
+        'ref_audio_count': int(data.get('ref_audio_count', 0) or 0),
+    }
+
+
+def get_or_create_video_prompt_agent_session(session_id=None):
+    if session_id and session_id in video_prompt_agent_sessions:
+        video_prompt_agent_sessions[session_id]['last_used'] = datetime.now().isoformat()
+        return session_id, video_prompt_agent_sessions[session_id]
+
+    new_session_id = str(uuid.uuid4())
+    video_prompt_agent_sessions[new_session_id] = {
+        'history': [],
+        'created_at': datetime.now().isoformat(),
+        'last_used': datetime.now().isoformat(),
+    }
+    return new_session_id, video_prompt_agent_sessions[new_session_id]
+
+
+def extract_optimized_video_prompt(agent_text):
+    """Extract the final prompt section from the skill-style agent output."""
+    if not agent_text:
+        return ''
+
+    patterns = [
+        r'####\s*优化后提示词\s*\n(?P<prompt>.*?)(?:\n####\s*(?:优化问题|相关原则)|\Z)',
+        r'###\s*优化后提示词\s*\n(?P<prompt>.*?)(?:\n###\s*(?:优化问题|相关原则)|\Z)',
+        r'优化后提示词[:：]\s*(?P<prompt>.*?)(?:\n(?:优化问题|相关原则)[:：]|\Z)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, agent_text, re.S)
+        if match:
+            prompt = match.group('prompt').strip()
+            return prompt.strip('`').strip()
+    return ''
+
 def image_to_base64(image):
     """将PIL Image转换为base64字符串"""
     buffered = io.BytesIO()
@@ -526,8 +675,24 @@ def parse_api_error(response, response_data=None):
         except:
             pass
 
+    error_obj = {}
+    error_message = ''
+    error_status = ''
+    error_reasons = set()
+
+    if response_data and isinstance(response_data, dict) and isinstance(response_data.get('error'), dict):
+        error_obj = response_data['error']
+        error_message = error_obj.get('message', '') or ''
+        error_status = error_obj.get('status', '') or ''
+        for detail in error_obj.get('details', []) or []:
+            if isinstance(detail, dict) and detail.get('reason'):
+                error_reasons.add(detail['reason'])
+
     # HTTP状态码错误
-    if status_code == 400:
+    if 'API_KEY_INVALID' in error_reasons or ('api key' in error_message.lower() and any(word in error_message.lower() for word in ('expired', 'invalid'))):
+        error_info['type'] = 'unauthorized'
+        error_info['user_message'] = 'API密钥无效或已过期，请更新对应 Provider 的 API Key'
+    elif status_code == 400:
         error_info['type'] = 'bad_request'
         error_info['user_message'] = '请求参数错误，请检查输入内容'
     elif status_code == 401:
@@ -554,11 +719,12 @@ def parse_api_error(response, response_data=None):
     # 提取详细错误信息
     if response_data and isinstance(response_data, dict):
         if 'error' in response_data:
-            error_obj = response_data['error']
             if isinstance(error_obj, dict):
-                error_info['message'] = error_obj.get('message', '')
+                error_info['message'] = error_message
                 error_info['details']['code'] = error_obj.get('code', status_code)
-                error_info['details']['status'] = error_obj.get('status', '')
+                error_info['details']['status'] = error_status
+                if error_reasons:
+                    error_info['details']['reasons'] = sorted(error_reasons)
 
     return error_info
 
@@ -842,6 +1008,121 @@ def delete_prompt(prompt_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/video/optimize-prompt', methods=['POST'])
+def optimize_video_prompt():
+    """One-click rewrite for the current video prompt."""
+    try:
+        data = request.get_json(silent=True) or {}
+        prompt = (data.get('prompt') or '').strip()
+        if not prompt:
+            return jsonify({'success': False, 'error': '请先输入视频 prompt'}), 400
+
+        prompt_file = OPENAI_CONFIG.get('rewriter_prompt_file') or 'video_prompt_rewriter.md'
+        system_prompt = load_system_prompt(prompt_file)
+        context = build_video_prompt_context(data, prompt)
+        input_payload = json.dumps(context, ensure_ascii=False, indent=2)
+        optimized, error_response, status_code = call_openai_response(
+            system_prompt,
+            input_payload,
+            {
+                'error_type': 'video_prompt_optimize_error',
+                'empty_type': 'video_prompt_optimize_empty',
+                'request': {'prompt': prompt},
+            },
+        )
+        if error_response:
+            return error_response, status_code
+
+        return jsonify({'success': True, 'prompt': optimized})
+
+    except requests.RequestException as e:
+        save_error_log('video_prompt_optimize_request_error', {'prompt': (request.get_json(silent=True) or {}).get('prompt', '')}, {}, str(e))
+        return jsonify({'success': False, 'error': f'OpenAI 请求失败: {e}'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/video/prompt-agent/session', methods=['POST'])
+def create_video_prompt_agent_session():
+    """Create an interactive video prompt optimization session."""
+    session_id, agent_session = get_or_create_video_prompt_agent_session()
+    return jsonify({
+        'success': True,
+        'session_id': session_id,
+        'history': agent_session['history'],
+    })
+
+
+@app.route('/api/video/prompt-agent/session/<session_id>', methods=['DELETE'])
+def delete_video_prompt_agent_session(session_id):
+    """Delete an interactive video prompt optimization session."""
+    if session_id in video_prompt_agent_sessions:
+        del video_prompt_agent_sessions[session_id]
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': '会话不存在'}), 404
+
+
+@app.route('/api/video/prompt-agent/message', methods=['POST'])
+def video_prompt_agent_message():
+    """Run one turn of the skill-backed video prompt agent."""
+    try:
+        data = request.get_json(silent=True) or {}
+        message = (data.get('message') or '').strip()
+        prompt = (data.get('prompt') or '').strip()
+        session_id, agent_session = get_or_create_video_prompt_agent_session(data.get('session_id'))
+
+        if not message and not prompt and not agent_session['history']:
+            return jsonify({'success': False, 'error': '请先输入视频 prompt 或发送消息'}), 400
+
+        system_prompt = load_system_prompt(OPENAI_CONFIG.get('agent_prompt_file') or OPENAI_CONFIG.get('prompt_file') or 'video_prompt_optimizer.md')
+        context = build_video_prompt_context(data, prompt)
+
+        user_turn = {
+            'role': 'user',
+            'content': message or '请根据当前视频 prompt 和参数开始优化。',
+        }
+        agent_session['history'].append(user_turn)
+        agent_session['last_used'] = datetime.now().isoformat()
+
+        input_payload = json.dumps({
+            'video_context': context,
+            'conversation': agent_session['history'],
+            'instruction': 'Continue this prompt optimization session. Ask clarifying questions when required by the skill, or produce the final optimized prompt when enough information is available.',
+        }, ensure_ascii=False, indent=2)
+
+        reply, error_response, status_code = call_openai_response(
+            system_prompt,
+            input_payload,
+            {
+                'error_type': 'video_prompt_agent_error',
+                'empty_type': 'video_prompt_agent_empty',
+                'request': {'prompt': prompt, 'session_id': session_id},
+            },
+        )
+        if error_response:
+            agent_session['history'].pop()
+            return error_response, status_code
+
+        assistant_turn = {'role': 'assistant', 'content': reply}
+        agent_session['history'].append(assistant_turn)
+        agent_session['last_used'] = datetime.now().isoformat()
+        optimized_prompt = extract_optimized_video_prompt(reply)
+
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'message': reply,
+            'optimized_prompt': optimized_prompt,
+            'history': agent_session['history'],
+        })
+
+    except requests.RequestException as e:
+        save_error_log('video_prompt_agent_request_error', {'session_id': (request.get_json(silent=True) or {}).get('session_id', '')}, {}, str(e))
+        return jsonify({'success': False, 'error': f'OpenAI 请求失败: {e}'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # ==================== Chat Session API ====================
 
 @app.route('/api/chat/session', methods=['POST'])
@@ -1051,42 +1332,54 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     return jsonify(response_payload)
 
 
-def _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config=None, model_id=None):
-    """调用 BytePlus Ark Seedream API 生成图片"""
+ARK_SEEDREAM_PRO_MAX_REFERENCES = 10
+ARK_SEEDREAM_PRO_SIZE_MAP = {
+    '1K': {
+        '1:1': '1024x1024', '4:3': '1152x864', '3:4': '864x1152',
+        '16:9': '1424x800', '9:16': '800x1424', '3:2': '1248x832',
+        '2:3': '832x1248', '21:9': '1568x672',
+    },
+    '2K': {
+        '1:1': '2048x2048', '4:3': '2368x1776', '3:4': '1776x2368',
+        '16:9': '2816x1584', '9:16': '1584x2816', '3:2': '2496x1664',
+        '2:3': '1664x2496', '21:9': '3136x1344',
+    },
+}
+ARK_SEEDREAM_OUTPUT_MIMES = {'png': 'image/png', 'jpeg': 'image/jpeg'}
+
+
+def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='png', watermark=False, provider_config=None, model_id=None):
+    """调用 BytePlus Ark Seedream 5.0 Pro API 生成单张图片。"""
     ark_cfg = provider_config or API_PROVIDERS.get('ark', {})
     api_key = ark_cfg.get('api_key', '')
     endpoint = ark_cfg.get('endpoint', '').rstrip('/')
-    model = model_id or ark_cfg.get('model', 'seedream-5-0-lite')
+    model = model_id or ark_cfg.get('model') or 'seedream-5-0-pro'
+    resolution = str(resolution or '1K').upper()
+    output_format = str(output_format or 'png').lower()
 
-    # seedream-5-0-lite 只支持 2K / 3K
-    SIZE_MAP = {
-        '2K': {
-            '1:1': '2048x2048', '4:3': '2304x1728', '3:4': '1728x2304',
-            '16:9': '2848x1600', '9:16': '1600x2848', '3:2': '2496x1664',
-            '2:3': '1664x2496', '21:9': '3136x1344',
-        },
-        '3K': {
-            '1:1': '3072x3072', '4:3': '3456x2592', '3:4': '2592x3456',
-            '16:9': '4096x2304', '9:16': '2304x4096', '3:2': '3744x2496',
-            '2:3': '2496x3744', '21:9': '4704x2016',
-        },
-    }
-    # 不支持的分辨率降级到 2K
-    res_map = SIZE_MAP.get(resolution, SIZE_MAP['2K'])
-    size = res_map.get(aspect_ratio, res_map.get('1:1', '2048x2048'))
+    if resolution not in ARK_SEEDREAM_PRO_SIZE_MAP:
+        return jsonify({'success': False, 'error': 'Seedream 5.0 Pro 仅支持 1K 或 2K', 'error_type': 'invalid_resolution'}), 400
+    if aspect_ratio not in ARK_SEEDREAM_PRO_SIZE_MAP[resolution]:
+        return jsonify({'success': False, 'error': f'Seedream 5.0 Pro 不支持当前比例: {aspect_ratio}', 'error_type': 'invalid_aspect_ratio'}), 400
+    if output_format not in ARK_SEEDREAM_OUTPUT_MIMES:
+        return jsonify({'success': False, 'error': '输出格式仅支持 png 或 jpeg', 'error_type': 'invalid_output_format'}), 400
+
+    size = ARK_SEEDREAM_PRO_SIZE_MAP[resolution][aspect_ratio]
 
     body = {
         'model': model,
         'prompt': prompt,
         'size': size,
         'response_format': 'b64_json',
-        'watermark': False,
-        'output_format': 'png',
-        'sequential_image_generation': 'disabled',
+        'watermark': bool(watermark),
+        'output_format': output_format,
+        'optimize_prompt_options': {'mode': 'standard'},
     }
 
     # 参考图（取 parts 中的 inlineData）
     ref_images = [p['inlineData']['data'] for p in parts if 'inlineData' in p]
+    if len(ref_images) > ARK_SEEDREAM_PRO_MAX_REFERENCES:
+        return jsonify({'success': False, 'error': 'Seedream 5.0 Pro 最多支持10张参考图', 'error_type': 'too_many_images'}), 400
     if len(ref_images) == 1:
         body['image'] = f"data:image/png;base64,{ref_images[0]}"
     elif len(ref_images) > 1:
@@ -1097,10 +1390,13 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config
 
     print(f'Using API: ARK, URL: {url}, Model: {model}, Size: {size}')
 
-    req_info = {'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution, 'size': size}
+    req_info = {
+        'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
+        'size': size, 'output_format': output_format, 'watermark': bool(watermark),
+    }
 
     try:
-        response = requests.post(url, headers=headers, json=body, timeout=120)
+        response = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
     except Exception as e:
         save_error_log('ark_request_error', req_info, {}, str(e))
         return jsonify({'success': False, 'error': f'Ark API 请求失败: {e}', 'error_type': 'request_error'}), 500
@@ -1117,15 +1413,18 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config
     for item in resp_data.get('data', []):
         if 'error' in item:
             continue
+        item_format = str(item.get('output_format') or output_format).lower()
+        mime_type = ARK_SEEDREAM_OUTPUT_MIMES.get(item_format, ARK_SEEDREAM_OUTPUT_MIMES[output_format])
         if item.get('b64_json'):
-            images.append(f"data:image/jpeg;base64,{item['b64_json']}")
+            images.append(f"data:{mime_type};base64,{item['b64_json']}")
         elif item.get('url'):
             # 下载 url 转 base64
             try:
                 img_resp = requests.get(item['url'], timeout=60)
                 if img_resp.status_code == 200:
                     b64 = base64.b64encode(img_resp.content).decode('utf-8')
-                    images.append(f"data:image/jpeg;base64,{b64}")
+                    response_mime = img_resp.headers.get('Content-Type', '').split(';', 1)[0]
+                    images.append(f"data:{response_mime or mime_type};base64,{b64}")
             except Exception:
                 pass
 
@@ -1133,7 +1432,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config
         save_error_log('ark_generation_failed', req_info, resp_data, '未能生成图片')
         return jsonify({'success': False, 'error': '未能生成图片', 'error_type': 'generation_failed'}), 500
 
-    return jsonify({'success': True, 'images': images, 'thinking': ''})
+    return jsonify({'success': True, 'images': images, 'thinking': '', 'output_format': output_format})
 
 
 @app.route('/api/generate', methods=['POST'])
@@ -1148,7 +1447,9 @@ def generate():
         if has_images:
             prompt = request.form.get('prompt')
             aspect_ratio = request.form.get('aspect_ratio', '3:4')
-            resolution = request.form.get('resolution', '2K')
+            resolution = request.form.get('resolution', '1K')
+            output_format = request.form.get('output_format', 'png').lower()
+            watermark = request.form.get('watermark', 'false').lower() == 'true'
             use_search = request.form.get('use_search', 'false').lower() == 'true'
             enable_chat = request.form.get('enable_chat', 'false').lower() == 'true'
             session_id = request.form.get('session_id', None)
@@ -1159,7 +1460,11 @@ def generate():
             data = request.json or {}
             prompt = data.get('prompt')
             aspect_ratio = data.get('aspect_ratio', '9:16')
-            resolution = data.get('resolution', '2K')
+            resolution = data.get('resolution', '1K')
+            output_format = str(data.get('output_format', 'png')).lower()
+            watermark = data.get('watermark', False)
+            if not isinstance(watermark, bool):
+                watermark = str(watermark).lower() == 'true'
             use_search = data.get('use_search', False)
             enable_chat = data.get('enable_chat', False)
             session_id = data.get('session_id', None)
@@ -1183,8 +1488,9 @@ def generate():
         print(f'Chat mode: {enable_chat}, Session ID: {session_id}')
         if has_images:
             images_files = request.files.getlist('images')
-            if len(images_files) > 14:
-                return jsonify({'success': False, 'error': '最多只能上传14张图片'}), 400
+            max_reference_images = ARK_SEEDREAM_PRO_MAX_REFERENCES if provider == 'ark' else 14
+            if len(images_files) > max_reference_images:
+                return jsonify({'success': False, 'error': f'当前 Provider 最多只能上传{max_reference_images}张图片'}), 400
             print(f'Number of reference images: {len(images_files)}')
 
         # 构建 parts
@@ -1200,15 +1506,25 @@ def generate():
         parts.append({"text": prompt})
 
         # 记录任务
-        params = {'aspect_ratio': aspect_ratio, 'resolution': resolution, 'use_search': use_search, 'think_level': think_level, 'enable_chat': enable_chat}
+        params = {
+            'aspect_ratio': aspect_ratio, 'resolution': resolution,
+            'use_search': use_search, 'think_level': think_level, 'enable_chat': enable_chat,
+        }
         params['provider'] = provider
         params['model'] = model_id
+        if provider == 'ark':
+            params['output_format'] = output_format
+            params['watermark'] = watermark
+            params['prompt_optimization'] = 'standard'
         db_task_id = task_db.create_task('image', prompt, params, provider=provider)
         task_db.update_task(db_task_id, status='processing')
 
         # Ark 走独立的 Seedream API
         if provider == 'ark':
-            resp = _generate_ark_image(prompt, aspect_ratio, resolution, parts, provider_config, model_id)
+            resp = _generate_ark_image(
+                prompt, aspect_ratio, resolution, parts, output_format, watermark,
+                provider_config, model_id,
+            )
         else:
             resp = _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level, provider, model_id)
         if isinstance(resp, tuple):
@@ -1237,8 +1553,9 @@ def generate():
             local_images = []
             for i, img_b64 in enumerate(resp_data.get('images', [])):
                 if img_b64.startswith('data:'):
-                    b64_data = img_b64.split(',', 1)[1]
-                    fname = f'image_{i}.png'
+                    header, b64_data = img_b64.split(',', 1)
+                    extension = 'jpg' if 'image/jpeg' in header.lower() else 'png'
+                    fname = f'image_{i}.{extension}'
                     with open(os.path.join(output_dir, fname), 'wb') as f:
                         f.write(base64.b64decode(b64_data))
                     local_images.append(f'/api/tasks/{db_task_id}/file/{fname}')

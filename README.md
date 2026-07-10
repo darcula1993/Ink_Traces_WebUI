@@ -28,7 +28,7 @@ Ink Traces WebUI is a local web workstation for prompt-driven image and video cr
 |---|---|
 | Image generation | Text-to-image and image-to-image through one unified workflow |
 | Video generation | Keyframe mode and reference mode for video, image, and audio inputs |
-| Providers | Google Vertex AI, Google AI Studio, BytePlus Ark Seedream, BytePlus Ark/Jiekou Seedance |
+| Providers | Google Vertex AI, Google AI Studio, BytePlus Ark Seedream 5.0 Pro, BytePlus Ark/Jiekou Seedance |
 | Prompt workflow | Prompt Vault, fullscreen editor, multi-tab workspaces, reusable saved prompts |
 | Runtime history | SQLite task queue for image/video results, local file recovery, task restore |
 | Controls | Aspect ratio, resolution, thinking level, Google Search grounding, chat mode |
@@ -84,6 +84,8 @@ Only templates are committed. Local runtime files are ignored by Git.
 | `config.json.example` | Public config template with empty credentials | Committed |
 | `config.json` | Local credentials, ports, provider settings, auth settings | Ignored |
 | `.flask_secret_key` | Auto-generated local Flask session secret when not set in config | Ignored |
+| `prompts/video_prompt_rewriter.md` | System prompt used by quick one-click video prompt rewriting | Committed |
+| `prompts/video_prompt_optimizer.md` | Skill-style system prompt used by the interactive video Prompt Agent | Committed |
 | `server/prompts.json.example` | Sample Prompt Vault data | Committed |
 | `server/prompts.json` | Local Prompt Vault data created by the app | Ignored |
 
@@ -92,11 +94,11 @@ Minimal image provider setup:
 ```json
 {
   "api": {
-    "default_provider": "ai_studio",
-    "ai_studio": {
-      "key": "<your-ai-studio-key>",
-      "model_id": "gemini-3.1-flash-image-preview",
-      "endpoint": "generativelanguage.googleapis.com"
+    "default_provider": "ark",
+    "ark": {
+      "api_key": "<your-byteplus-ark-key>",
+      "model": "seedream-5-0-pro",
+      "endpoint": "https://ark.ap-southeast.bytepluses.com"
     }
   }
 }
@@ -105,6 +107,8 @@ Minimal image provider setup:
 For video reference uploads through Ark, set `server.public_host`, `server.public_port`, and `server.public_scheme` so external services can fetch uploaded reference files.
 
 Set `auth.secret_key` or `INK_TRACES_SECRET_KEY` for controlled deployments. If neither is set, the backend creates an ignored local `.flask_secret_key` file so browser sessions survive restarts without committing secrets.
+
+For video prompt optimization, set `openai.api_key` in `config.json` or export `OPENAI_API_KEY`. Quick Fix uses `prompts/video_prompt_rewriter.md`; Prompt Agent uses the skill-style workflow in `prompts/video_prompt_optimizer.md`.
 
 ## Project Layout
 

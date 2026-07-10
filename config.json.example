@@ -20,7 +20,7 @@
     "port": 4545
   },
   "api": {
-    "default_provider": "ai_studio",
+    "default_provider": "ark",
     "default_model": "gemini-3.1-flash-image-preview",
     "available_models": [
       {
@@ -47,7 +47,7 @@
     },
     "ark": {
       "api_key": "",
-      "model": "",
+      "model": "seedream-5-0-pro",
       "endpoint": "https://ark.ap-southeast.bytepluses.com"
     }
   },
@@ -70,5 +70,14 @@
       "endpoint": "https://ark.ap-southeast.bytepluses.com",
       "model": ""
     }
+  },
+  "openai": {
+    "api_key": "",
+    "endpoint": "https://api.openai.com",
+    "model": "gpt-5",
+    "rewriter_prompt_file": "video_prompt_rewriter.md",
+    "agent_prompt_file": "video_prompt_optimizer.md",
+    "prompt_file": "video_prompt_optimizer.md",
+    "max_output_tokens": 1600
   }
 }
