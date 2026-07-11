@@ -14,6 +14,7 @@ GitHub: `darcula1993/Ink_Traces_WebUI`
 浏览器 (localhost:4545)
   ↓ Vite dev server proxy /api → localhost:5000
 Flask 后端 (localhost:5000)
+  ↓ SQLite 任务 + 独立 Worker
   ↓ REST API (HTTPS)
   ├── Google Gemini API (Vertex AI 或 AI Studio) — 图片生成
   ├── BytePlus Ark (Seedream 5.0 Pro) — 图片生成
@@ -22,7 +23,7 @@ Flask 后端 (localhost:5000)
 
 - Vite 开发服务器将 `/api` 请求代理到 Flask 后端（见 `client/vite.config.js`，timeout 300s）
 - 所有运行配置集中在本地 `config.json`；仓库只提交 `config.json.example`
-- `start.sh` / `stop.sh` 管理前后端进程生命周期
+- `start.sh` / `stop.sh` 管理 Gunicorn、Worker 和前端进程生命周期
 - `clean.sh` 清理临时文件（upload_video/, output/, error_logs/, tasks.db, logs）
 
 ---
@@ -32,9 +33,11 @@ Flask 后端 (localhost:5000)
 | 文件 | 职责 |
 |---|---|
 | `config.json.example` | 全局配置示例：API 密钥、Provider、模型、端口、安全设置、认证 |
-| `server/prompts.json.example` | Prompt Vault 示例数据；本地 `server/prompts.json` 被忽略 |
-| `server/app.py` (~1620行) | Flask 后端，所有 API 路由、Gemini/Ark 调用、视频轮询 |
-| `server/tasks.py` | SQLite 任务队列 CRUD |
+| `server/prompts.json.example` | Prompt Vault 示例数据；首次使用时导入 SQLite |
+| `server/app.py` | Flask API 与 Provider 适配 |
+| `server/worker.py` | 有界并发任务执行、视频轮询、资源维护 |
+| `server/tasks.py` | SQLite 任务、lease、资产、Prompt、Worker 心跳 |
+| `server/storage.py` | 媒体原子写入与生命周期清理 |
 | `client/src/App.jsx` (~1140行) | 主组件，图片/视频双模式、状态管理、API 调用 |
 | `client/src/components/TextToImage.jsx` | Prompt 输入 textarea |
 | `client/src/components/ImageToImage.jsx` | 参考图上传（点击/粘贴）；Seedream 5.0 Pro 最多10张 |
@@ -49,7 +52,7 @@ Flask 后端 (localhost:5000)
 ## 认证系统
 
 - Flask session-based，`@before_request` 中间件检查
-- 免认证路径：`/api/login`、`/api/auth/check`、`/api/health`、`/api/upload_video/*`（供 Ark 下载）
+- 免认证路径：`/api/login`、`/api/auth/check`、`/api/health`、`/api/live`、`/api/ready`、`/api/upload_video/*`（供 Ark 下载）
 - 非 `/api` 路径不拦截（静态资源）
 - `config.json` 中 `auth.username` 为空则禁用认证
 - 前端 `AuthGate` 与 `LoginPage` 目前内联在 `client/src/App.jsx`，由 `main.jsx` 渲染默认导出的 `AuthGate`
@@ -73,12 +76,13 @@ POST /api/generate
 
 - 无文件 → 文生图（JSON body）
 - 有文件 → 图生图（multipart/form-data）
+- 普通模式返回 `202 + task_id`，前端轮询本地任务；Chat 模式保持同步
 - Gemini: 支持 14 种宽高比 × 4 种分辨率、思考深度、搜索增强、Chat 模式
 - Ark: Seedream 5.0 Pro，支持 1K/2K、PNG/JPEG、watermark；prompt optimization 固定为 standard，无 think/search/chat
 
 ### 图片处理
 
-所有上传图片统一处理：`f.seek(0) → f.read() → Image.open(io.BytesIO(raw)) → convert('RGB') → PNG base64`。确保无论来源（本地上传、fetch URL blob）都能正确转为 PNG。
+上传图片先原子保存为任务输入 PNG，Worker 调用 Provider 后把结果写入 `output/image/{task_id}/`。SQLite 只保存 URL 和元数据，不保存 Base64。
 
 ---
 
@@ -93,8 +97,8 @@ POST /api/generate
 
 1. 前端上传参考视频 → `POST /api/upload_video` → 保存到 `upload_video/` 目录 → 返回公网 URL
 2. 前端提交生成请求 → `POST /api/video/generate` → 调用 Ark API → 返回 task_id
-3. 后台线程轮询 Ark 任务状态 → 完成后下载视频/尾帧到 `output/video/{task_id}/`
-4. 前端轮询 `/api/video/task` 获取状态和结果
+3. Worker 用 SQLite lease 领取任务并轮询 Ark 状态 → 完成后流式下载视频/尾帧
+4. 前端轮询 `/api/tasks/{db_task_id}` 获取本地状态和结果
 
 ### 视频模式
 
@@ -110,8 +114,8 @@ POST /api/generate
 
 ### 任务恢复
 
-- 服务启动时 `_recover_processing_tasks()` 自动恢复所有 `processing` 状态的视频任务轮询
-- 解决服务重启后轮询线程丢失的问题
+- Worker 通过 `next_run_at`、`lease_owner`、`lease_until` 自动恢复未完成任务
+- 多线程 Worker 有界并发，视频轮询优先，异常请求使用退避重试
 
 ### 价格估算
 
@@ -124,8 +128,8 @@ POST /api/generate
 ## 任务队列 (Task Queue)
 
 - SQLite 存储（`tasks.db`），支持图片和视频任务
-- 图片任务：同步完成后记录结果
-- 视频任务：异步轮询，后台线程更新状态
+- 普通图片任务：异步执行；Chat 图片任务保留同步行为
+- 视频任务：Worker 异步轮询，浏览器不直接查询 Provider
 - 前端 Queue 面板：查看历史、恢复任务、删除任务
 - 删除任务时清理关联的 output 目录和上传的视频文件
 
@@ -179,8 +183,8 @@ POST /api/generate
 2. **双仓库工作流** — `/root/Nanobanana/`（dev 分支开发）→ rsync 同步到 `/root/Ink_Traces_WebUI/`（排除 config.json、server/prompts.json）→ push GitHub
 3. **Ark 视频参考下载** — `public_host` 必须配置为 Ark 可访问的公网地址，`/api/upload_video/` 免认证
 4. **图片格式** — 所有上传图片强制转 PNG（Ark 不接受 JPEG 格式的 keyframe）
-5. **服务重启** — `./stop.sh && ./start.sh`，视频任务会自动恢复轮询
-6. **后端单进程** — Flask debug 模式，不适合高并发
+5. **服务重启** — `./stop.sh && ./start.sh`，未完成任务会通过 SQLite lease 恢复
+6. **后端进程** — Gunicorn 单进程多线程 + 独立有界并发 Worker
 7. **Chat 会话无持久化** — 存在内存中，重启丢失
 8. **Vite proxy timeout** — 设为 300s，视频生成可能耗时较长
 9. **安全过滤** — Gemini 即使 `BLOCK_NONE` 仍有底线过滤

@@ -1,29 +1,12 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import ReactDOM from 'react-dom'
 import { AlertTriangle, Download, Film, Maximize2, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import GenerationLoading from './GenerationLoading'
 
-const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error, eta }) => {
+const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error, taskStatus, taskId, provider }) => {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [lastFrameExpanded, setLastFrameExpanded] = useState(false)
-
-  // 模拟进度 + 计时
-  const [elapsed, setElapsed] = useState(0)
-  const timerRef = useRef(null)
-
-  useEffect(() => {
-    if (isLoading) {
-      setElapsed(0)
-      timerRef.current = setInterval(() => setElapsed(t => t + 1), 1000)
-    } else {
-      clearInterval(timerRef.current)
-    }
-    return () => clearInterval(timerRef.current)
-  }, [isLoading])
-
-  // 视频一般 60-180s，用对数曲线模拟到 95% 封顶
-  const simProgress = isLoading ? Math.min(95, Math.round(30 * Math.log(1 + elapsed / 10))) : 0
-  const formatTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 
   // Draggable last frame
   const [framePos, setFramePos] = useState({ x: 16, y: 60 })
@@ -56,34 +39,15 @@ const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error
   }, [])
 
   if (isLoading) {
-    return (
-      <div className="flex-grow flex flex-col items-center justify-center p-8 relative">
-        <div className="w-20 h-20 border-2 border-nexus-border rounded-lg mb-6 relative flex items-center justify-center bg-[#050505]">
-          <div className="absolute inset-3 border-2 border-nexus-green rounded-sm animate-[spin_2s_linear_infinite]"></div>
-          <div className="absolute inset-0 border border-nexus-green/30 rounded-lg animate-pulse"></div>
-        </div>
-        <h3 className="text-sm font-mono tracking-widest text-nexus-text uppercase animate-pulse">Rendering Video...</h3>
-        <div className="mt-4 w-56">
-          <div className="h-1 bg-nexus-border rounded-full overflow-hidden">
-            <div className="h-full bg-nexus-green transition-all duration-1000 ease-out" style={{ width: `${progress > 0 ? progress : simProgress}%` }} />
-          </div>
-          <div className="text-xs font-mono text-nexus-text mt-2 text-center">
-            {progress > 0 ? `${progress}%` : `~${simProgress}%`} · {formatTime(elapsed)}{eta > 0 ? ` · ETA ${eta}s` : ''}
-          </div>
-          <div className="text-[10px] font-mono text-nexus-text/40 mt-1 text-center">
-            {elapsed < 30 ? 'Queuing...' : elapsed < 90 ? 'Generating frames...' : 'Encoding video...'}
-          </div>
-        </div>
-      </div>
-    )
+    return <GenerationLoading type="video" status={taskStatus || 'submitting'} progress={progress} taskId={taskId} provider={provider} />
   }
 
   if (error) {
     return (
       <div className="flex-grow flex flex-col items-center justify-center p-8 text-center">
-        <AlertTriangle size={48} className="text-red-500 mb-6 drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
-        <h3 className="text-lg font-bold font-mono text-red-500 uppercase mb-3">Render Fault</h3>
-        <p className="text-sm font-mono text-red-400/80 max-w-md">{error}</p>
+        <AlertTriangle size={40} className="mb-5 text-nexus-red" />
+        <h3 className="mb-2 text-base font-semibold text-nexus-text-light">视频生成失败</h3>
+        <p className="max-w-md text-sm text-nexus-red">{error}</p>
       </div>
     )
   }
@@ -92,21 +56,21 @@ const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error
     return (
       <>
         <div className="flex-grow flex flex-col h-full min-h-0 relative group">
-          <div className="h-12 border-b border-nexus-border flex items-center justify-between px-6 shrink-0 bg-[#0f0f0f]">
-            <div className="text-xs font-mono text-nexus-text tracking-widest flex items-center gap-2">
+          <div className="flex h-11 shrink-0 items-center justify-between border-b border-nexus-border bg-nexus-panel px-4">
+            <div className="flex items-center gap-2 text-xs font-medium text-nexus-text-light">
               <span className="w-2 h-2 rounded-full bg-nexus-green"></span>
-              VIDEO OUTPUT TERMINAL
+              视频结果
             </div>
-            <div className="flex items-center gap-4">
-              <button onClick={() => setIsFullscreen(true)} className="text-nexus-text hover:text-white transition-colors">
+            <div className="flex items-center gap-1">
+              <button aria-label="全屏播放" title="全屏播放" onClick={() => setIsFullscreen(true)} className="icon-button size-8">
                 <Maximize2 size={16} />
               </button>
-              <a href={videoUrl} download={`render_${Date.now()}.mp4`} className="text-nexus-text hover:text-white transition-colors">
+              <a aria-label="下载视频" title="下载视频" href={videoUrl} download={`render_${Date.now()}.mp4`} className="icon-button size-8">
                 <Download size={16} />
               </a>
             </div>
           </div>
-          <div className="flex-grow min-h-0 relative overflow-hidden bg-[#050505] flex items-center justify-center p-4">
+          <div className="relative flex min-h-0 flex-grow items-center justify-center overflow-hidden bg-[#080a0d] p-4">
             <div className="absolute inset-0 bg-nexus-grid bg-nexus-grid-size opacity-30 pointer-events-none"></div>
             <video
               src={videoUrl}
@@ -124,12 +88,12 @@ const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error
                 style={{ left: framePos.x, top: framePos.y, width: lastFrameExpanded ? 320 : 140, height: lastFrameExpanded ? 'auto' : 100 }}
               >
                 <div className="flex items-center justify-between px-2 py-1 border-b border-nexus-border/50">
-                  <span className="text-[9px] font-mono text-nexus-text tracking-widest">LAST FRAME</span>
+                  <span className="text-[10px] font-medium text-nexus-text">尾帧</span>
                   <div className="flex gap-1">
-                    <button onClick={() => setLastFrameExpanded(!lastFrameExpanded)} className="text-nexus-text hover:text-nexus-green transition-colors">
+                    <button aria-label="切换尾帧尺寸" title="切换尺寸" onClick={() => setLastFrameExpanded(!lastFrameExpanded)} className="text-nexus-text hover:text-nexus-green transition-colors">
                       <Maximize2 size={10} />
                     </button>
-                    <a href={lastFrameUrl} download={`lastframe_${Date.now()}.png`} className="text-nexus-text hover:text-nexus-green transition-colors">
+                    <a aria-label="下载尾帧" title="下载尾帧" href={lastFrameUrl} download={`lastframe_${Date.now()}.png`} className="text-nexus-text hover:text-nexus-green transition-colors">
                       <Download size={10} />
                     </a>
                   </div>
@@ -151,14 +115,17 @@ const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error
             {isFullscreen && (
               <motion.div
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                role="dialog"
+                aria-modal="true"
+                aria-label="全屏视频预览"
                 className="fixed inset-0 bg-black/95 z-[999] flex flex-col items-center justify-center p-8 backdrop-blur-sm"
                 onClick={() => setIsFullscreen(false)}
               >
                 <div className="absolute top-6 right-6 flex items-center gap-6 z-10">
-                  <a href={videoUrl} download={`render_${Date.now()}.mp4`} onClick={e => e.stopPropagation()} className="text-nexus-text hover:text-white transition-colors p-2 bg-[#111] rounded-lg border border-nexus-border hover:border-nexus-green">
+                  <a aria-label="下载视频" title="下载视频" href={videoUrl} download={`render_${Date.now()}.mp4`} onClick={e => e.stopPropagation()} className="icon-button border-nexus-border bg-nexus-surface">
                     <Download size={20} />
                   </a>
-                  <button onClick={() => setIsFullscreen(false)} className="text-nexus-text hover:text-white transition-colors p-2 bg-[#111] rounded-lg border border-nexus-border hover:border-red-500">
+                  <button aria-label="关闭全屏预览" title="关闭" onClick={() => setIsFullscreen(false)} className="icon-button border-nexus-border bg-nexus-surface hover:text-nexus-red">
                     <X size={20} />
                   </button>
                 </div>
@@ -179,13 +146,11 @@ const VideoResultDisplay = ({ isLoading, videoUrl, lastFrameUrl, progress, error
   }
 
   return (
-    <div className="flex-grow flex flex-col items-center justify-center p-8 text-center text-nexus-text relative overflow-hidden bg-[#0a0a0a]">
+    <div className="relative flex flex-grow flex-col items-center justify-center overflow-hidden bg-[#080a0d] p-8 text-center text-nexus-text">
       <div className="absolute inset-0 bg-nexus-grid bg-nexus-grid-size opacity-10 pointer-events-none"></div>
-      <Film size={64} className="opacity-10 mb-6" strokeWidth={1} />
-      <h3 className="text-sm font-mono tracking-[0.2em] uppercase mb-4 opacity-50">Video Output Terminal</h3>
-      <div className="px-6 py-3 border border-nexus-border border-dashed rounded-lg text-xs font-mono opacity-40 bg-[#111]">
-        Waiting for render job...
-      </div>
+      <Film size={48} className="mb-4 opacity-15" strokeWidth={1.25} />
+      <h3 className="mb-1 text-sm font-medium text-nexus-text-light">视频结果</h3>
+      <p className="text-xs text-nexus-muted">生成结果将在这里显示</p>
     </div>
   )
 }

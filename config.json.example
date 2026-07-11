@@ -13,7 +13,11 @@
     "cors_origins": [],
     "request_timeout_seconds": 120,
     "poll_timeout_seconds": 30,
-    "download_timeout_seconds": 120
+    "download_timeout_seconds": 120,
+    "worker_concurrency": 3,
+    "worker_lease_seconds": 900,
+    "cleanup_interval_seconds": 3600,
+    "orphan_grace_hours": 24
   },
   "client": {
     "host": "0.0.0.0",
@@ -48,7 +52,8 @@
     "ark": {
       "api_key": "",
       "model": "seedream-5-0-pro",
-      "endpoint": "https://ark.ap-southeast.bytepluses.com"
+      "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "request_timeout_seconds": 600
     }
   },
   "safety": {

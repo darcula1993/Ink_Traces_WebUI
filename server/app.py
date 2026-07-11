@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, session
+from flask import Flask, request, jsonify, send_file, session, g
 from flask_cors import CORS
 from werkzeug.exceptions import ClientDisconnected, RequestEntityTooLarge
 import os
@@ -6,17 +6,27 @@ import base64
 import requests
 import io
 import json
-import threading
 import copy
 import secrets
 import re
+import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PIL import Image
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 import tasks as task_db
+import storage
+from http_client import HTTP
+from logging_config import configure_logging
+
+configure_logging()
 
 app = Flask(__name__)
+
+
+@app.teardown_appcontext
+def close_database_connection(_error=None):
+    task_db.close_db()
 
 # Flask配置 - 文件上传限制
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
@@ -40,6 +50,10 @@ BUILTIN_DEFAULT_CONFIG = {
         'request_timeout_seconds': 120,
         'poll_timeout_seconds': 30,
         'download_timeout_seconds': 120,
+        'worker_concurrency': 3,
+        'worker_lease_seconds': 900,
+        'cleanup_interval_seconds': 3600,
+        'orphan_grace_hours': 24,
     },
     'client': {'host': '0.0.0.0', 'port': 4545},
     'api': {
@@ -72,6 +86,7 @@ BUILTIN_DEFAULT_CONFIG = {
             'api_key': '',
             'model': 'seedream-5-0-pro',
             'endpoint': 'https://ark.ap-southeast.bytepluses.com',
+            'request_timeout_seconds': 600,
         },
     },
     'safety': {
@@ -112,6 +127,21 @@ def deep_merge(defaults, overrides):
         else:
             merged[key] = value
     return merged
+
+
+def as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if normalized in ('true', '1', 'yes', 'on'):
+        return True
+    if normalized in ('false', '0', 'no', 'off', ''):
+        return False
+    return default
 
 def load_config():
     """加载配置文件"""
@@ -212,9 +242,15 @@ def logout():
     return jsonify({'success': True})
 
 @app.before_request
+def start_request_timer():
+    g.request_started_at = time.perf_counter()
+    g.request_id = request.headers.get('X-Request-ID') or uuid.uuid4().hex
+
+
+@app.before_request
 def require_login():
     # 不需要认证的路径
-    open_paths = ['/api/login', '/api/auth/check', '/api/health']
+    open_paths = ['/api/login', '/api/auth/check', '/api/health', '/api/live', '/api/ready']
     if not AUTH_CONFIG.get('username'):
         return  # 未配置 auth 则不启用认证
     if request.path in open_paths:
@@ -225,6 +261,23 @@ def require_login():
         return
     if not session.get('logged_in'):
         return jsonify({'success': False, 'error': '未登录'}), 401
+
+@app.after_request
+def log_request(response):
+    started_at = getattr(g, 'request_started_at', None)
+    duration_ms = round((time.perf_counter() - started_at) * 1000, 2) if started_at else None
+    response.headers['X-Request-ID'] = getattr(g, 'request_id', '')
+    app.logger.info(
+        'request_completed',
+        extra={
+            'request_id': getattr(g, 'request_id', None),
+            'method': request.method,
+            'path': request.path,
+            'status': response.status_code,
+            'duration_ms': duration_ms,
+        },
+    )
+    return response
 
 # API Provider 配置
 CURRENT_PROVIDER = config['api'].get('default_provider', 'ark')
@@ -302,13 +355,15 @@ PUBLIC_PORT = config['server'].get('public_port', SERVER_PORT)
 PUBLIC_SCHEME = config['server'].get('public_scheme', 'http')
 
 # 上传视频目录（供外部服务下载的公网可访问视频参考文件）
-UPLOAD_VIDEO_DIR = os.path.join(PROJECT_ROOT, 'upload_video')
-if not os.path.exists(UPLOAD_VIDEO_DIR):
-    os.makedirs(UPLOAD_VIDEO_DIR)
+UPLOAD_VIDEO_DIR = storage.UPLOAD_VIDEO_DIR
 
 REQUEST_TIMEOUT = int(config.get('server', {}).get('request_timeout_seconds', 120) or 120)
 POLL_TIMEOUT = int(config.get('server', {}).get('poll_timeout_seconds', 30) or 30)
 DOWNLOAD_TIMEOUT = int(config.get('server', {}).get('download_timeout_seconds', 120) or 120)
+ARK_IMAGE_TIMEOUT = max(
+    REQUEST_TIMEOUT,
+    int(config.get('api', {}).get('ark', {}).get('request_timeout_seconds', 600) or 600),
+)
 ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.webm'}
 ALLOWED_VIDEO_MIMES = {'video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm'}
 
@@ -335,8 +390,14 @@ def save_temp_file(file_storage, suffix='.mp4'):
     fname = f'{file_id}{ext}'
     filepath = os.path.join(UPLOAD_VIDEO_DIR, fname)
     file_storage.seek(0)
-    with open(filepath, 'wb') as f:
-        f.write(file_storage.read())
+    temp_path = f'{filepath}.tmp'
+    try:
+        file_storage.save(temp_path)
+        os.replace(temp_path, filepath)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    storage.register_file(None, 'video_upload', filepath, mime or None, storage.upload_expiry())
     public_url = build_public_url(f'/api/upload_video/{fname}')
     return filepath, public_url
 
@@ -414,6 +475,8 @@ def redact_sensitive(value):
             key_lower = str(key).lower()
             if key_lower in SENSITIVE_KEYS or any(part in key_lower for part in ('api_key', 'secret', 'password', 'token')):
                 redacted[key] = '***REDACTED***'
+            elif key_lower in ('data', 'b64_json') and isinstance(item, str) and len(item) > 1024:
+                redacted[key] = f'<omitted {len(item)} characters>'
             elif key_lower in ('api_url', 'url') and isinstance(item, str):
                 redacted[key] = redact_url(item)
             else:
@@ -421,8 +484,11 @@ def redact_sensitive(value):
         return redacted
     if isinstance(value, list):
         return [redact_sensitive(item) for item in value]
-    if isinstance(value, str) and value.lower().startswith('bearer '):
-        return 'Bearer ***REDACTED***'
+    if isinstance(value, str):
+        if value.lower().startswith('bearer '):
+            return 'Bearer ***REDACTED***'
+        if value.startswith('data:') and len(value) > 1024:
+            return f'<omitted data URL: {len(value)} characters>'
     return value
 
 # Chat会话存储 (内存中存储，重启后会丢失)
@@ -477,27 +543,22 @@ def save_error_log(error_type, request_data, response_data, error_message=None):
         return None
 
 def load_prompts():
-    """从文件加载prompts"""
+    """Load prompts from SQLite, importing the legacy JSON file once."""
+    prompts = task_db.list_prompts()
+    if prompts:
+        return prompts
+
     source_file = PROMPTS_FILE if os.path.exists(PROMPTS_FILE) else PROMPTS_EXAMPLE_FILE
-    if os.path.exists(source_file):
-        try:
-            with open(source_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading prompts: {e}")
-            return []
-    return []
-
-def save_prompts(prompts):
-    """保存prompts到文件"""
+    if not os.path.exists(source_file):
+        return []
     try:
-        with open(PROMPTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(prompts, f, ensure_ascii=False, indent=2)
-        return True
+        with open(source_file, 'r', encoding='utf-8') as f:
+            legacy_prompts = json.load(f)
+        task_db.import_prompts(legacy_prompts)
+        return task_db.list_prompts()
     except Exception as e:
-        print(f"Error saving prompts: {e}")
-        return False
-
+        print(f"Error importing prompts: {e}")
+        return []
 
 def load_system_prompt(filename):
     """Load a versioned system prompt from the repository prompt directory."""
@@ -551,11 +612,11 @@ def call_openai_response(system_prompt, input_payload, error_context):
         'max_output_tokens': max_output_tokens,
         'store': False,
     }
-    response = requests.post(
+    response = HTTP.post(
         f'{endpoint}/v1/responses',
         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
         json=body,
-        timeout=REQUEST_TIMEOUT,
+        timeout=(10, REQUEST_TIMEOUT),
     )
     response_data = response.json() if response.text else {}
     if response.status_code >= 400:
@@ -801,6 +862,35 @@ def parse_safety_error(response_data):
 def health():
     return jsonify({'status': 'ok', 'message': 'Server is running'})
 
+
+@app.route('/api/live', methods=['GET'])
+def live():
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/ready', methods=['GET'])
+def ready():
+    try:
+        database_ok = task_db.ping()
+        disk = storage.storage_usage()
+        worker = task_db.latest_worker_heartbeat()
+        worker_ok = False
+        if worker and worker.get('last_seen_at'):
+            last_seen = datetime.fromisoformat(worker['last_seen_at'])
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            worker_ok = (datetime.now(timezone.utc) - last_seen).total_seconds() < 30
+        ready_status = database_ok and worker_ok
+        return jsonify({
+            'status': 'ready' if ready_status else 'not_ready',
+            'database': database_ok,
+            'disk_free_bytes': disk['free'],
+            'worker_ok': worker_ok,
+            'worker': worker,
+        }), 200 if ready_status else 503
+    except Exception as e:
+        return jsonify({'status': 'not_ready', 'error': str(e)}), 503
+
 # ==================== API Provider Switching ====================
 
 @app.route('/api/provider', methods=['GET'])
@@ -946,18 +1036,11 @@ def create_prompt():
         if not text or not text.strip():
             return jsonify({'success': False, 'error': 'Prompt text is required'}), 400
 
-        prompts = load_prompts()
-        new_prompt = {
-            'id': int(datetime.now().timestamp() * 1000),  # 使用时间戳作为ID
-            'text': text.strip(),
-            'createdAt': datetime.now().isoformat()
-        }
-        prompts.insert(0, new_prompt)  # 添加到列表开头
-
-        if save_prompts(prompts):
-            return jsonify({'success': True, 'prompt': new_prompt})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to save prompt'}), 500
+        new_prompt = task_db.create_prompt(
+            text.strip(),
+            created_at=task_db.utcnow(),
+        )
+        return jsonify({'success': True, 'prompt': new_prompt})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -971,22 +1054,9 @@ def update_prompt(prompt_id):
         if not new_text or not new_text.strip():
             return jsonify({'success': False, 'error': 'Prompt text is required'}), 400
 
-        prompts = load_prompts()
-        updated = False
-
-        for prompt in prompts:
-            if prompt['id'] == prompt_id:
-                prompt['text'] = new_text.strip()
-                updated = True
-                break
-
-        if not updated:
+        if not task_db.update_prompt(prompt_id, new_text.strip()):
             return jsonify({'success': False, 'error': 'Prompt not found'}), 404
-
-        if save_prompts(prompts):
-            return jsonify({'success': True})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to save prompt'}), 500
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -994,17 +1064,9 @@ def update_prompt(prompt_id):
 def delete_prompt(prompt_id):
     """删除prompt"""
     try:
-        prompts = load_prompts()
-        original_length = len(prompts)
-        prompts = [p for p in prompts if p['id'] != prompt_id]
-
-        if len(prompts) == original_length:
+        if not task_db.delete_prompt(prompt_id):
             return jsonify({'success': False, 'error': 'Prompt not found'}), 404
-
-        if save_prompts(prompts):
-            return jsonify({'success': True})
-        else:
-            return jsonify({'success': False, 'error': 'Failed to delete prompt'}), 500
+        return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -1209,7 +1271,7 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     print(f'Using API: {provider.upper()}, URL: {redact_url(api_url)}')
 
     try:
-        response = requests.post(api_url, headers=headers, json=request_body, timeout=REQUEST_TIMEOUT)
+        response = HTTP.post(api_url, headers=headers, json=request_body, timeout=(10, REQUEST_TIMEOUT))
     except requests.RequestException as e:
         req_info = {
             'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
@@ -1354,6 +1416,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     api_key = ark_cfg.get('api_key', '')
     endpoint = ark_cfg.get('endpoint', '').rstrip('/')
     model = model_id or ark_cfg.get('model') or 'seedream-5-0-pro'
+    request_timeout = max(30, int(ark_cfg.get('request_timeout_seconds', ARK_IMAGE_TIMEOUT) or ARK_IMAGE_TIMEOUT))
     resolution = str(resolution or '1K').upper()
     output_format = str(output_format or 'png').lower()
 
@@ -1396,17 +1459,57 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     }
 
     try:
-        response = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+        response = HTTP.post(url, headers=headers, json=body, timeout=(10, request_timeout))
+    except requests.exceptions.ConnectTimeout as e:
+        save_error_log('ark_request_error', req_info, {}, str(e))
+        return jsonify({
+            'success': False,
+            'error': '连接 Ark API 超时，系统将自动重试',
+            'error_type': 'connect_timeout',
+            'retryable': True,
+            'error_details': {'message': str(e), 'timeout_seconds': 10},
+        }), 503
+    except requests.exceptions.ReadTimeout as e:
+        save_error_log('ark_request_timeout', req_info, {}, str(e))
+        return jsonify({
+            'success': False,
+            'error': f'Ark 在 {request_timeout} 秒内未返回，任务结果未知；为避免重复提交，系统未自动重试',
+            'error_type': 'upstream_timeout',
+            'retryable': False,
+            'result_unknown': True,
+            'error_details': {
+                'message': '请求已经发出，但没有及时收到响应。请先在 Ark 控制台确认任务结果，再决定是否重新生成。',
+                'timeout_seconds': request_timeout,
+            },
+        }), 504
+    except requests.exceptions.RequestException as e:
+        save_error_log('ark_request_error', req_info, {}, str(e))
+        return jsonify({
+            'success': False,
+            'error': f'Ark API 网络请求失败: {e}',
+            'error_type': 'request_error',
+            'retryable': False,
+        }), 502
     except Exception as e:
         save_error_log('ark_request_error', req_info, {}, str(e))
-        return jsonify({'success': False, 'error': f'Ark API 请求失败: {e}', 'error_type': 'request_error'}), 500
+        return jsonify({
+            'success': False,
+            'error': f'Ark API 请求失败: {e}',
+            'error_type': 'request_error',
+            'retryable': False,
+        }), 500
 
     resp_data = response.json() if response.text else {}
 
     if response.status_code != 200:
         err_msg = resp_data.get('error', {}).get('message', f'Ark API 错误 {response.status_code}') if isinstance(resp_data.get('error'), dict) else resp_data.get('error', f'Ark API 错误 {response.status_code}')
         save_error_log('ark_api_error', req_info, resp_data, err_msg)
-        return jsonify({'success': False, 'error': err_msg, 'error_type': 'api_error'}), response.status_code
+        return jsonify({
+            'success': False,
+            'error': err_msg,
+            'error_type': 'api_error',
+            'retryable': response.status_code == 429,
+        }), response.status_code
 
     # 解析返回的图片
     images = []
@@ -1420,7 +1523,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         elif item.get('url'):
             # 下载 url 转 base64
             try:
-                img_resp = requests.get(item['url'], timeout=60)
+                img_resp = HTTP.get(item['url'], timeout=(10, 60))
                 if img_resp.status_code == 200:
                     b64 = base64.b64encode(img_resp.content).decode('utf-8')
                     response_mime = img_resp.headers.get('Content-Type', '').split(';', 1)[0]
@@ -1435,13 +1538,124 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     return jsonify({'success': True, 'images': images, 'thinking': '', 'output_format': output_format})
 
 
+def _response_payload(response):
+    if isinstance(response, tuple):
+        response_obj, status_code = response
+    else:
+        response_obj, status_code = response, 200
+    return response_obj.get_json(), status_code
+
+
+def execute_image_task(task_id):
+    """Execute one persisted image task and store only lightweight result metadata."""
+    task = task_db.get_task(task_id)
+    if not task:
+        return {'success': False, 'error': '任务不存在'}, 404
+
+    params = task.get('params') or {}
+    provider, provider_config = get_image_provider_config(task.get('provider') or params.get('provider'))
+    model_id = params.get('model') or get_provider_default_model(provider, provider_config)
+    output_dir = task.get('output_dir') or storage.task_output_dir('image', task_id)
+    input_assets = [
+        asset for asset in task_db.list_assets(task_id)
+        if asset['kind'] == 'input_image' and os.path.isfile(asset['path'])
+    ]
+    input_assets.sort(key=lambda asset: asset['path'])
+
+    parts = []
+    local_refs = []
+    for asset in input_assets:
+        with open(asset['path'], 'rb') as handle:
+            encoded = base64.b64encode(handle.read()).decode('utf-8')
+        parts.append({'inlineData': {'mimeType': asset.get('mime_type') or 'image/png', 'data': encoded}})
+        local_refs.append(f'/api/tasks/{task_id}/file/{os.path.basename(asset["path"])}')
+    parts.append({'text': task.get('prompt') or ''})
+
+    try:
+        if provider == 'ark':
+            response = _generate_ark_image(
+                task.get('prompt') or '',
+                params.get('aspect_ratio', '1:1'),
+                params.get('resolution', '1K'),
+                parts,
+                params.get('output_format', 'png'),
+                bool(params.get('watermark', False)),
+                provider_config,
+                model_id,
+            )
+        else:
+            response = _parse_and_respond(
+                task.get('prompt') or '',
+                params.get('aspect_ratio', '1:1'),
+                params.get('resolution', '1K'),
+                bool(params.get('use_search', False)),
+                bool(params.get('enable_chat', False)),
+                params.get('session_id'),
+                parts,
+                params.get('think_level', 'minimal'),
+                provider,
+                model_id,
+            )
+        response_data, status_code = _response_payload(response)
+    except Exception as e:
+        task_db.fail_task(task_id, str(e))
+        return {'success': False, 'error': str(e), 'error_type': 'request_error', 'task_id': task_id}, 500
+
+    if not response_data.get('success'):
+        error_result = {
+            'error_type': response_data.get('error_type'),
+            'error_details': response_data.get('error_details'),
+            'result_unknown': bool(response_data.get('result_unknown', False)),
+        }
+        task_db.fail_task(task_id, response_data.get('error', '图片生成失败'), error_result)
+        response_data['task_id'] = task_id
+        return response_data, status_code
+
+    local_images = []
+    for index, data_url in enumerate(response_data.get('images') or []):
+        if not isinstance(data_url, str) or not data_url.startswith('data:'):
+            continue
+        header = data_url.split(',', 1)[0].lower()
+        extension = 'jpg' if 'image/jpeg' in header else 'png'
+        mime_type = 'image/jpeg' if extension == 'jpg' else 'image/png'
+        filename = f'image_{index}.{extension}'
+        path = os.path.join(output_dir, filename)
+        storage.save_data_url(data_url, path)
+        storage.register_file(task_id, 'output_image', path, mime_type)
+        local_images.append(f'/api/tasks/{task_id}/file/{filename}')
+
+    if not local_images:
+        task_db.fail_task(task_id, '未能保存生成图片')
+        return {'success': False, 'error': '未能保存生成图片', 'error_type': 'generation_failed', 'task_id': task_id}, 500
+
+    result = {
+        'local_images': local_images,
+        'local_refs': local_refs,
+        'thinking': response_data.get('thinking', ''),
+        'output_format': response_data.get('output_format', params.get('output_format', 'png')),
+    }
+    task_db.complete_task(task_id, result, output_dir)
+
+    payload = {
+        'success': True,
+        'images': local_images,
+        'thinking': result['thinking'],
+        'task_id': task_id,
+        'safety_ratings': response_data.get('safety_ratings'),
+        'prompt_safety_ratings': response_data.get('prompt_safety_ratings'),
+    }
+    if response_data.get('session_id'):
+        payload['session_id'] = response_data['session_id']
+    return payload, 200
+
+
 @app.route('/api/generate', methods=['POST'])
 @app.route('/api/generate/text-to-image', methods=['POST'])
 @app.route('/api/generate/image-to-image', methods=['POST'])
 def generate():
-    """统一生成接口：自动判断文生图/图生图"""
+    """Queue normal image jobs; keep chat generations synchronous for compatibility."""
+    db_task_id = None
     try:
-        # 判断是否有文件上传（图生图）
         has_images = bool(request.files.getlist('images'))
 
         if has_images:
@@ -1457,16 +1671,14 @@ def generate():
             provider = request.form.get('provider', get_session_image_provider())
             model_id = request.form.get('model', None)
         else:
-            data = request.json or {}
+            data = request.get_json(silent=True) or {}
             prompt = data.get('prompt')
             aspect_ratio = data.get('aspect_ratio', '9:16')
             resolution = data.get('resolution', '1K')
             output_format = str(data.get('output_format', 'png')).lower()
-            watermark = data.get('watermark', False)
-            if not isinstance(watermark, bool):
-                watermark = str(watermark).lower() == 'true'
-            use_search = data.get('use_search', False)
-            enable_chat = data.get('enable_chat', False)
+            watermark = as_bool(data.get('watermark', False))
+            use_search = as_bool(data.get('use_search', False))
+            enable_chat = as_bool(data.get('enable_chat', False))
             session_id = data.get('session_id', None)
             think_level = data.get('think_level', 'minimal')
             provider = data.get('provider', get_session_image_provider())
@@ -1476,6 +1688,18 @@ def generate():
             return jsonify({'success': False, 'error': '请提供图片描述'}), 400
         if provider not in API_PROVIDERS:
             return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
+        valid_ratios = set(ARK_SEEDREAM_PRO_SIZE_MAP['1K']) if provider == 'ark' else {
+            '1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4',
+            '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+        }
+        valid_resolutions = {'1K', '2K'} if provider == 'ark' else {'0.5K', '1K', '2K', '4K'}
+        if aspect_ratio not in valid_ratios:
+            return jsonify({'success': False, 'error': f'不支持的图片比例: {aspect_ratio}'}), 400
+        if str(resolution).upper() not in valid_resolutions:
+            return jsonify({'success': False, 'error': f'不支持的图片分辨率: {resolution}'}), 400
+        resolution = str(resolution).upper()
+        if think_level not in ('minimal', 'high'):
+            return jsonify({'success': False, 'error': f'不支持的思考级别: {think_level}'}), 400
         provider, provider_config = get_image_provider_config(provider)
         if not get_provider_key(provider, provider_config):
             return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
@@ -1484,94 +1708,56 @@ def generate():
         else:
             model_id = model_id or get_provider_default_model(provider, provider_config)
 
-        print(f'Generating image with prompt: {prompt}')
-        print(f'Chat mode: {enable_chat}, Session ID: {session_id}')
+        images_files = request.files.getlist('images') if has_images else []
         if has_images:
-            images_files = request.files.getlist('images')
             max_reference_images = ARK_SEEDREAM_PRO_MAX_REFERENCES if provider == 'ark' else 14
             if len(images_files) > max_reference_images:
                 return jsonify({'success': False, 'error': f'当前 Provider 最多只能上传{max_reference_images}张图片'}), 400
-            print(f'Number of reference images: {len(images_files)}')
 
-        # 构建 parts
-        parts = []
-        if has_images:
-            for img_file in request.files.getlist('images'):
-                img_file.seek(0)
-                raw = img_file.read()
-                image = Image.open(io.BytesIO(raw))
-                image = image.convert('RGB')
-                image_b64 = image_to_base64(image)
-                parts.append({"inlineData": {"mimeType": "image/png", "data": image_b64}})
-        parts.append({"text": prompt})
-
-        # 记录任务
         params = {
             'aspect_ratio': aspect_ratio, 'resolution': resolution,
             'use_search': use_search, 'think_level': think_level, 'enable_chat': enable_chat,
+            'session_id': session_id,
+            'provider': provider,
+            'model': model_id,
         }
-        params['provider'] = provider
-        params['model'] = model_id
         if provider == 'ark':
             params['output_format'] = output_format
             params['watermark'] = watermark
             params['prompt_optimization'] = 'standard'
-        db_task_id = task_db.create_task('image', prompt, params, provider=provider)
-        task_db.update_task(db_task_id, status='processing')
+        db_task_id = task_db.create_task('image', prompt, params, provider=provider, status='preparing')
+        output_dir = storage.task_output_dir('image', db_task_id)
+        task_db.update_task(db_task_id, output_dir=output_dir)
 
-        # Ark 走独立的 Seedream API
-        if provider == 'ark':
-            resp = _generate_ark_image(
-                prompt, aspect_ratio, resolution, parts, output_format, watermark,
-                provider_config, model_id,
-            )
-        else:
-            resp = _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level, provider, model_id)
-        if isinstance(resp, tuple):
-            resp_obj, status_code = resp
-            resp_data = resp_obj.get_json()
-        else:
-            resp_obj = resp
-            status_code = 200
-            resp_data = resp.get_json()
+        for index, image_file in enumerate(images_files):
+            path = os.path.join(output_dir, f'ref_{index}.png')
+            storage.save_uploaded_image(image_file, path)
+            storage.register_file(db_task_id, 'input_image', path, 'image/png')
 
-        if resp_data.get('success'):
-            # 保存图片到本地
-            output_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output', 'image', str(db_task_id))
-            os.makedirs(output_dir, exist_ok=True)
+        if enable_chat and provider != 'ark':
+            task_db.update_task(db_task_id, status='processing')
+            payload, status_code = execute_image_task(db_task_id)
+            return jsonify(payload), status_code
 
-            # 保存上传的参考图
-            local_refs = []
-            for i, part in enumerate(parts):
-                if 'inlineData' in part:
-                    fname = f'ref_{i}.png'
-                    with open(os.path.join(output_dir, fname), 'wb') as f:
-                        f.write(base64.b64decode(part['inlineData']['data']))
-                    local_refs.append(f'/api/tasks/{db_task_id}/file/{fname}')
-
-            # 保存生成的图片
-            local_images = []
-            for i, img_b64 in enumerate(resp_data.get('images', [])):
-                if img_b64.startswith('data:'):
-                    header, b64_data = img_b64.split(',', 1)
-                    extension = 'jpg' if 'image/jpeg' in header.lower() else 'png'
-                    fname = f'image_{i}.{extension}'
-                    with open(os.path.join(output_dir, fname), 'wb') as f:
-                        f.write(base64.b64decode(b64_data))
-                    local_images.append(f'/api/tasks/{db_task_id}/file/{fname}')
-            task_db.update_task(db_task_id, status='succeeded', result={'images': resp_data.get('images', []), 'local_images': local_images, 'local_refs': local_refs, 'thinking': resp_data.get('thinking', '')}, output_dir=output_dir, completed_at=datetime.now().isoformat())
-        else:
-            task_db.update_task(db_task_id, status='failed', error=resp_data.get('error', ''), completed_at=datetime.now().isoformat())
-
-        # 在响应中附加 task_id
-        resp_data['task_id'] = db_task_id
-        return jsonify(resp_data), status_code
+        task_db.update_task(db_task_id, status='pending', next_run_at=task_db.utcnow())
+        return jsonify({
+            'success': True,
+            'queued': True,
+            'task_id': db_task_id,
+            'status': 'pending',
+        }), 202
 
     except ClientDisconnected:
+        if db_task_id is not None:
+            task_db.fail_task(db_task_id, '连接断开，请重试')
         return jsonify({'success': False, 'error': '连接断开，请重试'}), 400
     except RequestEntityTooLarge:
+        if db_task_id is not None:
+            task_db.fail_task(db_task_id, '上传文件总大小超过100MB限制')
         return jsonify({'success': False, 'error': '上传文件总大小超过100MB限制'}), 413
     except Exception as e:
+        if db_task_id is not None:
+            task_db.fail_task(db_task_id, str(e))
         print(f'Error generating image: {str(e)}')
         import traceback
         traceback.print_exc()
@@ -1610,7 +1796,7 @@ def get_video_provider_info():
 
 @app.route('/api/video/provider', methods=['POST'])
 def switch_video_provider():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     p = data.get('provider', '')
     if p not in VIDEO_PROVIDERS:
         return jsonify({'success': False, 'error': f'未知 provider: {p}'}), 400
@@ -1731,6 +1917,8 @@ def _parse_files(has_files, video_mode, provider=None):
         ref_video_urls_raw = request.form.get('ref_video_urls')
         if ref_video_urls_raw:
             urls = json.loads(ref_video_urls_raw)
+            if not isinstance(urls, list):
+                raise ValueError('ref_video_urls 必须是数组')
             if urls:
                 files_data.setdefault('ref_videos', []).extend(urls[:3])
         ref_auds = request.files.getlist('ref_audios')
@@ -1746,13 +1934,14 @@ def _parse_files(has_files, video_mode, provider=None):
 @app.route('/api/video/generate', methods=['POST'])
 def video_generate():
     """提交视频生成任务，返回 task_id"""
+    db_task_id = None
     try:
         has_files = bool(request.content_type and 'multipart' in request.content_type)
 
         if has_files:
             prompt = request.form.get('prompt', '')
             ratio = request.form.get('ratio', 'adaptive')
-            duration = int(request.form.get('duration', '5'))
+            duration = request.form.get('duration', '5')
             resolution = request.form.get('resolution', '720p')
             fast = request.form.get('fast', 'false').lower() == 'true'
             generate_audio = request.form.get('generate_audio', 'true').lower() == 'true'
@@ -1761,20 +1950,32 @@ def video_generate():
             video_mode = request.form.get('video_mode', 'keyframe')
             provider = request.form.get('provider', get_session_video_provider())
         else:
-            data = request.json or {}
+            data = request.get_json(silent=True) or {}
             prompt = data.get('prompt', '')
             ratio = data.get('ratio', 'adaptive')
             duration = data.get('duration', 5)
             resolution = data.get('resolution', '720p')
-            fast = data.get('fast', False)
-            generate_audio = data.get('generate_audio', True)
-            return_last_frame = data.get('return_last_frame', False)
-            web_search = data.get('web_search', False)
+            fast = as_bool(data.get('fast', False))
+            generate_audio = as_bool(data.get('generate_audio', True), default=True)
+            return_last_frame = as_bool(data.get('return_last_frame', False))
+            web_search = as_bool(data.get('web_search', False))
             video_mode = data.get('video_mode', 'keyframe')
             provider = data.get('provider', get_session_video_provider())
 
         if provider not in VIDEO_PROVIDERS:
             return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
+        try:
+            duration = int(duration)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'duration 必须是整数'}), 400
+        if duration not in {-1, *range(4, 16)}:
+            return jsonify({'success': False, 'error': f'不支持的视频时长: {duration}'}), 400
+        if ratio not in {'adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'}:
+            return jsonify({'success': False, 'error': f'不支持的视频比例: {ratio}'}), 400
+        if resolution not in {'480p', '720p', '1080p'}:
+            return jsonify({'success': False, 'error': f'不支持的视频分辨率: {resolution}'}), 400
+        if video_mode not in {'keyframe', 'reference'}:
+            return jsonify({'success': False, 'error': f'不支持的视频模式: {video_mode}'}), 400
         provider, prov = get_video_provider_config(provider)
         app.logger.warning(f'Video generate [{provider}]: ratio={ratio}, duration={duration}, resolution={resolution}, fast={fast}, audio={generate_audio}, return_last_frame={return_last_frame}, mode={video_mode}')
 
@@ -1785,8 +1986,10 @@ def video_generate():
 
         # JSON body 中的预上传视频 URL
         if not has_files:
-            data = request.json or {}
+            data = request.get_json(silent=True) or {}
             ref_video_urls = data.get('ref_video_urls', [])
+            if not isinstance(ref_video_urls, list):
+                return jsonify({'success': False, 'error': 'ref_video_urls 必须是数组'}), 400
             if ref_video_urls:
                 files_data['ref_videos'] = ref_video_urls[:3]
 
@@ -1805,24 +2008,11 @@ def video_generate():
             body = _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data)
             url = f'{endpoint}/v3/async/seedance-2.0'
 
-        resp = requests.post(url, headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}, json=body, timeout=REQUEST_TIMEOUT)
-        resp_data = resp.json() if resp.text else {}
-
-        if resp.status_code != 200:
-            err_msg = resp_data.get('message') or resp_data.get('error', {}).get('message', f'API 错误 {resp.status_code}')
-            return jsonify({'success': False, 'error': err_msg}), resp.status_code
-
-        # jiekou returns task_id, ark returns id
-        external_id = resp_data.get('task_id') or resp_data.get('id')
-
-        # 记录任务并启动后台轮询
         params = {'ratio': ratio, 'duration': duration, 'resolution': resolution, 'fast': fast, 'generate_audio': generate_audio, 'return_last_frame': return_last_frame, 'video_mode': video_mode}
-        # 记录上传的参考视频路径，便于删除任务时清理
         ref_video_paths = list(files_data.get('ref_video_paths', []))
-        # 从预上传 URL 反推本地路径（/api/upload_video/<filename>）
-        for url in files_data.get('ref_videos', []):
-            if isinstance(url, str) and '/api/upload_video/' in url:
-                fname = url.rsplit('/api/upload_video/', 1)[-1]
+        for ref_url in files_data.get('ref_videos', []):
+            if isinstance(ref_url, str) and '/api/upload_video/' in ref_url:
+                fname = ref_url.rsplit('/api/upload_video/', 1)[-1]
                 fp = os.path.join(UPLOAD_VIDEO_DIR, os.path.basename(fname))
                 if fp not in ref_video_paths and os.path.isfile(fp):
                     ref_video_paths.append(fp)
@@ -1830,12 +2020,45 @@ def video_generate():
             params['ref_video_paths'] = ref_video_paths
         if files_data.get('ref_videos'):
             params['ref_video_urls'] = files_data['ref_videos']
-        db_task_id = task_db.create_task('video', prompt, params, provider=provider, external_task_id=external_id)
-        threading.Thread(target=_poll_video_task_bg, args=(db_task_id, external_id, provider), daemon=True).start()
+
+        db_task_id = task_db.create_task('video', prompt, params, provider=provider)
+        output_dir = storage.task_output_dir('video', db_task_id)
+        task_db.update_task(db_task_id, output_dir=output_dir)
+        for path in ref_video_paths:
+            task_db.link_asset(path, db_task_id, expires_at=None)
+
+        resp = HTTP.post(url, headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}, json=body, timeout=(10, REQUEST_TIMEOUT))
+        try:
+            resp_data = resp.json() if resp.text else {}
+        except ValueError:
+            resp_data = {}
+        if not isinstance(resp_data, dict):
+            resp_data = {}
+
+        if resp.status_code != 200:
+            err_obj = resp_data.get('error', {}) if isinstance(resp_data, dict) else {}
+            err_msg = resp_data.get('message') or (err_obj.get('message') if isinstance(err_obj, dict) else '') or f'API 错误 {resp.status_code}'
+            task_db.fail_task(db_task_id, err_msg)
+            return jsonify({'success': False, 'error': err_msg, 'db_task_id': db_task_id}), resp.status_code
+
+        external_id = resp_data.get('task_id') or resp_data.get('id')
+        if not external_id:
+            task_db.fail_task(db_task_id, '供应商未返回任务 ID')
+            return jsonify({'success': False, 'error': '供应商未返回任务 ID', 'db_task_id': db_task_id}), 502
+
+        task_db.update_task(
+            db_task_id,
+            status='processing',
+            external_task_id=external_id,
+            progress=0,
+            next_run_at=task_db.utcnow(),
+        )
 
         return jsonify({'success': True, 'task_id': external_id, 'db_task_id': db_task_id, 'provider': provider})
 
     except Exception as e:
+        if db_task_id is not None:
+            task_db.fail_task(db_task_id, str(e))
         print(f'Error submitting video task: {e}')
         import traceback
         traceback.print_exc()
@@ -1852,77 +2075,40 @@ ARK_STATUS_MAP = {
 }
 
 
-# 视频输出保存目录
-VIDEO_OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output', 'video')
-
-
 @app.route('/api/video/task', methods=['GET'])
 def video_task_status():
-    """查询视频生成任务状态"""
-    task_id = request.args.get('task_id')
+    """Compatibility endpoint backed by the local task database."""
+    external_task_id = request.args.get('task_id')
     provider = request.args.get('provider', get_session_video_provider())
-    if not task_id:
+    if not external_task_id:
         return jsonify({'success': False, 'error': '缺少 task_id'}), 400
+    task = task_db.get_task_by_external(provider, external_task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '本地任务不存在'}), 404
 
-    try:
-        prov = VIDEO_PROVIDERS.get(provider, get_video_provider())
-        api_key = prov.get('api_key', '')
-        endpoint = prov.get('endpoint', '')
-
-        if provider == 'ark':
-            resp = requests.get(
-                f'{endpoint}/api/v3/contents/generations/tasks/{task_id}',
-                headers={'Authorization': f'Bearer {api_key}'},
-                timeout=POLL_TIMEOUT
-            )
-            resp_data = resp.json() if resp.text else {}
-            if resp.status_code != 200:
-                err_msg = resp_data.get('error', {}).get('message', f'查询失败 {resp.status_code}')
-                return jsonify({'success': False, 'error': err_msg}), resp.status_code
-
-            ark_status = resp_data.get('status', '')
-            content = resp_data.get('content', {})
-            result = {
-                'success': True,
-                'status': ARK_STATUS_MAP.get(ark_status, ark_status),
-                'reason': resp_data.get('error', {}).get('message', '') if isinstance(resp_data.get('error'), dict) else resp_data.get('error', ''),
-                'progress': 0,
-                'eta': 0,
-                'videos': [],
-                'images': []
-            }
-            if content.get('video_url'):
-                result['videos'] = [{'video_url': content['video_url'], 'video_type': 'mp4'}]
-            if content.get('last_frame_url'):
-                result['images'] = [{'image_url': content['last_frame_url']}]
-
-        else:
-            resp = requests.get(
-                f'{endpoint}/v3/async/task-result',
-                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-                params={'task_id': task_id},
-                timeout=POLL_TIMEOUT
-            )
-            resp_data = resp.json() if resp.text else {}
-            if resp.status_code != 200:
-                return jsonify({'success': False, 'error': resp_data.get('message', f'查询失败 {resp.status_code}')}), resp.status_code
-
-            task = resp_data.get('task', {})
-            result = {
-                'success': True,
-                'status': task.get('status', ''),
-                'reason': task.get('reason', ''),
-                'progress': task.get('progress_percent', 0),
-                'eta': task.get('eta', 0),
-                'videos': resp_data.get('videos', []),
-                'images': resp_data.get('images', [])
-            }
-
-        return jsonify(result)
-
-    except Exception as e:
-        print(f'Error querying video task: {e}')
-        return jsonify({'success': False, 'error': str(e)}), 500
+    status_map = {
+        'pending': 'TASK_STATUS_QUEUED',
+        'processing': 'TASK_STATUS_PROCESSING',
+        'succeeded': 'TASK_STATUS_SUCCEED',
+        'failed': 'TASK_STATUS_FAILED',
+    }
+    stored_result = task.get('result') or {}
+    videos = stored_result.get('videos') or []
+    images = stored_result.get('images') or []
+    if stored_result.get('local_video'):
+        videos = [{'video_url': stored_result['local_video'], 'video_type': 'mp4'}]
+    if stored_result.get('local_last_frame'):
+        images = [{'image_url': stored_result['local_last_frame']}]
+    return jsonify({
+        'success': True,
+        'db_task_id': task['id'],
+        'status': status_map.get(task['status'], task['status']),
+        'reason': task.get('error') or '',
+        'progress': task.get('progress') or 0,
+        'eta': 0,
+        'videos': videos,
+        'images': images,
+    })
 
 
 # ============================================================
@@ -1933,9 +2119,12 @@ def video_task_status():
 def api_list_tasks():
     task_type = request.args.get('type')
     status = request.args.get('status')
-    limit = int(request.args.get('limit', 50))
-    offset = int(request.args.get('offset', 0))
-    tasks, total = task_db.list_tasks(task_type, status, limit, offset)
+    try:
+        limit = max(1, min(int(request.args.get('limit', 50)), 100))
+        offset = max(0, int(request.args.get('offset', 0)))
+    except ValueError:
+        return jsonify({'success': False, 'error': 'limit 和 offset 必须是整数'}), 400
+    tasks, total = task_db.list_tasks(task_type, status, limit, offset, summary=True)
     # 列表接口剥离大字段，只保留缩略图路径
     for t in tasks:
         if isinstance(t.get('result'), dict):
@@ -1963,14 +2152,7 @@ def api_delete_task(task_id):
     t = task_db.get_task(task_id)
     if not t:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
-    # 删除本地文件
-    if t.get('output_dir') and os.path.isdir(t['output_dir']):
-        import shutil
-        shutil.rmtree(t['output_dir'], ignore_errors=True)
-    # 删除上传的参考视频
-    for vpath in (t.get('params') or {}).get('ref_video_paths', []):
-        if os.path.isfile(vpath):
-            os.remove(vpath)
+    storage.remove_task_files(t)
     task_db.delete_task(task_id)
     return jsonify({'success': True})
 
@@ -1978,16 +2160,11 @@ def api_delete_task(task_id):
 @app.route('/api/tasks/clear', methods=['DELETE'])
 def api_clear_tasks():
     """清空所有任务及其输出文件"""
-    import shutil
-    tasks, _ = task_db.list_tasks(limit=9999)
+    tasks, _ = task_db.list_tasks(limit=None)
     for t in tasks:
-        if t.get('output_dir') and os.path.isdir(t['output_dir']):
-            shutil.rmtree(t['output_dir'], ignore_errors=True)
-        for vpath in (t.get('params') or {}).get('ref_video_paths', []):
-            if os.path.isfile(vpath):
-                os.remove(vpath)
-        task_db.delete_task(t['id'])
-    return jsonify({'success': True, 'deleted': len(tasks)})
+        storage.remove_task_files(t)
+    deleted = task_db.delete_all_tasks()
+    return jsonify({'success': True, 'deleted': deleted})
 
 
 @app.route('/api/tasks/<int:task_id>/file/<path:filename>', methods=['GET'])
@@ -2036,6 +2213,7 @@ def api_delete_upload_video():
     if os.path.isfile(filepath):
         try:
             os.remove(filepath)
+            task_db.delete_asset(filepath)
             return jsonify({'success': True})
         except Exception as e:
             return jsonify({'success': False, 'error': str(e)}), 500
@@ -2053,107 +2231,119 @@ def api_upload_video_file(filename):
 
 
 # ============================================================
-# Background video polling (server-side)
+# Worker-facing video polling
 # ============================================================
 
-def _poll_video_task_bg(db_task_id, external_task_id, provider):
-    """后台轮询视频任务直到完成"""
-    import time
+def poll_video_task_once(task_id):
+    """Poll one provider task once and persist terminal results."""
+    task = task_db.get_task(task_id)
+    if not task:
+        return {'state': 'failed', 'error': '任务不存在'}
+
+    external_task_id = task.get('external_task_id')
+    provider = task.get('provider') or 'ark'
     prov = VIDEO_PROVIDERS.get(provider, {})
     api_key = prov.get('api_key', '')
     endpoint = prov.get('endpoint', '')
-    poll_interval = int(VIDEO_CONFIG.get('poll_interval_seconds', 4) or 4)
-    max_attempts = int(VIDEO_CONFIG.get('poll_max_attempts', 1800) or 1800)
 
-    task_db.update_task(db_task_id, status='processing')
+    try:
+        if provider == 'ark':
+            response = HTTP.get(
+                f'{endpoint}/api/v3/contents/generations/tasks/{external_task_id}',
+                headers={'Authorization': f'Bearer {api_key}'},
+                timeout=(10, POLL_TIMEOUT),
+            )
+        else:
+            response = HTTP.get(
+                f'{endpoint}/v3/async/task-result',
+                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
+                params={'task_id': external_task_id},
+                timeout=(10, POLL_TIMEOUT),
+            )
+    except requests.RequestException as e:
+        return {'state': 'retry', 'error': str(e)}
 
-    for attempt in range(max_attempts):
-        try:
-            if provider == 'ark':
-                resp = requests.get(
-                    f'{endpoint}/api/v3/contents/generations/tasks/{external_task_id}',
-                    headers={'Authorization': f'Bearer {api_key}'},
-                    timeout=POLL_TIMEOUT
-                )
-                resp_data = resp.json() if resp.text else {}
-                if resp.status_code >= 400:
-                    reason = resp_data.get('error', {}).get('message', f'查询失败 {resp.status_code}') if isinstance(resp_data.get('error'), dict) else f'查询失败 {resp.status_code}'
-                    task_db.update_task(db_task_id, status='failed', error=reason, completed_at=datetime.now().isoformat())
-                    return
-                ark_status = resp_data.get('status', '')
-                mapped = ARK_STATUS_MAP.get(ark_status, ark_status)
-                content = resp_data.get('content', {})
-                videos = [{'video_url': content['video_url'], 'video_type': 'mp4'}] if content.get('video_url') else []
-                images = [{'image_url': content['last_frame_url']}] if content.get('last_frame_url') else []
-                reason = resp_data.get('error', {}).get('message', '') if isinstance(resp_data.get('error'), dict) else ''
-            else:
-                resp = requests.get(
-                    f'{endpoint}/v3/async/task-result',
-                    headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-                    params={'task_id': external_task_id},
-                    timeout=POLL_TIMEOUT
-                )
-                resp_data = resp.json() if resp.text else {}
-                if resp.status_code >= 400:
-                    task_db.update_task(db_task_id, status='failed', error=resp_data.get('message', f'查询失败 {resp.status_code}'), completed_at=datetime.now().isoformat())
-                    return
-                task_info = resp_data.get('task', {})
-                mapped = task_info.get('status', '')
-                videos = resp_data.get('videos', [])
-                images = resp_data.get('images', [])
-                reason = task_info.get('reason', '')
+    try:
+        response_data = response.json() if response.text else {}
+    except ValueError:
+        response_data = {}
+    if not isinstance(response_data, dict):
+        response_data = {}
 
-            if mapped == 'TASK_STATUS_SUCCEED':
-                result = {'videos': videos, 'images': images}
-                # 保存文件
-                output_dir = os.path.join(VIDEO_OUTPUT_DIR, str(db_task_id))
-                os.makedirs(output_dir, exist_ok=True)
-                for i, vid in enumerate(videos):
-                    url = vid.get('video_url')
-                    if url:
-                        r = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
-                        if r.status_code == 200:
-                            fname = 'video.mp4' if i == 0 else f'video_{i}.mp4'
-                            with open(os.path.join(output_dir, fname), 'wb') as f:
-                                f.write(r.content)
-                            result['local_video'] = f'/api/tasks/{db_task_id}/file/{fname}'
-                for i, img in enumerate(images):
-                    url = img.get('image_url')
-                    if url:
-                        r = requests.get(url, timeout=DOWNLOAD_TIMEOUT)
-                        if r.status_code == 200:
-                            fname = 'last_frame.png' if i == 0 else f'last_frame_{i}.png'
-                            with open(os.path.join(output_dir, fname), 'wb') as f:
-                                f.write(r.content)
-                            result['local_last_frame'] = f'/api/tasks/{db_task_id}/file/{fname}'
+    if response.status_code >= 400:
+        error_obj = response_data.get('error', {})
+        reason = (
+            response_data.get('message')
+            or (error_obj.get('message') if isinstance(error_obj, dict) else '')
+            or f'查询失败 {response.status_code}'
+        )
+        if response.status_code == 429 or response.status_code >= 500:
+            return {'state': 'retry', 'error': reason}
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
 
-                task_db.update_task(db_task_id, status='succeeded', result=result, output_dir=output_dir, completed_at=datetime.now().isoformat())
-                return
+    if provider == 'ark':
+        mapped_status = ARK_STATUS_MAP.get(response_data.get('status', ''), response_data.get('status', ''))
+        content = response_data.get('content') or {}
+        videos = [{'video_url': content['video_url'], 'video_type': 'mp4'}] if content.get('video_url') else []
+        images = [{'image_url': content['last_frame_url']}] if content.get('last_frame_url') else []
+        error_obj = response_data.get('error', {})
+        reason = error_obj.get('message', '') if isinstance(error_obj, dict) else str(error_obj or '')
+        progress = 0
+    else:
+        task_info = response_data.get('task') or {}
+        mapped_status = task_info.get('status', '')
+        videos = response_data.get('videos') or []
+        images = response_data.get('images') or []
+        reason = task_info.get('reason', '')
+        progress = int(task_info.get('progress_percent', 0) or 0)
 
-            elif mapped == 'TASK_STATUS_FAILED':
-                task_db.update_task(db_task_id, status='failed', error=reason or '视频生成失败', completed_at=datetime.now().isoformat())
-                return
+    if mapped_status == 'TASK_STATUS_FAILED':
+        task_db.fail_task(task_id, reason or '视频生成失败')
+        return {'state': 'failed', 'error': reason or '视频生成失败'}
 
-        except Exception as e:
-            print(f'Background poll error for task {db_task_id}: {e}')
+    if mapped_status != 'TASK_STATUS_SUCCEED':
+        return {'state': 'pending', 'progress': progress}
 
-        time.sleep(poll_interval)
+    output_dir = task.get('output_dir') or storage.task_output_dir('video', task_id)
+    result = {'videos': videos, 'images': images, 'local_videos': [], 'local_images': []}
+    try:
+        for index, video in enumerate(videos):
+            url = video.get('video_url')
+            if not url:
+                continue
+            filename = 'video.mp4' if index == 0 else f'video_{index}.mp4'
+            path = os.path.join(output_dir, filename)
+            with HTTP.get(url, timeout=(10, DOWNLOAD_TIMEOUT), stream=True) as download:
+                if download.status_code >= 400:
+                    return {'state': 'retry', 'error': f'视频下载失败 {download.status_code}'}
+                storage.stream_response_to_file(download, path)
+            storage.register_file(task_id, 'output_video', path, 'video/mp4')
+            result['local_videos'].append(f'/api/tasks/{task_id}/file/{filename}')
 
-    task_db.update_task(db_task_id, status='failed', error='视频任务轮询超时', completed_at=datetime.now().isoformat())
+        for index, image in enumerate(images):
+            url = image.get('image_url')
+            if not url:
+                continue
+            filename = 'last_frame.png' if index == 0 else f'last_frame_{index}.png'
+            path = os.path.join(output_dir, filename)
+            with HTTP.get(url, timeout=(10, DOWNLOAD_TIMEOUT), stream=True) as download:
+                if download.status_code >= 400:
+                    return {'state': 'retry', 'error': f'尾帧下载失败 {download.status_code}'}
+                storage.stream_response_to_file(download, path)
+            storage.register_file(task_id, 'output_image', path, 'image/png')
+            result['local_images'].append(f'/api/tasks/{task_id}/file/{filename}')
+    except requests.RequestException as e:
+        return {'state': 'retry', 'error': str(e)}
 
-
-def _recover_processing_tasks():
-    """服务启动时恢复所有 processing 状态的视频任务轮询"""
-    tasks, _ = task_db.list_tasks(task_type='video', status='processing', limit=100)
-    for t in tasks:
-        ext_id = t.get('external_task_id')
-        provider = t.get('provider', 'ark')
-        if ext_id:
-            print(f'  Recovering task {t["id"]} (external: {ext_id})')
-            threading.Thread(target=_poll_video_task_bg, args=(t['id'], ext_id, provider), daemon=True).start()
+    if result['local_videos']:
+        result['local_video'] = result['local_videos'][0]
+    if result['local_images']:
+        result['local_last_frame'] = result['local_images'][0]
+    task_db.complete_task(task_id, result, output_dir)
+    return {'state': 'succeeded', 'result': result}
 
 if __name__ == '__main__':
-    _recover_processing_tasks()
     print('=' * 60)
     print('Nanobanana Server - Configuration')
     print('=' * 60)

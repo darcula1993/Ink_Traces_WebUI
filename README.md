@@ -87,7 +87,7 @@ Only templates are committed. Local runtime files are ignored by Git.
 | `prompts/video_prompt_rewriter.md` | System prompt used by quick one-click video prompt rewriting | Committed |
 | `prompts/video_prompt_optimizer.md` | Skill-style system prompt used by the interactive video Prompt Agent | Committed |
 | `server/prompts.json.example` | Sample Prompt Vault data | Committed |
-| `server/prompts.json` | Local Prompt Vault data created by the app | Ignored |
+| `server/prompts.json` | Legacy Prompt Vault data imported into SQLite on first use | Ignored |
 
 Minimal image provider setup:
 
@@ -98,11 +98,14 @@ Minimal image provider setup:
     "ark": {
       "api_key": "<your-byteplus-ark-key>",
       "model": "seedream-5-0-pro",
-      "endpoint": "https://ark.ap-southeast.bytepluses.com"
+      "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "request_timeout_seconds": 600
     }
   }
 }
 ```
+
+Ark image generation is synchronous upstream and may take more than two minutes. A read timeout is treated as an unknown result and is not replayed automatically, which avoids duplicate generations when the provider accepted the original POST.
 
 For video reference uploads through Ark, set `server.public_host`, `server.public_port`, and `server.public_scheme` so external services can fetch uploaded reference files.
 
@@ -123,8 +126,11 @@ Ink_Traces_WebUI/
 │       ├── App.jsx              # Main UI, tabs, image/video workflows
 │       └── components/          # Uploaders, result viewers, vault, task queue
 ├── server/
-│   ├── app.py                   # Flask API, providers, video polling
-│   ├── tasks.py                 # SQLite task queue helpers
+│   ├── app.py                   # Flask API and provider adapters
+│   ├── worker.py                # Leased image execution and video polling worker
+│   ├── tasks.py                 # SQLite tasks, assets, prompts, and worker state
+│   ├── storage.py               # Atomic media writes and lifecycle cleanup
+│   ├── maintenance.py           # Cleanup, legacy compaction, and VACUUM commands
 │   ├── prompts.json.example     # Public Prompt Vault sample
 │   └── requirements.txt
 ├── doc/
@@ -140,15 +146,16 @@ Ink_Traces_WebUI/
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/health` | Backend health check |
+| `GET /api/health` | Compatibility health check |
+| `GET /api/live` / `GET /api/ready` | Process and dependency health checks |
 | `GET/POST /api/provider` | Get or switch image provider |
 | `GET/POST /api/model` | Get or switch image model |
-| `POST /api/generate` | Unified image generation endpoint |
+| `POST /api/generate` | Queue image generation; chat mode remains synchronous |
 | `GET/POST /api/prompts` | List or save Prompt Vault entries |
 | `PUT/DELETE /api/prompts/:id` | Edit or delete Prompt Vault entries |
 | `GET/POST /api/video/provider` | Get or switch video provider |
 | `POST /api/video/generate` | Submit video generation task |
-| `GET /api/video/task` | Query external video task status |
+| `GET /api/video/task` | Legacy-compatible local video status lookup |
 | `GET /api/tasks` | List local task history |
 | `GET/DELETE /api/tasks/:id` | Restore or delete local task |
 | `POST /api/upload_video` | Upload reference video for external provider access |
@@ -170,13 +177,22 @@ These paths are intentionally ignored:
 
 This keeps API keys, prompt collections, generated media, logs, uploaded references, and local task history out of Git.
 
+Backend maintenance can be run while the services are stopped:
+
+```bash
+python3 server/maintenance.py all --grace-hours 24
+```
+
+This removes expired/orphaned media, strips legacy inline Base64 results, checkpoints WAL, and compacts SQLite.
+
 ## Notes
 
 - Chat sessions are stored in memory and are lost when the Flask process restarts.
-- Video generation is asynchronous; the backend polls provider task status in background threads.
+- Normal image generation and video polling run in the bounded SQLite-leased worker started by `start.sh`.
+- Generated media stays on disk; SQLite stores task and asset metadata rather than Base64 payloads.
 - Ark reference-video workflows require a public URL that the provider can download.
 - The Flask backend restricts CORS to configured/local origins by default; set `server.cors_origins` when serving the UI from another host.
-- The Flask backend is intended for local or controlled deployments, not high-concurrency production traffic.
+- Gunicorn serves the API with a separate worker process; the stack remains intended for local or controlled deployments.
 - Safety filters can be configured in `config.json`, but provider-side baseline safety enforcement may still apply.
 
 ## License

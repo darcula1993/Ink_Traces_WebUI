@@ -31,12 +31,24 @@ echo -e "${CYAN}================================${NC}\n"
 
 kill_tree() {
     local pid=$1
-    # 先杀所有子进程
-    local children=$(pgrep -P "$pid" 2>/dev/null)
-    for child in $children; do
-        kill_tree "$child"
+    local pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [ -n "$pgid" ]; then
+        kill -TERM -- "-$pgid" 2>/dev/null
+    else
+        kill -TERM "$pid" 2>/dev/null
+    fi
+    for _ in {1..50}; do
+        local state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')
+        if [ -z "$state" ] || [[ "$state" == Z* ]]; then
+            return
+        fi
+        sleep 0.1
     done
-    kill -9 "$pid" 2>/dev/null
+    if [ -n "$pgid" ]; then
+        kill -KILL -- "-$pgid" 2>/dev/null
+    else
+        kill -KILL "$pid" 2>/dev/null
+    fi
 }
 
 kill_by_pid_file() {
@@ -70,13 +82,16 @@ kill_by_port() {
 kill_by_pid_file "$PROJECT_ROOT/.server.pid" "后端服务"
 kill_by_port "$SERVER_PORT" "后端服务"
 
+# 停止任务 worker
+kill_by_pid_file "$PROJECT_ROOT/.worker.pid" "任务 Worker"
+
 # 停止前端
 kill_by_pid_file "$PROJECT_ROOT/.client.pid" "前端服务"
 kill_by_port "$CLIENT_PORT" "前端服务"
 
 # 清理残留进程
 echo -e "\n${YELLOW}检查残留进程...${NC}"
-for pattern in "python.*app.py" "flask" "vite.*--port.*$CLIENT_PORT" "node.*vite" "npm.*run.*dev"; do
+for pattern in "python.*app.py" "gunicorn.*app:app" "python.*worker.py" "flask" "vite.*--port.*$CLIENT_PORT" "node.*vite" "npm.*run.*dev"; do
     pids=$(pgrep -f "$pattern" 2>/dev/null)
     if [ -n "$pids" ]; then
         echo -e "${YELLOW}清理匹配 [$pattern] 的进程...${NC}"
@@ -96,18 +111,18 @@ for port in $SERVER_PORT $CLIENT_PORT; do
 done
 
 # 清理 PID 文件
-rm -f "$PROJECT_ROOT/.server.pid" "$PROJECT_ROOT/.client.pid"
+rm -f "$PROJECT_ROOT/.server.pid" "$PROJECT_ROOT/.client.pid" "$PROJECT_ROOT/.worker.pid"
 
 echo -e "\n${GREEN}================================${NC}"
 echo -e "${GREEN}   停止完成！端口已释放${NC}"
 echo -e "${GREEN}================================${NC}\n"
 
-if [ -f "$PROJECT_ROOT/server.log" ] || [ -f "$PROJECT_ROOT/client.log" ]; then
+if [ -f "$PROJECT_ROOT/server.log" ] || [ -f "$PROJECT_ROOT/worker.log" ] || [ -f "$PROJECT_ROOT/client.log" ]; then
     echo -e "${CYAN}是否清理日志文件？ [y/N]${NC}"
     read -r -n 1 response
     echo
     if [[ "$response" =~ ^[Yy]$ ]]; then
-        rm -f "$PROJECT_ROOT/server.log" "$PROJECT_ROOT/client.log"
+        rm -f "$PROJECT_ROOT/server.log" "$PROJECT_ROOT/worker.log" "$PROJECT_ROOT/client.log"
         echo -e "${GREEN}✓ 日志文件已清理${NC}\n"
     fi
 fi

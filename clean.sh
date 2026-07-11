@@ -41,7 +41,7 @@ else
 fi
 
 # 清理日志文件
-rm -f server.log client.log
+rm -f server.log worker.log client.log
 echo "✓ 已清理日志文件"
 
 echo ""
