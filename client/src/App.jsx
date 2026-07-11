@@ -6,9 +6,14 @@ import ResultDisplay from './components/ResultDisplay'
 import VideoResultDisplay from './components/VideoResultDisplay'
 import PromptCollection from './components/PromptCollection'
 import TaskHistory from './components/TaskHistory'
+import CodeRainCanvas from './components/CodeRainCanvas'
+import GlassBackdrop from './components/GlassBackdrop'
+import IconButton from './components/ui/IconButton'
+import SegmentedControl from './components/ui/SegmentedControl'
+import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Square, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, Clock, LogOut, Bot, Send, Check } from 'lucide-react'
+import { Play, Square, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, Clock, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert } from 'lucide-react'
 import { useLocalStorage } from './lib/useLocalStorage'
 
 axios.defaults.withCredentials = true
@@ -29,19 +34,34 @@ function LoginPage({ onLogin }) {
     }
   }
   return (
-    <div className="min-h-screen bg-nexus-bg flex items-center justify-center">
-      <form onSubmit={handleSubmit} className="w-80 p-6 border border-nexus-border rounded-lg bg-[#0a0a0a]">
-        <div className="text-center mb-6">
-          <span className="text-nexus-green font-mono text-lg">&gt;</span>
-          <span className="text-white font-mono text-lg ml-2">Ink_Traces_WebUI</span>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#050706] p-5">
+      <CodeRainCanvas status="submitting" />
+      <div className="absolute inset-0 bg-black/55" aria-hidden="true" />
+      <form onSubmit={handleSubmit} className="liquid-login relative z-10 w-full max-w-[380px] p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="brand-mark flex size-10 items-center justify-center text-nexus-green">
+            <Braces size={20} />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-nexus-text-light">Ink Traces</h1>
+            <p className="mt-0.5 text-xs text-nexus-muted">Visual generation workspace</p>
+          </div>
         </div>
-        <input name="username" placeholder="Username" autoFocus
-          className="w-full mb-3 px-3 py-2 bg-transparent border border-nexus-border rounded text-white font-mono text-sm outline-none focus:border-nexus-green" />
-        <input name="password" type="password" placeholder="Password"
-          className="w-full mb-4 px-3 py-2 bg-transparent border border-nexus-border rounded text-white font-mono text-sm outline-none focus:border-nexus-green" />
-        {error && <div className="text-red-400 text-xs font-mono mb-3">{error}</div>}
-        <button type="submit" className="w-full py-2 bg-nexus-green/10 border border-nexus-green/30 rounded text-nexus-green font-mono text-sm hover:bg-nexus-green/20 transition-colors">
-          LOGIN
+        <label className="mb-1.5 block text-xs font-medium text-nexus-text" htmlFor="login-username">用户名</label>
+        <div className="relative mb-4">
+          <User size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-nexus-muted" />
+          <input id="login-username" name="username" autoComplete="username" required autoFocus
+            className="glass-input h-10 w-full pl-9 pr-3 text-sm text-nexus-text-light outline-none" />
+        </div>
+        <label className="mb-1.5 block text-xs font-medium text-nexus-text" htmlFor="login-password">密码</label>
+        <div className="relative mb-4">
+          <LockKeyhole size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-nexus-muted" />
+          <input id="login-password" name="password" type="password" autoComplete="current-password" required
+            className="glass-input h-10 w-full pl-9 pr-3 text-sm text-nexus-text-light outline-none" />
+        </div>
+        {error && <div role="alert" className="mb-3 rounded border border-nexus-red/25 bg-nexus-red/10 px-3 py-2 text-xs text-nexus-red">{error}</div>}
+        <button type="submit" className="btn-base btn-primary w-full min-h-10">
+          登录
         </button>
       </form>
     </div>
@@ -75,6 +95,38 @@ function App({ onLogout }) {
   const [videoPromptAgentInput, setVideoPromptAgentInput] = useState('')
   const [videoPromptAgentLoading, setVideoPromptAgentLoading] = useState(false)
   const [videoPromptAgentDraft, setVideoPromptAgentDraft] = useState('')
+  const [notification, setNotification] = useState(null)
+  const notificationTimer = useRef(null)
+  const appShellRef = useRef(null)
+
+  const notify = useCallback((message, tone = 'success') => {
+    window.clearTimeout(notificationTimer.current)
+    setNotification({ message, tone })
+    notificationTimer.current = window.setTimeout(() => setNotification(null), 2800)
+  }, [])
+
+  useEffect(() => () => window.clearTimeout(notificationTimer.current), [])
+
+  useEffect(() => {
+    const shell = appShellRef.current
+    if (!shell || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+    let frameId = null
+
+    const updateHighlight = (event) => {
+      cancelAnimationFrame(frameId)
+      frameId = requestAnimationFrame(() => {
+        const rect = shell.getBoundingClientRect()
+        shell.style.setProperty('--glass-light-x', `${((event.clientX - rect.left) / rect.width) * 100}%`)
+        shell.style.setProperty('--glass-light-y', `${((event.clientY - rect.top) / rect.height) * 100}%`)
+      })
+    }
+
+    shell.addEventListener('pointermove', updateHighlight, { passive: true })
+    return () => {
+      shell.removeEventListener('pointermove', updateHighlight)
+      cancelAnimationFrame(frameId)
+    }
+  }, [])
 
   const [apiProvider, setApiProvider] = useState('vertex')
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
@@ -84,7 +136,7 @@ function App({ onLogout }) {
   const makeImgTab = (id) => ({
     id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
     chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', watermark: false,
-    loading: false, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null
+    loading: false, taskId: null, taskStatus: null, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null
   })
 
   const [imgTabs, setImgTabs] = useLocalStorage('img_tabs', [makeImgTab(1)])
@@ -94,7 +146,11 @@ function App({ onLogout }) {
   const activeImgTab = imgTabs.find(t => t.id === activeImgTabId) || imgTabs[0] || makeImgTab(1)
 
   const updateImgTab = useCallback((id, updates) => {
-    setImgTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t))
+    setImgTabs(prev => prev.map(t => {
+      if (t.id !== id) return t
+      const resolvedUpdates = typeof updates === 'function' ? updates(t) : updates
+      return { ...t, ...resolvedUpdates }
+    }))
   }, [setImgTabs])
 
   const addImgTab = () => {
@@ -128,7 +184,7 @@ function App({ onLogout }) {
     fast: false, audio: true, returnLastFrame: false, mode: 'keyframe', search: false,
     firstFrame: null, lastFrame: null, refImages: [], refVideos: [], refAudios: [],
     loading: false, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0, error: null,
-    taskId: null, taskProvider: null
+    taskId: null, taskProvider: null, taskStatus: null
   })
 
   const [videoTabs, setVideoTabs] = useLocalStorage('vid_tabs', [makeVideoTab(1)])
@@ -141,12 +197,17 @@ function App({ onLogout }) {
     setVideoTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t))
   }, [setVideoTabs])
   const videoPollTimers = useRef(new Map())
+  const taskPollsInFlight = useRef(new Set())
   const unmountedRef = useRef(false)
 
-  useEffect(() => () => {
-    unmountedRef.current = true
-    videoPollTimers.current.forEach(timer => clearTimeout(timer))
-    videoPollTimers.current.clear()
+  useEffect(() => {
+    // React Strict Mode runs setup -> cleanup -> setup in development.
+    unmountedRef.current = false
+    return () => {
+      unmountedRef.current = true
+      videoPollTimers.current.forEach(timer => clearTimeout(timer))
+      videoPollTimers.current.clear()
+    }
   }, [])
 
   const addVideoTab = () => {
@@ -226,7 +287,7 @@ function App({ onLogout }) {
       if (response.data.success) {
         setCurrentModel(newModel)
       }
-    } catch (error) { alert('切换失败: ' + (error.response?.data?.error || error.message)) }
+    } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
 
   const switchApiProvider = async () => {
@@ -239,7 +300,7 @@ function App({ onLogout }) {
         setApiProvider(newProvider)
         if (newProvider !== 'ark' && response.data.model) setCurrentModel(response.data.model)
       }
-    } catch (error) { alert('切换失败: ' + (error.response?.data?.error || error.message)) }
+    } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
   
   const switchVideoProvider = async () => {
@@ -247,32 +308,80 @@ function App({ onLogout }) {
     try {
       const response = await axios.post('/api/video/provider', { provider: newProvider })
       if (response.data.success) setVideoProvider(newProvider)
-    } catch (error) { alert('切换失败: ' + (error.response?.data?.error || error.message)) }
+    } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
 
   const handleSavePrompt = async () => {
     const p = appMode === 'video' ? activeTab.prompt : activeImgTab.prompt
-    if (!p || !p.trim()) return alert('Empty prompt')
+    if (!p || !p.trim()) return notify('请先输入提示词', 'error')
     try {
       const response = await axios.post('/api/prompts', { text: p.trim() })
-      if (response.data.success) alert('Saved to vault')
-      else alert('Failed to save')
-    } catch (e) { alert('Failed to save') }
+      if (response.data.success) notify('已保存到提示词库')
+      else notify('保存失败', 'error')
+    } catch (e) { notify('保存失败', 'error') }
   }
+
+  const pollImageTask = useCallback(async (tabId, taskId) => {
+    const timerKey = `image:${tabId}:${taskId}`
+    if (taskPollsInFlight.current.has(timerKey)) return
+    if (videoPollTimers.current.has(timerKey)) {
+      clearTimeout(videoPollTimers.current.get(timerKey))
+      videoPollTimers.current.delete(timerKey)
+    }
+    taskPollsInFlight.current.add(timerKey)
+    try {
+      const response = await axios.get(`/api/tasks/${taskId}`)
+      if (unmountedRef.current) return
+      const task = response.data.task
+      const result = task.result || {}
+      updateImgTab(tabId, { taskStatus: task.status })
+      if (task.status === 'succeeded') {
+        updateImgTab(tabId, {
+          loading: false,
+          taskId: null,
+          generatedImages: result.local_images || [],
+          thinkingText: result.thinking || '',
+          error: null
+        })
+      } else if (task.status === 'failed') {
+        updateImgTab(tabId, {
+          loading: false,
+          taskId: null,
+          error: task.error || '生成失败',
+          errorType: result.error_type,
+          errorDetails: result.error_details
+        })
+      } else {
+        const timer = setTimeout(() => pollImageTask(tabId, taskId), 1500)
+        videoPollTimers.current.set(timerKey, timer)
+      }
+    } catch (error) {
+      if (unmountedRef.current) return
+      if (error.response?.status === 404) {
+        updateImgTab(tabId, { loading: false, taskId: null, error: '任务已被删除或不存在' })
+        return
+      }
+      const timer = setTimeout(() => pollImageTask(tabId, taskId), 3000)
+      videoPollTimers.current.set(timerKey, timer)
+    } finally {
+      taskPollsInFlight.current.delete(timerKey)
+    }
+  }, [updateImgTab])
 
   const handleGenerate = async () => {
     const tab = activeImgTab
     if (!tab.prompt.trim()) return
     const requestModel = apiProvider === 'ark' ? undefined : currentModel
 
-    updateImgTab(tab.id, { loading: true, error: null, errorType: null, errorDetails: null })
+    updateImgTab(tab.id, { loading: true, taskStatus: 'submitting', error: null, errorType: null, errorDetails: null })
     if (!tab.chatMode) {
       updateImgTab(tab.id, { generatedImages: [], thinkingText: '' })
     }
 
     try {
+      let response
       if (tab.uploadedImages.length === 0) {
-        const response = await axios.post('/api/generate', {
+        response = await axios.post('/api/generate', {
           prompt: tab.prompt, aspect_ratio: tab.aspectRatio, resolution: tab.resolution,
           use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId,
           think_level: tab.thinkLevel, provider: apiProvider, model: requestModel,
@@ -281,7 +390,6 @@ function App({ onLogout }) {
             watermark: Boolean(tab.watermark)
           } : {})
         })
-        handleResponse(tab.id, response.data)
       } else {
         const formData = new FormData()
         formData.append('prompt', tab.prompt)
@@ -318,19 +426,25 @@ function App({ onLogout }) {
         })
         if (pendingFetches.length) await Promise.all(pendingFetches)
         
-        const response = await axios.post('/api/generate', formData, {
+        response = await axios.post('/api/generate', formData, {
           headers: { 'Content-Type': 'multipart/form-data' }
         })
+      }
+
+      if (response.data.queued && response.data.task_id) {
+        updateImgTab(tab.id, { taskId: response.data.task_id, taskStatus: response.data.status || 'pending', loading: true })
+        pollImageTask(tab.id, response.data.task_id)
+      } else {
         handleResponse(tab.id, response.data)
+        updateImgTab(tab.id, { loading: false })
       }
     } catch (err) {
       const errorData = err.response?.data || {}
       updateImgTab(tab.id, {
+        loading: false,
         error: errorData.error || err.message || '生成失败',
         errorType: errorData.error_type, errorDetails: errorData.error_details
       })
-    } finally {
-      updateImgTab(tab.id, { loading: false })
     }
   }
 
@@ -381,16 +495,34 @@ function App({ onLogout }) {
 
   // 视频生成
   const pollVideoTask = useCallback(async (tabId, taskId, provider) => {
-    const pollProvider = provider || videoProvider
-    const timerKey = `${tabId}:${taskId}`
+    const timerKey = `video:${tabId}:${taskId}`
+    if (taskPollsInFlight.current.has(timerKey)) return
     if (videoPollTimers.current.has(timerKey)) {
       clearTimeout(videoPollTimers.current.get(timerKey))
       videoPollTimers.current.delete(timerKey)
     }
+    taskPollsInFlight.current.add(timerKey)
     try {
-      const resp = await axios.get('/api/video/task', { params: { task_id: taskId, provider: pollProvider } })
+      let d
+      try {
+        const resp = await axios.get(`/api/tasks/${taskId}`)
+        const task = resp.data.task
+        const result = task.result || {}
+        updateTab(tabId, { taskStatus: task.status })
+        d = {
+          success: true,
+          status: task.status === 'succeeded' ? 'TASK_STATUS_SUCCEED' : task.status === 'failed' ? 'TASK_STATUS_FAILED' : 'TASK_STATUS_PROCESSING',
+          reason: task.error,
+          progress: task.progress || 0,
+          videos: result.local_video ? [{ video_url: result.local_video }] : (result.videos || []),
+          images: result.local_last_frame ? [{ image_url: result.local_last_frame }] : (result.images || [])
+        }
+      } catch (error) {
+        if (error.response?.status !== 404 || !provider) throw error
+        const resp = await axios.get('/api/video/task', { params: { task_id: taskId, provider } })
+        d = resp.data
+      }
       if (unmountedRef.current) return
-      const d = resp.data
       if (!d.success) { updateTab(tabId, { error: d.error, loading: false }); return }
 
       updateTab(tabId, { progress: d.progress || 0, eta: d.eta || 0 })
@@ -407,14 +539,21 @@ function App({ onLogout }) {
       } else if (d.status === 'TASK_STATUS_FAILED') {
         updateTab(tabId, { loading: false, taskId: null, taskProvider: null, error: d.reason || '视频生成失败' })
       } else {
-        const timer = setTimeout(() => pollVideoTask(tabId, taskId, pollProvider), 3000)
+        const timer = setTimeout(() => pollVideoTask(tabId, taskId, provider), 3000)
         videoPollTimers.current.set(timerKey, timer)
       }
     } catch (e) {
       if (unmountedRef.current) return
-      updateTab(tabId, { error: e.message, loading: false })
+      if (e.response?.status === 404) {
+        updateTab(tabId, { loading: false, taskId: null, taskProvider: null, error: '任务已被删除或不存在' })
+        return
+      }
+      const timer = setTimeout(() => pollVideoTask(tabId, taskId, provider), 3000)
+      videoPollTimers.current.set(timerKey, timer)
+    } finally {
+      taskPollsInFlight.current.delete(timerKey)
     }
-  }, [updateTab, videoProvider])
+  }, [updateTab])
 
   // 视频模式粘贴上传图片
   useEffect(() => {
@@ -450,6 +589,12 @@ function App({ onLogout }) {
 
   // 页面加载时恢复所有未完成的视频任务轮询
   useEffect(() => {
+    imgTabs.forEach(tab => {
+      if (tab.taskId && !tab.error) {
+        updateImgTab(tab.id, { loading: true })
+        pollImageTask(tab.id, tab.taskId)
+      }
+    })
     videoTabs.forEach(tab => {
       if (tab.taskId && !tab.videoUrl && !tab.error) {
         updateTab(tab.id, { loading: true })
@@ -465,7 +610,7 @@ function App({ onLogout }) {
     const tab = activeTab
     if (!videoTabHasInput(tab)) return
 
-    updateTab(tab.id, { loading: true, error: null, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0 })
+    updateTab(tab.id, { loading: true, taskStatus: 'submitting', error: null, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0 })
 
     try {
       let resp
@@ -523,10 +668,11 @@ function App({ onLogout }) {
         }, { timeout: 300000 })
       }
 
-      if (resp.data.success && resp.data.task_id) {
+      if (resp.data.success && (resp.data.db_task_id || resp.data.task_id)) {
         const taskProvider = resp.data.provider || videoProvider
-        updateTab(tab.id, { taskId: resp.data.task_id, taskProvider })
-        pollVideoTask(tab.id, resp.data.task_id, taskProvider)
+        const localTaskId = resp.data.db_task_id || resp.data.task_id
+        updateTab(tab.id, { taskId: localTaskId, taskProvider, taskStatus: 'pending' })
+        pollVideoTask(tab.id, localTaskId, taskProvider)
       } else {
         updateTab(tab.id, { error: resp.data.error || '提交失败', loading: false })
       }
@@ -614,7 +760,7 @@ function App({ onLogout }) {
   }
 
   // 左侧面板拖拽调整宽度
-  const [panelWidth, setPanelWidth] = useState(480)
+  const [panelWidth, setPanelWidth] = useState(400)
   const isDragging = useRef(false)
 
   // 从 Task Queue 加载任务到主 UI
@@ -686,7 +832,7 @@ function App({ onLogout }) {
     document.body.style.userSelect = 'none'
     const onMove = (ev) => {
       if (!isDragging.current) return
-      setPanelWidth(Math.min(700, Math.max(300, ev.clientX)))
+      setPanelWidth(Math.min(560, Math.max(300, ev.clientX)))
     }
     const onUp = () => {
       isDragging.current = false
@@ -699,72 +845,110 @@ function App({ onLogout }) {
     window.addEventListener('mouseup', onUp)
   }
 
+  const handleResizeKeyDown = (event) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+    event.preventDefault()
+    const delta = event.key === 'ArrowLeft' ? -20 : 20
+    setPanelWidth(width => Math.min(560, Math.max(300, width + delta)))
+  }
+
+  const activeTaskCount = imgTabs.filter(tab => tab.loading).length + videoTabs.filter(tab => tab.loading).length
+  const handleSelectSavedPrompt = (prompt) => {
+    if (appMode === 'video') updateTab(activeTab.id, { prompt })
+    else updateImgTab(activeImgTab.id, { prompt })
+    setShowPromptCollection(false)
+  }
+  const currentModelLabel = appMode === 'video'
+    ? 'Seedance 2.0'
+    : apiProvider === 'ark'
+      ? 'Seedream 5.0 Pro'
+      : currentModel.includes('flash') ? 'Gemini Flash 3.1' : 'Gemini Pro 3.0'
+  const currentProviderLabel = appMode === 'video'
+    ? (videoProvider === 'ark' ? 'Ark' : 'Jiekou')
+    : apiProvider === 'vertex' ? 'Vertex AI' : apiProvider === 'ark' ? 'Ark' : 'AI Studio'
+  const canSwitchModel = appMode === 'image' && apiProvider !== 'ark' && availableModels.length > 1
+
   return (
-    <div className="min-h-screen bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden selection:bg-nexus-green-dim selection:text-nexus-green relative">
+    <div ref={appShellRef} className="app-shell bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative">
+      <GlassBackdrop />
       
       {/* 极简顶栏 */}
-      <header className="h-10 border-b border-nexus-border flex items-center justify-between px-4 bg-nexus-bg z-50 shrink-0">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 text-sm font-mono text-nexus-text">
-            <span className="text-nexus-green">&gt;</span>
-            <span className="tracking-wide">Ink_Traces_WebUI v1.0.0</span>
+      <header className="app-header liquid-glass flex items-center justify-between px-3 z-50 shrink-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="brand-mark flex size-8 items-center justify-center text-nexus-green">
+              <Braces size={15} />
+            </div>
+            <div className="leading-tight">
+              <div className="text-sm font-semibold text-white">Ink Traces</div>
+              <div className="brand-version font-mono text-[10px] text-nexus-muted">VISUAL WORKSPACE</div>
+            </div>
           </div>
-          <div className="flex items-center gap-1 ml-2">
-            <button onClick={() => setAppMode('image')} className={`px-3 py-1 text-xs font-mono tracking-widest transition-colors rounded ${appMode === 'image' ? 'bg-nexus-green/10 text-nexus-green border border-nexus-green/30' : 'text-nexus-text hover:text-white'}`}>
-              <Cpu size={11} className="inline mr-1.5 -mt-0.5" />IMAGE
-            </button>
-            <button onClick={() => setAppMode('video')} className={`px-3 py-1 text-xs font-mono tracking-widest transition-colors rounded ${appMode === 'video' ? 'bg-nexus-green/10 text-nexus-green border border-nexus-green/30' : 'text-nexus-text hover:text-white'}`}>
-              <Film size={11} className="inline mr-1.5 -mt-0.5" />VIDEO
-            </button>
-          </div>
+          <SegmentedControl
+            label="生成模式"
+            value={appMode}
+            onChange={setAppMode}
+            options={[
+              { value: 'image', label: '图片', icon: ImageIcon },
+              { value: 'video', label: '视频', icon: Film },
+            ]}
+          />
         </div>
-        <div className="flex items-center gap-6 text-sm font-mono">
-          <button onClick={switchModel} className="flex items-center gap-2 text-nexus-text hover:text-white transition-colors cursor-pointer group">
-            <span className="w-2 h-2 rounded-full bg-nexus-green shadow-[0_0_8px_#10b981]"></span>
-            GPU: <span className="group-hover:text-nexus-green transition-colors">{appMode === 'video' ? 'Seedance_2.0_Cluster' : apiProvider === 'ark' ? 'SEEDREAM_5.0_PRO' : currentModel.includes('flash') ? 'FLASH_3.1_CLUSTER' : 'PRO_3.0_CLUSTER'}</span>
+        <div className="header-actions flex min-w-0 items-center gap-1.5">
+          <button onClick={canSwitchModel ? switchModel : undefined} aria-disabled={!canSwitchModel} className={`header-chip btn-base btn-outline max-w-[220px] ${canSwitchModel ? '' : 'cursor-default'}`} title={canSwitchModel ? '切换模型' : '当前模型'}>
+            <Cpu size={14} className="text-nexus-green" />
+            <span className="header-model-label truncate">{currentModelLabel}</span>
           </button>
-          <button onClick={appMode === 'video' ? switchVideoProvider : switchApiProvider} className="flex items-center gap-2 text-nexus-text hover:text-white transition-colors cursor-pointer group">
-            <Database size={12} className="group-hover:text-nexus-green transition-colors" />
-            NODE: <span className="group-hover:text-nexus-green transition-colors">{appMode === 'video' ? (videoProvider === 'ark' ? 'ARK' : 'JIEKOU') : apiProvider === 'vertex' ? 'VERTEX_AI' : apiProvider === 'ark' ? 'ARK_SEEDREAM' : 'AI_STUDIO'}</span>
+          <button onClick={appMode === 'video' ? switchVideoProvider : switchApiProvider} className="header-chip btn-base btn-outline max-w-[150px]" title="切换 Provider">
+            <Database size={14} className="text-nexus-blue" />
+            <span className="header-provider-label truncate">{currentProviderLabel}</span>
           </button>
-          <button onClick={() => setShowPromptCollection(!showPromptCollection)} className={`flex items-center gap-2 transition-colors cursor-pointer group ${showPromptCollection ? 'text-nexus-green' : 'text-nexus-text hover:text-white'}`}>
-            <HardDrive size={14} className="group-hover:text-nexus-green transition-colors" /> VAULT
-          </button>
-          <button onClick={() => setShowTaskQueue(!showTaskQueue)} className={`flex items-center gap-2 transition-colors cursor-pointer group ${showTaskQueue ? 'text-nexus-green' : 'text-nexus-text hover:text-white'}`}>
-            <Clock size={14} className="group-hover:text-nexus-green transition-colors" /> QUEUE
-          </button>
-          <button onClick={handleLogout} className="flex items-center gap-2 text-nexus-text hover:text-red-400 transition-colors cursor-pointer group">
-            <LogOut size={14} />
-          </button>
+          <div className="glass-control-group flex items-center gap-0.5">
+            <IconButton label="提示词库" onClick={() => { setShowPromptCollection(value => !value); setShowTaskQueue(false) }} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
+            <span className="relative inline-flex">
+              <IconButton label="任务历史" onClick={() => { setShowTaskQueue(value => !value); setShowPromptCollection(false) }} className={showTaskQueue ? 'text-nexus-green' : ''}><Clock size={16} /></IconButton>
+              {activeTaskCount > 0 && <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-nexus-amber text-[9px] font-semibold text-black">{activeTaskCount}</span>}
+            </span>
+            <IconButton label="退出登录" onClick={handleLogout} className="hover:text-nexus-red"><LogOut size={16} /></IconButton>
+          </div>
         </div>
       </header>
 
       {/* 主工作区 */}
-      <main className="flex-grow flex min-h-0 relative">
+      <main className="workspace-main flex-grow relative" style={{ '--prompt-user-width': `${panelWidth}px` }}>
 
       {appMode === 'image' ? (<>
         
-        {/* 左侧：代码编辑器风格的输入区 */}
-        <div style={{ width: panelWidth }} className="shrink-0 border-r border-nexus-border flex flex-col bg-nexus-bg relative z-40 overflow-hidden">
+        {/* 左侧：提示词输入 */}
+        <section className="prompt-pane relative z-20">
           
           {/* 图片标签页栏 */}
-          <div className="flex border-b border-nexus-border text-sm font-mono overflow-x-auto custom-scrollbar shrink-0">
+          <div className="flex border-b border-nexus-border text-sm font-mono overflow-x-auto custom-scrollbar shrink-0" role="tablist" aria-label="图片任务标签">
             {imgTabs.map(tab => (
               <div key={tab.id}
                 onClick={() => setActiveImgTabId(tab.id)}
                 onDoubleClick={() => setShowFullEditor(true)}
-                className={`px-3 py-2.5 flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 transition-colors ${tab.id === activeImgTabId ? 'border-nexus-green text-white' : 'border-transparent text-nexus-text hover:bg-white/5'}`}
+                role="tab"
+                tabIndex={tab.id === activeImgTabId ? 0 : -1}
+                aria-selected={tab.id === activeImgTabId}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    setActiveImgTabId(tab.id)
+                  }
+                }}
+                className={`px-3 py-2.5 flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 transition-colors ${tab.id === activeImgTabId ? 'border-nexus-green text-white bg-nexus-surface' : 'border-transparent text-nexus-text hover:bg-nexus-surface'}`}
               >
                 {tab.loading ? <div className="w-3 h-3 border border-nexus-green border-t-transparent rounded-full animate-spin" /> : <Cpu size={12} className={tab.id === activeImgTabId ? 'text-nexus-green' : ''} />}
                 <span className="max-w-[80px] truncate text-xs">{tab.prompt ? tab.prompt.slice(0, 12) : `img_${tab.id}`}</span>
                 {imgTabs.length > 1 && (
-                  <button onClick={e => { e.stopPropagation(); closeImgTab(tab.id) }} className="ml-1 text-nexus-text hover:text-red-400 transition-colors">
+                  <button aria-label={`关闭图片标签 ${tab.id}`} title="关闭标签" onClick={e => { e.stopPropagation(); closeImgTab(tab.id) }} className="ml-1 rounded p-0.5 text-nexus-text hover:bg-nexus-red/10 hover:text-nexus-red transition-colors">
                     <X size={10} />
                   </button>
                 )}
               </div>
             ))}
-            <button onClick={addImgTab} className="px-2 py-2.5 text-nexus-text hover:text-nexus-green transition-colors shrink-0">+</button>
+            <button aria-label="新建图片标签" title="新建标签" onClick={addImgTab} className="px-2.5 py-2 text-nexus-text hover:bg-nexus-surface hover:text-nexus-green transition-colors shrink-0"><Plus size={14} /></button>
           </div>
 
           {/* 编辑器主体 */}
@@ -777,75 +961,86 @@ function App({ onLogout }) {
           </div>
 
           {/* 执行按钮区 */}
-          <div className="p-4 border-t border-nexus-border bg-nexus-bg z-10">
+          <div className="prompt-actions p-3 border-t border-nexus-border z-10">
             <button
               onClick={handleGenerate}
               disabled={activeImgTab.loading || !activeImgTab.prompt.trim()}
-              className="w-full py-4 px-6 rounded-lg bg-[#1a1a1a] hover:bg-[#222] border border-[#333] hover:border-nexus-green transition-all flex items-center justify-center gap-3 text-sm font-mono tracking-widest disabled:opacity-50 disabled:cursor-not-allowed group"
+              className="btn-base btn-primary w-full min-h-11"
             >
               {activeImgTab.loading ? (
-                <><Square size={14} className="text-nexus-text animate-pulse" /> <span>EXECUTING...</span></>
+                <><Square size={14} className="animate-pulse" /> <span>生成中</span></>
               ) : (
-                <><Play size={14} className="text-nexus-green group-hover:drop-shadow-[0_0_8px_#10b981]" fill="currentColor" /> <span className="text-white">EXECUTE RUN()</span></>
+                <><Play size={14} fill="currentColor" /> <span>生成图片</span></>
               )}
             </button>
           </div>
 
-        </div>
+        </section>
 
         {/* 拖拽手柄 */}
         <div
           onMouseDown={handleDragStart}
-          className="w-1 shrink-0 cursor-col-resize hover:bg-nexus-green/50 active:bg-nexus-green transition-colors z-50"
+          className="workspace-resizer z-20"
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+          aria-valuemin={300}
+          aria-valuemax={560}
+          aria-valuenow={panelWidth}
+          aria-label="调整提示词面板宽度"
+          onKeyDown={handleResizeKeyDown}
         />
 
-        {/* 右侧：画布与控制台 (中间区域) */}
-        <div className={`flex-grow flex flex-col min-w-0 bg-[#0f0f0f] relative p-4 gap-6 z-0 transition-all duration-300 ${showPromptCollection ? '' : ''}`}>
-          
-          <div className="absolute inset-0 bg-nexus-grid bg-nexus-grid-size opacity-20 pointer-events-none"></div>
+        {/* 中间：生成画布 */}
+        <section className="canvas-pane">
+          <div className="canvas-grid" />
 
           {/* 上部：输出终端画布 */}
-          <div className="flex-grow min-h-0 panel-border relative flex flex-col overflow-hidden shadow-2xl z-10" style={{ height: 0 }}>
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-nexus-border bg-nexus-panel shadow-2xl">
             <ResultDisplay
               isLoading={activeImgTab.loading} generatedImages={activeImgTab.generatedImages} thinkingText={activeImgTab.thinkingText}
               error={activeImgTab.error} errorType={activeImgTab.errorType} errorDetails={activeImgTab.errorDetails}
+              taskStatus={activeImgTab.taskStatus} taskId={activeImgTab.taskId} provider={apiProvider}
             />
           </div>
+        </section>
 
-          {/* 下部：参数控制台 */}
-          <div className="h-[240px] shrink-0 panel-border p-4 flex gap-6 overflow-x-auto z-10 custom-scrollbar">
+        {/* 右侧：图片参数 */}
+        <aside className="inspector-pane custom-scrollbar">
+          <div className="inspector-header">
+            <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />图片参数</div>
+            <span className="font-mono text-[11px] text-nexus-muted">{activeImgTab.aspectRatio} · {activeImgTab.resolution}</span>
+          </div>
             
             {/* GEOMETRY (宽高比) */}
-            <div className="w-[160px] shrink-0 flex flex-col">
-              <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                <Grid3X3 size={12} /> GEOMETRY
+            <div className="inspector-section">
+              <div className="inspector-title">
+                <Grid3X3 size={14} className="text-nexus-blue" /> 画幅
               </div>
               <div className="flex-grow">
                  <select 
                    value={activeImgTab.aspectRatio} onChange={e => updateImgTab(activeImgTab.id, { aspectRatio: e.target.value })}
-                   className="w-full bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer py-2"
+                   className="field-select w-full font-mono"
                  >
                    {aspectRatios.map((ratio) => (
                      <option key={ratio} value={ratio} className="bg-nexus-bg">{ratio}</option>
                    ))}
                  </select>
-                 <div className="mt-4 text-sm font-mono text-nexus-text opacity-50 text-center">
-                    SELECT ASPECT RATIO
-                 </div>
+                 <div className="mt-2 text-xs text-nexus-muted">输出画面的宽高比例</div>
               </div>
             </div>
 
             {/* ENGINE PARAMS (分辨率和其他) */}
-            <div className="w-[240px] shrink-0 flex flex-col border-l border-nexus-border pl-6">
-              <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                <Settings size={12} /> ENGINE PARAMS
+            <div className="inspector-section">
+              <div className="inspector-title">
+                <Settings size={14} className="text-nexus-green" /> 输出设置
               </div>
               <div className="flex flex-col justify-between flex-grow gap-2">
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">RESOLUTION</span>
+                   <span className="field-label">分辨率</span>
                    <select 
                      value={activeImgTab.resolution} onChange={e => updateImgTab(activeImgTab.id, { resolution: e.target.value })}
-                     className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer"
+                     className="field-select font-mono"
                    >
                      {resolutions.map((res) => (
                        <option key={res} value={res} className="bg-nexus-bg">{res}</option>
@@ -854,56 +1049,41 @@ function App({ onLogout }) {
                  </div>
                  {isArk ? (<>
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">FORMAT</span>
+                   <span className="field-label">格式</span>
                    <select
                      value={activeImgTab.outputFormat || 'png'}
                      onChange={e => updateImgTab(activeImgTab.id, { outputFormat: e.target.value })}
-                     className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer"
+                     className="field-select font-mono"
                    >
                      <option value="png" className="bg-nexus-bg">PNG</option>
                      <option value="jpeg" className="bg-nexus-bg">JPEG</option>
                    </select>
                  </div>
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">WATERMARK</span>
-                   <button
-                     onClick={() => updateImgTab(activeImgTab.id, { watermark: !activeImgTab.watermark })}
-                     className={`w-8 h-4 rounded-full relative transition-colors ${activeImgTab.watermark ? 'bg-nexus-green' : 'bg-[#333]'}`}
-                   >
-                     <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeImgTab.watermark ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                   </button>
+                   <span className="field-label">添加水印</span>
+                   <ToggleSwitch label="添加水印" checked={activeImgTab.watermark} onChange={watermark => updateImgTab(activeImgTab.id, { watermark })} />
                  </div>
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">PROMPT_OPT</span>
-                   <span className="text-xs font-mono text-nexus-green">STANDARD</span>
+                   <span className="field-label">提示词优化</span>
+                   <span className="text-xs font-medium text-nexus-green">标准</span>
                  </div>
                  </>) : (<>
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">USE_SEARCH</span>
-                   <button 
-                     onClick={() => updateImgTab(activeImgTab.id, { useSearch: !activeImgTab.useSearch })}
-                     className={`w-8 h-4 rounded-full relative transition-colors ${activeImgTab.useSearch ? 'bg-nexus-green' : 'bg-[#333]'}`}
-                   >
-                     <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeImgTab.useSearch ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                   </button>
+                   <span className="field-label">联网搜索</span>
+                   <ToggleSwitch label="联网搜索" checked={activeImgTab.useSearch} onChange={useSearch => updateImgTab(activeImgTab.id, { useSearch })} />
                  </div>
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">CHAT_STATE</span>
-                   <button 
-                     onClick={() => updateImgTab(activeImgTab.id, { chatMode: !activeImgTab.chatMode })}
-                     className={`w-8 h-4 rounded-full relative transition-colors ${activeImgTab.chatMode ? 'bg-nexus-green' : 'bg-[#333]'}`}
-                   >
-                     <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeImgTab.chatMode ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                   </button>
+                   <span className="field-label">连续对话</span>
+                   <ToggleSwitch label="连续对话" checked={activeImgTab.chatMode} onChange={chatMode => updateImgTab(activeImgTab.id, { chatMode })} />
                  </div>
                  <div className="flex items-center justify-between">
-                   <span className="text-sm font-mono text-nexus-text">THINK</span>
+                   <span className="field-label">思考深度</span>
                    <select
                      value={activeImgTab.thinkLevel} onChange={e => updateImgTab(activeImgTab.id, { thinkLevel: e.target.value })}
-                     className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer"
+                     className="field-select"
                    >
-                     <option value="minimal" className="bg-nexus-bg">Minimal</option>
-                     <option value="high" className="bg-nexus-bg">High</option>
+                     <option value="minimal" className="bg-nexus-bg">快速</option>
+                     <option value="high" className="bg-nexus-bg">深入</option>
                    </select>
                  </div>
                  </>)}
@@ -911,194 +1091,196 @@ function App({ onLogout }) {
             </div>
 
             {/* SOURCE NODE */}
-            <div className="min-w-[260px] shrink-0 flex flex-col border-l border-nexus-border pl-6">
-              <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                <HardDrive size={12} /> SOURCE NODE
+            <div className="inspector-section">
+              <div className="inspector-title">
+                <HardDrive size={14} className="text-nexus-violet" /> 参考素材
               </div>
               <div className="flex-grow min-h-0">
                  <ImageToImage
                    uploadedImages={activeImgTab.uploadedImages}
-                   setUploadedImages={v => updateImgTab(activeImgTab.id, { uploadedImages: v })}
+                   setUploadedImages={value => updateImgTab(activeImgTab.id, tab => ({
+                     uploadedImages: typeof value === 'function'
+                       ? value(Array.isArray(tab.uploadedImages) ? tab.uploadedImages : [])
+                       : value,
+                   }))}
                    maxImages={isArk ? 10 : 14}
                  />
               </div>
             </div>
 
-          </div>
-
-        </div>
-
-        {/* 右侧折叠边栏：Vault Storage */}
-        <AnimatePresence>
-          {showPromptCollection && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="absolute right-0 top-0 bottom-0 border-l border-nexus-border bg-nexus-bg z-30 flex flex-col"
-            >
-              <div className="p-4 border-b border-nexus-border flex justify-between items-center shrink-0">
-                <div className="flex items-center gap-2 font-mono text-sm text-white">
-                  <HardDrive size={14} className="text-nexus-green" /> VAULT_STORAGE
-                </div>
-                <button onClick={() => setShowPromptCollection(false)} className="text-nexus-text hover:text-white transition-colors">
-                  <X size={14} />
-                </button>
-              </div>
-              <div className="flex-grow overflow-hidden relative">
-                <PromptCollection theme="dark" onSelectPrompt={(p) => { updateImgTab(activeImgTab.id, { prompt: p }); setShowPromptCollection(false); }} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </aside>
 
       </>) : (
         /* ============ VIDEO MODE ============ */
         <>
-          {/* 左侧：视频 Prompt 输入 */}
-          <div style={{ width: panelWidth }} className="shrink-0 border-r border-nexus-border flex flex-col bg-nexus-bg relative z-40 overflow-hidden">
+          {/* 左侧：视频提示词 */}
+          <section className="prompt-pane relative z-20">
             {/* 视频标签页栏 */}
-            <div className="flex border-b border-nexus-border text-sm font-mono overflow-x-auto custom-scrollbar shrink-0">
+            <div className="flex border-b border-nexus-border text-sm font-mono overflow-x-auto custom-scrollbar shrink-0" role="tablist" aria-label="视频任务标签">
               {videoTabs.map(tab => (
                 <div key={tab.id}
                   onClick={() => setActiveVideoTabId(tab.id)}
                   onDoubleClick={() => setShowFullEditor(true)}
-                  className={`px-3 py-2.5 flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 transition-colors ${tab.id === activeVideoTabId ? 'border-nexus-green text-white' : 'border-transparent text-nexus-text hover:bg-white/5'}`}
+                  role="tab"
+                  tabIndex={tab.id === activeVideoTabId ? 0 : -1}
+                  aria-selected={tab.id === activeVideoTabId}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      setActiveVideoTabId(tab.id)
+                    }
+                  }}
+                  className={`px-3 py-2.5 flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 transition-colors ${tab.id === activeVideoTabId ? 'border-nexus-green text-white bg-nexus-surface' : 'border-transparent text-nexus-text hover:bg-nexus-surface'}`}
                 >
                   {tab.loading ? <div className="w-3 h-3 border border-nexus-green border-t-transparent rounded-full animate-spin" /> : <Film size={12} className={tab.id === activeVideoTabId ? 'text-nexus-green' : ''} />}
                   <span className="max-w-[80px] truncate text-xs">{tab.prompt ? tab.prompt.slice(0, 12) : `vid_${tab.id}`}</span>
                   {videoTabs.length > 1 && (
-                    <button onClick={e => { e.stopPropagation(); closeVideoTab(tab.id) }} className="ml-1 text-nexus-text hover:text-red-400 transition-colors">
+                    <button aria-label={`关闭视频标签 ${tab.id}`} title="关闭标签" onClick={e => { e.stopPropagation(); closeVideoTab(tab.id) }} className="ml-1 rounded p-0.5 text-nexus-text hover:bg-nexus-red/10 hover:text-nexus-red transition-colors">
                       <X size={10} />
                     </button>
                   )}
                 </div>
               ))}
-              <button onClick={addVideoTab} className="px-2 py-2.5 text-nexus-text hover:text-nexus-green transition-colors shrink-0">+</button>
+              <button aria-label="新建视频标签" title="新建标签" onClick={addVideoTab} className="px-2.5 py-2 text-nexus-text hover:bg-nexus-surface hover:text-nexus-green transition-colors shrink-0"><Plus size={14} /></button>
             </div>
             <div className="flex-grow flex flex-col min-h-0 relative z-10">
-              <div className="flex-grow flex flex-col min-h-0 relative bg-nexus-bg">
-                <div className="absolute top-4 left-4 text-xs font-mono text-nexus-text opacity-50 z-10 pointer-events-none">
-                  // Describe your video<br/>
+              <div className="flex-grow flex flex-col min-h-0 relative bg-transparent">
+                <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
+                  <span className="text-xs font-medium text-nexus-text-light">视频提示词</span>
+                  <span className="font-mono text-[11px] text-nexus-muted">{activeTab.prompt.length}</span>
                 </div>
-                <div className="flex-grow min-h-0 relative mt-8 overflow-hidden">
+                <div className="flex-grow min-h-0 relative overflow-hidden">
                   <textarea
+                    aria-label="视频提示词"
                     value={activeTab.prompt}
                     onChange={(e) => updateTab(activeTab.id, { prompt: e.target.value })}
                     disabled={activeTab.loading}
-                    className="absolute inset-0 px-4 py-4 bg-transparent text-[#2ecc71] text-sm font-mono leading-6 outline-none resize-none whitespace-pre-wrap break-words overflow-y-auto selection:bg-[#2ecc71]/20 selection:text-white custom-scrollbar"
-                    spellCheck="false"
-                    placeholder="A cinematic drone shot over a futuristic city at sunset..."
+                    className="absolute inset-0 resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
+                    spellCheck="true"
+                    placeholder="描述镜头、主体、动作、光线与节奏..."
                   />
                 </div>
               </div>
             </div>
-            <div className="p-4 border-t border-nexus-border bg-nexus-bg z-10">
+            <div className="prompt-actions p-3 border-t border-nexus-border z-10">
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <button
                   onClick={handleOptimizeVideoPrompt}
                   disabled={activeTab.loading || optimizingVideoPrompt || !activeTab.prompt.trim()}
-                  className="py-2.5 px-3 rounded border border-nexus-border hover:border-nexus-green/60 bg-[#111] hover:bg-[#151515] text-nexus-text hover:text-nexus-green transition-all flex items-center justify-center gap-2 text-xs font-mono tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="btn-base btn-outline min-h-9 px-2 text-xs"
                 >
                   {optimizingVideoPrompt ? (
-                    <><Cpu size={12} className="animate-pulse" /> <span>QUICK...</span></>
+                    <><Cpu size={12} className="animate-pulse" /> <span>优化中</span></>
                   ) : (
-                    <><Settings size={12} /> <span>QUICK FIX</span></>
+                    <><Settings size={12} /> <span>快速优化</span></>
                   )}
                 </button>
                 <button
                   onClick={openVideoPromptAgent}
                   disabled={activeTab.loading || videoPromptAgentLoading || !videoTabHasInput(activeTab)}
-                  className={`py-2.5 px-3 rounded border transition-all flex items-center justify-center gap-2 text-xs font-mono tracking-widest disabled:opacity-40 disabled:cursor-not-allowed ${showVideoPromptAgent ? 'border-nexus-green/60 bg-nexus-green/10 text-nexus-green' : 'border-nexus-border bg-[#111] text-nexus-text hover:border-nexus-green/60 hover:bg-[#151515] hover:text-nexus-green'}`}
+                  className={`btn-base min-h-9 px-2 text-xs ${showVideoPromptAgent ? 'btn-active' : 'btn-outline'}`}
                 >
-                  <Bot size={12} /> <span>{videoPromptAgentLoading ? 'AGENT...' : 'AGENT'}</span>
+                  <Bot size={12} /> <span>{videoPromptAgentLoading ? '处理中' : '提示词助手'}</span>
                 </button>
               </div>
               <button
                 onClick={handleVideoGenerate}
                 disabled={activeTab.loading || !videoTabHasInput(activeTab)}
-                className="w-full py-4 px-6 rounded-lg bg-[#1a1a1a] hover:bg-[#222] border border-[#333] hover:border-nexus-green transition-all flex items-center justify-center gap-3 text-sm font-mono tracking-widest disabled:opacity-50 disabled:cursor-not-allowed group"
+                className="btn-base btn-primary w-full min-h-11"
               >
                 {activeTab.loading ? (
-                  <><Square size={14} className="text-nexus-text animate-pulse" /> <span>RENDERING...</span></>
+                  <><Square size={14} className="animate-pulse" /> <span>生成中</span></>
                 ) : (
-                  <><Play size={14} className="text-nexus-green group-hover:drop-shadow-[0_0_8px_#10b981]" fill="currentColor" /> <span className="text-white">RENDER VIDEO()</span></>
+                  <><Play size={14} fill="currentColor" /> <span>生成视频</span></>
                 )}
               </button>
             </div>
-          </div>
+          </section>
 
           {/* 拖拽手柄 */}
-          <div onMouseDown={handleDragStart} className="w-1 shrink-0 cursor-col-resize hover:bg-nexus-green/50 active:bg-nexus-green transition-colors z-50" />
+          <div
+            onMouseDown={handleDragStart}
+            onKeyDown={handleResizeKeyDown}
+            className="workspace-resizer z-20"
+            role="separator"
+            tabIndex={0}
+            aria-orientation="vertical"
+            aria-valuemin={300}
+            aria-valuemax={560}
+            aria-valuenow={panelWidth}
+            aria-label="调整提示词面板宽度"
+          />
 
-          {/* 右侧：视频画布与参数 */}
-          <div className="flex-grow flex flex-col min-w-0 bg-[#0f0f0f] relative p-4 gap-6 z-0">
-            <div className="absolute inset-0 bg-nexus-grid bg-nexus-grid-size opacity-20 pointer-events-none"></div>
+          {/* 中间：视频画布 */}
+          <section className="canvas-pane">
+            <div className="canvas-grid" />
 
             {/* 视频输出 */}
-            <div className="flex-grow min-h-0 panel-border relative flex flex-col overflow-hidden shadow-2xl z-10" style={{ height: 0 }}>
+            <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-nexus-border bg-nexus-panel shadow-2xl">
               <VideoResultDisplay
                 isLoading={activeTab.loading} videoUrl={activeTab.videoUrl} lastFrameUrl={activeTab.lastFrameUrl}
                 progress={activeTab.progress} error={activeTab.error} eta={activeTab.eta}
+                taskStatus={activeTab.taskStatus} taskId={activeTab.taskId} provider={videoProvider}
               />
             </div>
+          </section>
 
-            {/* 视频参数控制台 */}
-            <div className="h-[240px] shrink-0 panel-border p-4 flex gap-6 overflow-x-auto z-10 custom-scrollbar">
+          {/* 右侧：视频参数 */}
+          <aside className="inspector-pane custom-scrollbar">
+            <div className="inspector-header">
+              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />视频参数</div>
+              <span className="font-mono text-[11px] text-nexus-muted">{activeTab.resolution} · {activeTab.duration === -1 ? 'Auto' : `${activeTab.duration}s`}</span>
+            </div>
 
               {/* 生成模式 */}
-              <div className="w-[180px] shrink-0 flex flex-col">
-                <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                  <Grid3X3 size={12} /> 生成模式
+              <div className="inspector-section">
+                <div className="inspector-title">
+                  <Grid3X3 size={14} className="text-nexus-blue" /> 生成设置
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">RATIO</span>
+                    <span className="field-label">画幅</span>
                     <select value={activeTab.ratio} onChange={e => updateTab(activeTab.id, { ratio: e.target.value })}
-                      className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer">
+                      className="field-select font-mono">
                       {['adaptive','16:9','4:3','1:1','3:4','9:16','21:9'].map(r => (
                         <option key={r} value={r} className="bg-nexus-bg">{r}</option>
                       ))}
                     </select>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">MODE</span>
+                    <span className="field-label">模式</span>
                     <select value={activeTab.mode} onChange={e => updateTab(activeTab.id, { mode: e.target.value })}
-                      className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer">
+                      className="field-select">
                       <option value="keyframe" className="bg-nexus-bg">首尾帧</option>
                       <option value="reference" className="bg-nexus-bg">全能参考</option>
                     </select>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">SEARCH</span>
-                    <button onClick={() => updateTab(activeTab.id, { search: !activeTab.search })}
-                      className={`w-8 h-4 rounded-full relative transition-colors ${activeTab.search ? 'bg-nexus-green' : 'bg-[#333]'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeTab.search ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                    </button>
+                    <span className="field-label">联网搜索</span>
+                    <ToggleSwitch label="联网搜索" checked={activeTab.search} onChange={search => updateTab(activeTab.id, { search })} />
                   </div>
                 </div>
               </div>
 
               {/* ENGINE PARAMS */}
-              <div className="w-[240px] shrink-0 flex flex-col border-l border-nexus-border pl-6">
-                <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                  <Settings size={12} /> ENGINE PARAMS
+              <div className="inspector-section">
+                <div className="inspector-title">
+                  <Settings size={14} className="text-nexus-green" /> 输出参数
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">RESOLUTION</span>
+                    <span className="field-label">分辨率</span>
                     <select value={activeTab.resolution} onChange={e => updateTab(activeTab.id, { resolution: e.target.value })}
-                      className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer">
+                      className="field-select font-mono">
                       <option value="480p" className="bg-nexus-bg">480p</option>
                       <option value="720p" className="bg-nexus-bg">720p</option>
                       <option value="1080p" className="bg-nexus-bg">1080p</option>
                     </select>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">DURATION</span>
+                    <span className="field-label">时长</span>
                     <select value={activeTab.duration} onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
-                      className="bg-transparent border-b border-nexus-border text-sm font-mono text-white outline-none cursor-pointer">
+                      className="field-select font-mono">
                       {[4,5,6,7,8,9,10,11,12,13,14,15].map(d => (
                         <option key={d} value={d} className="bg-nexus-bg">{d}s</option>
                       ))}
@@ -1106,51 +1288,42 @@ function App({ onLogout }) {
                     </select>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">FAST_MODE</span>
-                    <button onClick={() => updateTab(activeTab.id, { fast: !activeTab.fast })}
-                      className={`w-8 h-4 rounded-full relative transition-colors ${activeTab.fast ? 'bg-nexus-green' : 'bg-[#333]'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeTab.fast ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                    </button>
+                    <span className="field-label">快速模式</span>
+                    <ToggleSwitch label="快速模式" checked={activeTab.fast} onChange={fast => updateTab(activeTab.id, { fast })} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">AUDIO</span>
-                    <button onClick={() => updateTab(activeTab.id, { audio: !activeTab.audio })}
-                      className={`w-8 h-4 rounded-full relative transition-colors ${activeTab.audio ? 'bg-nexus-green' : 'bg-[#333]'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeTab.audio ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                    </button>
+                    <span className="field-label">生成音频</span>
+                    <ToggleSwitch label="生成音频" checked={activeTab.audio} onChange={audio => updateTab(activeTab.id, { audio })} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-mono text-nexus-text">LAST_FRM</span>
-                    <button onClick={() => updateTab(activeTab.id, { returnLastFrame: !activeTab.returnLastFrame })}
-                      className={`w-8 h-4 rounded-full relative transition-colors ${activeTab.returnLastFrame ? 'bg-nexus-green' : 'bg-[#333]'}`}>
-                      <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${activeTab.returnLastFrame ? 'left-[18px]' : 'left-[2px]'}`}></div>
-                    </button>
+                    <span className="field-label">返回尾帧</span>
+                    <ToggleSwitch label="返回尾帧" checked={activeTab.returnLastFrame} onChange={returnLastFrame => updateTab(activeTab.id, { returnLastFrame })} />
                   </div>
                 </div>
               </div>
 
               {/* KEYFRAMES / REFERENCE */}
-              <div className="min-w-[300px] shrink-0 flex flex-col border-l border-nexus-border pl-6">
-                <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                  <Film size={12} /> {activeTab.mode === 'keyframe' ? 'KEYFRAMES' : 'REFERENCE'}
+              <div className="inspector-section">
+                <div className="inspector-title">
+                  <Film size={14} className="text-nexus-violet" /> {activeTab.mode === 'keyframe' ? '关键帧' : '参考素材'}
                 </div>
 
                 {activeTab.mode === 'keyframe' ? (
                 <div className="flex-grow flex gap-3">
                   <div className="w-[120px] flex flex-col">
-                    <span className="text-[10px] font-mono text-nexus-text mb-1">FIRST FRAME</span>
+                    <span className="mb-1.5 text-xs text-nexus-text">首帧</span>
                     {activeTab.firstFrame ? (
                       <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
-                        <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="first" />
-                        <button onClick={() => updateTab(activeTab.id, { firstFrame: null })}
-                          className="absolute top-1 right-1 p-1 bg-red-900/80 text-red-400 rounded hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                        <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
+                        <button aria-label="删除首帧" title="删除首帧" onClick={() => updateTab(activeTab.id, { firstFrame: null })}
+                          className="absolute right-1 top-1 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
                           <X size={10} />
                         </button>
                       </div>
                     ) : (
-                      <label className="w-[120px] h-[120px] border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
-                        + IMG
-                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                      <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
+                        <Plus size={16} /> 添加
+                        <input aria-label="上传首帧" type="file" accept="image/*" className="hidden" onChange={e => {
                           const f = e.target.files[0]; if (!f) return
                           const reader = new FileReader()
                           reader.onload = ev => updateTab(activeTab.id, { firstFrame: { file: f, preview: ev.target.result } })
@@ -1160,19 +1333,19 @@ function App({ onLogout }) {
                     )}
                   </div>
                   <div className="w-[120px] flex flex-col">
-                    <span className="text-[10px] font-mono text-nexus-text mb-1">LAST FRAME</span>
+                    <span className="mb-1.5 text-xs text-nexus-text">尾帧</span>
                     {activeTab.lastFrame ? (
                       <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
-                        <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="last" />
-                        <button onClick={() => updateTab(activeTab.id, { lastFrame: null })}
-                          className="absolute top-1 right-1 p-1 bg-red-900/80 text-red-400 rounded hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                        <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
+                        <button aria-label="删除尾帧" title="删除尾帧" onClick={() => updateTab(activeTab.id, { lastFrame: null })}
+                          className="absolute right-1 top-1 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
                           <X size={10} />
                         </button>
                       </div>
                     ) : (
-                      <label className="w-[120px] h-[120px] border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
-                        + IMG
-                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                      <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
+                        <Plus size={16} /> 添加
+                        <input aria-label="上传尾帧" type="file" accept="image/*" className="hidden" onChange={e => {
                           const f = e.target.files[0]; if (!f) return
                           const reader = new FileReader()
                           reader.onload = ev => updateTab(activeTab.id, { lastFrame: { file: f, preview: ev.target.result } })
@@ -1186,21 +1359,21 @@ function App({ onLogout }) {
                 <div className="flex-grow flex gap-4 overflow-x-auto">
                   {/* REF IMAGES (max 9) */}
                   <div className="flex flex-col min-w-[120px]">
-                    <span className="text-[10px] font-mono text-nexus-text mb-1">IMAGES (max 9)</span>
+                    <span className="mb-1.5 text-xs text-nexus-text">图片（最多 9 个）</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refImages.map((img, i) => (
                         <div key={i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0">
                           <img src={img.preview} className="w-full h-full object-cover" alt="" />
-                          <button onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
-                            className="absolute top-0.5 right-0.5 p-0.5 bg-red-900/80 text-red-400 rounded hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button aria-label={`删除参考图片 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
+                            className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
                           </button>
                         </div>
                       ))}
                       {activeTab.refImages.length < 9 && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
-                          +
-                          <input type="file" accept="image/*" multiple className="hidden" onChange={e => {
+                          <Plus size={14} />
+                          <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={e => {
                             const files = Array.from(e.target.files).slice(0, 9 - activeTab.refImages.length)
                             Promise.all(files.map(f => new Promise(r => { const rd = new FileReader(); rd.onload = ev => r({ file: f, preview: ev.target.result }); rd.readAsDataURL(f) })))
                               .then(items => updateTab(activeTab.id, { refImages: [...activeTab.refImages, ...items] }))
@@ -1211,7 +1384,7 @@ function App({ onLogout }) {
                   </div>
                   {/* REF VIDEOS (max 3) */}
                   <div className="flex flex-col min-w-[100px]">
-                    <span className="text-[10px] font-mono text-nexus-text mb-1">VIDEOS (max 3)</span>
+                    <span className="mb-1.5 text-xs text-nexus-text">视频（最多 3 个）</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refVideos.map((vid, i) => (
                         <div key={vid.uid || i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0 bg-[#111] flex items-center justify-center">
@@ -1227,21 +1400,21 @@ function App({ onLogout }) {
                             <Film size={14} className="text-nexus-green" />
                           )}
                           <span className="absolute bottom-0.5 text-[8px] font-mono text-nexus-text truncate w-full text-center">{vid.name?.slice(0,6)}</span>
-                          <button onClick={() => {
+                          <button aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
                               if (vid.url) {
                                 axios.delete('/api/upload_video', { data: { url: vid.url } }).catch(() => {})
                               }
                               updateTab(activeTab.id, { refVideos: activeTab.refVideos.filter((_, j) => j !== i) })
                             }}
-                            className="absolute top-0.5 right-0.5 p-0.5 bg-red-900/80 text-red-400 rounded hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                            className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
                           </button>
                         </div>
                       ))}
                       {activeTab.refVideos.length < 3 && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
-                          +
-                          <input type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={e => {
+                          <Plus size={14} />
+                          <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={e => {
                             const files = Array.from(e.target.files).slice(0, 3 - activeTab.refVideos.length)
                             const items = files.map(f => ({ uid: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: f.name, url: null, thumbnail: null, progress: 0, uploading: true }))
                             const tabId = activeTab.id
@@ -1291,22 +1464,22 @@ function App({ onLogout }) {
                   </div>
                   {/* REF AUDIOS (max 3) */}
                   <div className="flex flex-col min-w-[100px]">
-                    <span className="text-[10px] font-mono text-nexus-text mb-1">AUDIOS (max 3)</span>
+                    <span className="mb-1.5 text-xs text-nexus-text">音频（最多 3 个）</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refAudios.map((aud, i) => (
                         <div key={i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0 bg-[#111] flex items-center justify-center">
-                          <span className="text-[10px] font-mono text-nexus-text">♪</span>
+                          <AudioLines size={15} className="text-nexus-cyan" />
                           <span className="absolute bottom-0.5 text-[8px] font-mono text-nexus-text truncate w-full text-center">{aud.file.name.slice(0,6)}</span>
-                          <button onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
-                            className="absolute top-0.5 right-0.5 p-0.5 bg-red-900/80 text-red-400 rounded hover:bg-red-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button aria-label={`删除参考音频 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
+                            className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
                           </button>
                         </div>
                       ))}
                       {activeTab.refAudios.length < 3 && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
-                          +
-                          <input type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={e => {
+                          <Plus size={14} />
+                          <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={e => {
                             const files = Array.from(e.target.files).slice(0, 3 - activeTab.refAudios.length)
                             updateTab(activeTab.id, { refAudios: [...activeTab.refAudios, ...files.map(f => ({ file: f }))] })
                           }} />
@@ -1319,9 +1492,9 @@ function App({ onLogout }) {
               </div>
 
               {/* PRICE ESTIMATE */}
-              <div className="w-[140px] shrink-0 flex flex-col border-l border-nexus-border pl-6">
-                <div className="flex items-center gap-2 text-sm font-mono text-nexus-text mb-3 tracking-widest uppercase">
-                  ¥ COST
+              <div className="inspector-section">
+                <div className="inspector-title">
+                  <Database size={14} className="text-nexus-amber" /> 费用估算
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   {(() => {
@@ -1346,7 +1519,7 @@ function App({ onLogout }) {
                     const price = (tokens / 1000000 * unitPrice).toFixed(2)
                     return (<>
                       <div className="text-2xl font-mono text-nexus-green">¥{price}</div>
-                      <div className="text-[10px] font-mono text-nexus-text leading-4 opacity-70">
+                      <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
                         <div>{fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
                         <div>{w}×{h} · {dur}s · {fps}fps</div>
                         <div>{hasVid ? '含参考视频' : '无参考视频'}</div>
@@ -1357,76 +1530,96 @@ function App({ onLogout }) {
                 </div>
               </div>
 
-            </div>
-          </div>
+          </aside>
         </>
       )}
 
-      {/* 右侧折叠边栏：Task Queue */}
+      {/* 右侧抽屉：提示词库 */}
+      <AnimatePresence>
+        {showPromptCollection && (
+          <motion.aside
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+            className="drawer-panel liquid-glass-strong absolute bottom-0 right-0 top-0 z-40 flex flex-col"
+          >
+            <div className="glass-drawer-header flex h-12 shrink-0 items-center justify-between px-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
+                <Library size={15} className="text-nexus-violet" /> 提示词库
+              </div>
+              <IconButton label="关闭提示词库" onClick={() => setShowPromptCollection(false)}><X size={16} /></IconButton>
+            </div>
+            <div className="relative flex-grow overflow-hidden">
+              <PromptCollection onSelectPrompt={handleSelectSavedPrompt} />
+            </div>
+          </motion.aside>
+        )}
+      </AnimatePresence>
+
+      {/* 右侧抽屉：任务历史 */}
       <AnimatePresence>
         {showTaskQueue && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 360, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="absolute right-0 top-0 bottom-0 border-l border-nexus-border bg-nexus-bg z-30 flex flex-col"
+          <motion.aside
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+            className="drawer-panel liquid-glass-strong absolute bottom-0 right-0 top-0 z-40 flex flex-col"
           >
-            <div className="p-4 border-b border-nexus-border flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2 font-mono text-sm text-white">
-                <Clock size={14} className="text-nexus-green" /> TASK_QUEUE
+            <div className="glass-drawer-header flex h-12 shrink-0 items-center justify-between px-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
+                <Clock size={15} className="text-nexus-blue" /> 任务历史
               </div>
-              <button onClick={() => setShowTaskQueue(false)} className="text-nexus-text hover:text-white transition-colors">
-                <X size={14} />
-              </button>
+              <IconButton label="关闭任务历史" onClick={() => setShowTaskQueue(false)}><X size={16} /></IconButton>
             </div>
             <div className="flex-grow overflow-hidden relative">
               <TaskHistory onLoadTask={handleLoadTask} />
             </div>
-          </motion.div>
+          </motion.aside>
         )}
       </AnimatePresence>
 
-      {/* 右侧折叠边栏：Video Prompt Agent */}
+      {/* 右侧抽屉：视频提示词助手 */}
       <AnimatePresence>
         {showVideoPromptAgent && appMode === 'video' && (
-          <motion.div
-            initial={{ width: 0, opacity: 0 }}
-            animate={{ width: 420, opacity: 1 }}
-            exit={{ width: 0, opacity: 0 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="absolute right-0 top-0 bottom-0 border-l border-nexus-border bg-nexus-bg z-40 flex flex-col"
+          <motion.aside
+            initial={{ x: '100%', opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: '100%', opacity: 0 }}
+            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+            className="agent-drawer liquid-glass-strong absolute bottom-0 right-0 top-0 z-50 flex flex-col"
           >
-            <div className="p-4 border-b border-nexus-border flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2 font-mono text-sm text-white">
-                <Bot size={14} className="text-nexus-green" /> PROMPT_AGENT
+            <div className="glass-drawer-header flex h-12 shrink-0 items-center justify-between px-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
+                <Bot size={15} className="text-nexus-violet" /> 提示词助手
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={resetVideoPromptAgent}
                   disabled={videoPromptAgentLoading}
-                  className="text-[10px] font-mono text-nexus-text hover:text-nexus-green transition-colors disabled:opacity-40"
+                  className="btn-base min-h-8 px-2 text-xs text-nexus-text hover:bg-nexus-surface hover:text-nexus-text-light"
                 >
-                  RESET
+                  重置
                 </button>
-                <button onClick={() => setShowVideoPromptAgent(false)} className="text-nexus-text hover:text-white transition-colors">
-                  <X size={14} />
-                </button>
+                <IconButton label="关闭提示词助手" onClick={() => setShowVideoPromptAgent(false)}><X size={16} /></IconButton>
               </div>
             </div>
 
-            <div className="flex-grow min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3">
+            <div className="flex-grow min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3 bg-nexus-bg/30">
               {videoPromptAgentMessages.length === 0 && !videoPromptAgentLoading && (
-                <div className="h-full flex items-center justify-center text-center text-xs font-mono text-nexus-text/60 leading-5 px-6">
-                  Click AGENT to start a skill-backed prompt optimization session.
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-nexus-muted">
+                  <Bot size={28} className="opacity-40" />
+                  <span>暂无对话</span>
                 </div>
               )}
               {videoPromptAgentMessages.map((msg, i) => (
                 <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[88%] rounded border px-3 py-2 text-xs font-mono leading-5 whitespace-pre-wrap break-words ${
+                  <div className={`max-w-[88%] rounded-md border px-3 py-2.5 text-sm leading-5 whitespace-pre-wrap break-words ${
                     msg.role === 'user'
-                      ? 'border-nexus-green/40 bg-nexus-green/10 text-nexus-green'
-                      : 'border-nexus-border bg-[#0f0f0f] text-white'
+                      ? 'border-nexus-blue/35 bg-nexus-blue/10 text-nexus-text-light'
+                      : 'border-nexus-border bg-nexus-surface text-nexus-text-light'
                   }`}>
                     {msg.content}
                   </div>
@@ -1434,24 +1627,24 @@ function App({ onLogout }) {
               ))}
               {videoPromptAgentLoading && (
                 <div className="flex justify-start">
-                  <div className="border border-nexus-border bg-[#0f0f0f] rounded px-3 py-2 text-xs font-mono text-nexus-text flex items-center gap-2">
-                    <Cpu size={12} className="animate-pulse text-nexus-green" /> THINKING
+                  <div className="flex items-center gap-2 rounded-md border border-nexus-border bg-nexus-surface px-3 py-2 text-xs text-nexus-text">
+                    <Cpu size={12} className="animate-pulse text-nexus-violet" /> 分析中
                   </div>
                 </div>
               )}
             </div>
 
             {videoPromptAgentDraft && (
-              <div className="border-t border-nexus-border p-3 shrink-0 bg-[#0a0a0a]">
-                <div className="text-[10px] font-mono text-nexus-text mb-2 tracking-widest">DETECTED_FINAL_PROMPT</div>
-                <div className="max-h-28 overflow-y-auto custom-scrollbar text-xs font-mono leading-5 text-[#2ecc71] border border-nexus-border rounded p-2 whitespace-pre-wrap break-words">
+              <div className="shrink-0 border-t border-nexus-border bg-nexus-panel p-3">
+                <div className="mb-2 text-xs font-medium text-nexus-text">建议提示词</div>
+                <div className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-nexus-border bg-nexus-bg p-2.5 text-sm leading-5 text-nexus-text-light custom-scrollbar">
                   {videoPromptAgentDraft}
                 </div>
                 <button
                   onClick={applyVideoPromptAgentDraft}
-                  className="mt-2 w-full py-2 rounded border border-nexus-green/40 bg-nexus-green/10 text-nexus-green hover:bg-nexus-green/20 transition-colors flex items-center justify-center gap-2 text-xs font-mono tracking-widest"
+                  className="btn-base btn-primary mt-2 w-full text-xs"
                 >
-                  <Check size={12} /> APPLY PROMPT
+                  <Check size={13} /> 应用提示词
                 </button>
               </div>
             )}
@@ -1462,27 +1655,30 @@ function App({ onLogout }) {
                 if (!videoPromptAgentInput.trim() || videoPromptAgentLoading) return
                 sendVideoPromptAgentMessage(videoPromptAgentInput)
               }}
-              className="border-t border-nexus-border p-3 shrink-0 bg-nexus-bg"
+              className="shrink-0 border-t border-nexus-border bg-nexus-panel p-3"
             >
               <div className="flex gap-2">
                 <textarea
                   value={videoPromptAgentInput}
                   onChange={e => setVideoPromptAgentInput(e.target.value)}
+                  aria-label="给提示词助手发送消息"
                   disabled={videoPromptAgentLoading}
                   rows={3}
-                  className="flex-grow min-w-0 bg-[#0f0f0f] border border-nexus-border rounded px-3 py-2 text-xs font-mono leading-5 text-white outline-none resize-none focus:border-nexus-green custom-scrollbar disabled:opacity-50"
-                  placeholder="Reply with choices or extra details..."
+                  className="min-w-0 flex-grow resize-none rounded-md border border-nexus-border bg-nexus-bg px-3 py-2 text-sm leading-5 text-nexus-text-light outline-none focus:border-nexus-blue custom-scrollbar disabled:opacity-50"
+                  placeholder="补充要求或回复问题..."
                 />
                 <button
                   type="submit"
+                  aria-label="发送消息"
+                  title="发送"
                   disabled={videoPromptAgentLoading || !videoPromptAgentInput.trim()}
-                  className="w-10 rounded border border-nexus-border text-nexus-text hover:text-nexus-green hover:border-nexus-green/60 transition-colors flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="icon-button h-auto w-10 border-nexus-border bg-nexus-surface hover:text-nexus-violet"
                 >
                   <Send size={14} />
                 </button>
               </div>
             </form>
-          </motion.div>
+          </motion.aside>
         )}
       </AnimatePresence>
 
@@ -1494,32 +1690,29 @@ function App({ onLogout }) {
           {showFullEditor && (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/95 z-[999] flex flex-col backdrop-blur-sm"
+              role="dialog"
+              aria-modal="true"
+              aria-label="提示词编辑器"
+              className="fixed inset-0 z-[999] flex flex-col bg-nexus-bg/98 backdrop-blur-sm"
             >
               {/* 标题栏 */}
-              <div className="h-10 border-b border-nexus-border flex items-center justify-between px-4 bg-[#0a0a0a] shrink-0">
-                <div className="flex items-center gap-2 text-sm font-mono text-nexus-text">
-                  <Maximize2 size={14} className="text-nexus-green" />
-                  <span className="tracking-widest">{appMode === 'video' ? 'video_prompt.nxs' : 'prompt.nxs'}</span>
-                  <span className="text-nexus-text/40 ml-2">— FULLSCREEN EDITOR</span>
+              <div className="editor-header liquid-glass-strong flex h-12 shrink-0 items-center justify-between px-3">
+                <div className="flex min-w-0 items-center gap-2 text-sm text-nexus-text-light">
+                  <Maximize2 size={15} className="shrink-0 text-nexus-blue" />
+                  <span className="font-semibold">提示词编辑器</span>
+                  <span className="truncate font-mono text-[11px] text-nexus-muted">{appMode === 'video' ? 'video_prompt' : 'image_prompt'}</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setShowEditorVault(!showEditorVault)} className={`flex items-center gap-2 transition-colors p-1 hover:bg-white/10 rounded ${showEditorVault ? 'text-nexus-green' : 'text-nexus-text hover:text-nexus-green'}`}>
-                    <HardDrive size={14} /> <span className="text-xs tracking-widest">VAULT</span>
-                  </button>
-                  <button onClick={handleSavePrompt} disabled={!(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).trim()} className="flex items-center gap-2 text-nexus-text hover:text-nexus-green transition-colors p-1 hover:bg-white/10 rounded disabled:opacity-30">
-                    <Save size={14} /> <span className="text-xs tracking-widest">SAVE</span>
-                  </button>
-                  <button onClick={() => { setShowFullEditor(false); setShowEditorVault(false) }} className="text-nexus-text hover:text-white transition-colors p-1 hover:bg-white/10 rounded">
-                    <X size={16} />
-                  </button>
+                <div className="flex items-center gap-1">
+                  <IconButton label="提示词库" onClick={() => setShowEditorVault(!showEditorVault)} className={showEditorVault ? 'border-nexus-violet/35 bg-nexus-violet/10 text-nexus-violet' : ''}><Library size={16} /></IconButton>
+                  <IconButton label="保存提示词" onClick={handleSavePrompt} disabled={!(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).trim()}><Save size={16} /></IconButton>
+                  <IconButton label="关闭编辑器" onClick={() => { setShowFullEditor(false); setShowEditorVault(false) }}><X size={17} /></IconButton>
                 </div>
               </div>
 
               {/* 编辑器主体 */}
               <div className="flex-grow flex min-h-0 relative">
                 {/* 行号 */}
-                <div className="w-14 shrink-0 border-r border-nexus-border/50 bg-[#0a0a0a] py-4 pr-3 font-mono text-xs text-[#555] select-none overflow-hidden text-right">
+                <div className="editor-gutter w-14 shrink-0 select-none overflow-hidden border-r border-nexus-border bg-nexus-panel py-4 pr-3 text-right font-mono text-xs text-nexus-muted/60">
                   {Array.from({ length: Math.max(50, (appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).split('\n').length) }, (_, i) => (
                     <div key={i} className="h-6 leading-6">{i + 1}</div>
                   ))}
@@ -1527,31 +1720,48 @@ function App({ onLogout }) {
                 {/* 输入区 */}
                 <textarea
                   autoFocus
+                  aria-label="编辑提示词"
                   value={appMode === 'video' ? activeTab.prompt : activeImgTab.prompt}
                   onChange={(e) => appMode === 'video' ? updateTab(activeTab.id, { prompt: e.target.value }) : updateImgTab(activeImgTab.id, { prompt: e.target.value })}
-                  className="flex-grow bg-transparent text-[#2ecc71] text-sm font-mono leading-6 p-4 outline-none resize-none whitespace-pre-wrap break-words overflow-y-auto selection:bg-[#2ecc71]/20 selection:text-white custom-scrollbar"
-                  spellCheck="false"
-                  placeholder="Enter your prompt here..."
+                  className="min-w-0 flex-grow resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent p-4 font-mono text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar"
+                  spellCheck="true"
+                  placeholder="输入提示词..."
                 />
                 {/* Vault 侧边栏 */}
                 {showEditorVault && (
-                  <div className="w-[350px] shrink-0 border-l border-nexus-border bg-[#0a0a0a] flex flex-col overflow-hidden">
-                    <PromptCollection theme="dark" onSelectPrompt={(p) => appMode === 'video' ? updateTab(activeTab.id, { prompt: p }) : updateImgTab(activeImgTab.id, { prompt: p })} />
-                  </div>
+                  <aside className="editor-vault liquid-glass-strong flex w-[360px] shrink-0 flex-col overflow-hidden">
+                    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-nexus-border px-3 text-xs font-semibold text-nexus-text-light"><Library size={14} className="text-nexus-violet" />提示词库</div>
+                    <PromptCollection onSelectPrompt={(p) => appMode === 'video' ? updateTab(activeTab.id, { prompt: p }) : updateImgTab(activeImgTab.id, { prompt: p })} />
+                  </aside>
                 )}
               </div>
 
               {/* 底栏 */}
-              <div className="h-8 border-t border-nexus-border flex items-center px-4 bg-[#0a0a0a] shrink-0 text-xs font-mono text-nexus-text/50 gap-4">
-                <span>Lines: {(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).split('\n').length}</span>
-                <span>Chars: {(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).length}</span>
-                <span className="ml-auto">ESC to close</span>
+              <div className="flex h-8 shrink-0 items-center gap-4 border-t border-nexus-border bg-nexus-panel px-4 font-mono text-xs text-nexus-muted">
+                <span>行 {(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).split('\n').length}</span>
+                <span>字符 {(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).length}</span>
               </div>
             </motion.div>
           )}
         </AnimatePresence>,
         document.body
       )}
+
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            role={notification.tone === 'error' ? 'alert' : 'status'}
+            aria-live="polite"
+            className={`fixed bottom-4 right-4 z-[1200] flex max-w-[calc(100vw-32px)] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
+          >
+            {notification.tone === 'error' ? <CircleAlert size={15} /> : <Check size={15} className="text-nexus-green" />}
+            {notification.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

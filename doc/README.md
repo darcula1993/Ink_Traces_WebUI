@@ -87,7 +87,7 @@ http://localhost:4545
 | `prompts/video_prompt_rewriter.md` | 视频 Prompt 快速一键重写使用的 system prompt | 已提交 |
 | `prompts/video_prompt_optimizer.md` | 交互式视频 Prompt Agent 使用的 skill 风格 system prompt | 已提交 |
 | `server/prompts.json.example` | Prompt Vault 示例数据 | 已提交 |
-| `server/prompts.json` | 应用运行时生成的本地 Prompt Vault 数据 | 已忽略 |
+| `server/prompts.json` | 旧版 Prompt Vault 数据，首次使用时导入 SQLite | 已忽略 |
 
 最小图片 Provider 配置示例：
 
@@ -98,11 +98,14 @@ http://localhost:4545
     "ark": {
       "api_key": "<your-byteplus-ark-key>",
       "model": "seedream-5-0-pro",
-      "endpoint": "https://ark.ap-southeast.bytepluses.com"
+      "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "request_timeout_seconds": 600
     }
   }
 }
 ```
+
+Ark 图片生成的上游接口是同步请求，耗时可能超过两分钟。读取超时会被视为“结果未知”且不会自动重放，避免 Provider 已接收原始 POST 时产生重复生成。
 
 如果使用 Ark 视频参考素材上传，需要配置 `server.public_host`、`server.public_port` 和 `server.public_scheme`，确保外部服务能够下载参考视频文件。
 
@@ -123,8 +126,11 @@ Ink_Traces_WebUI/
 │       ├── App.jsx              # 主界面、多标签、图片/视频工作流
 │       └── components/          # 上传、结果展示、Vault、任务队列组件
 ├── server/
-│   ├── app.py                   # Flask API、Provider 调用、视频轮询
-│   ├── tasks.py                 # SQLite 任务队列工具
+│   ├── app.py                   # Flask API 与 Provider 适配
+│   ├── worker.py                # 带 lease 的图片执行与视频轮询 Worker
+│   ├── tasks.py                 # SQLite 任务、资产、Prompt 与 Worker 状态
+│   ├── storage.py               # 媒体原子写入与生命周期清理
+│   ├── maintenance.py           # 清理、旧数据瘦身与 VACUUM 工具
 │   ├── prompts.json.example     # 公开 Prompt Vault 示例
 │   └── requirements.txt
 ├── doc/
@@ -140,15 +146,16 @@ Ink_Traces_WebUI/
 
 | 接口 | 用途 |
 |---|---|
-| `GET /api/health` | 后端健康检查 |
+| `GET /api/health` | 兼容健康检查 |
+| `GET /api/live` / `GET /api/ready` | 进程与依赖就绪检查 |
 | `GET/POST /api/provider` | 获取或切换图片 Provider |
 | `GET/POST /api/model` | 获取或切换图片模型 |
-| `POST /api/generate` | 统一图片生成接口 |
+| `POST /api/generate` | 提交异步图片任务；Chat 模式保持同步 |
 | `GET/POST /api/prompts` | 读取或保存 Prompt Vault |
 | `PUT/DELETE /api/prompts/:id` | 编辑或删除 Prompt Vault 条目 |
 | `GET/POST /api/video/provider` | 获取或切换视频 Provider |
 | `POST /api/video/generate` | 提交视频生成任务 |
-| `GET /api/video/task` | 查询外部视频任务状态 |
+| `GET /api/video/task` | 兼容旧客户端的本地视频状态查询 |
 | `GET /api/tasks` | 查看本地任务历史 |
 | `GET/DELETE /api/tasks/:id` | 恢复或删除本地任务 |
 | `POST /api/upload_video` | 上传供外部 Provider 下载的参考视频 |
@@ -170,13 +177,22 @@ Ink_Traces_WebUI/
 
 这可以避免 API 密钥、Prompt 收藏、生成结果、日志、上传素材和本地任务历史进入仓库。
 
+停止服务后可以执行后端维护：
+
+```bash
+python3 server/maintenance.py all --grace-hours 24
+```
+
+该命令会清理过期或孤立媒体、移除旧任务中的 Base64、执行 WAL checkpoint，并压缩 SQLite 文件。
+
 ## 注意事项
 
 - Chat 会话存储在后端内存中，Flask 进程重启后会丢失。
-- 视频生成是异步流程，后端会用后台线程轮询 Provider 任务状态。
+- 普通图片生成和视频轮询由 `start.sh` 启动的有界 SQLite lease Worker 执行。
+- 生成媒体保存在文件系统，SQLite 只保存任务和资产元数据，不再保存 Base64 图片。
 - Ark 参考视频工作流要求 Provider 能访问你的公网下载 URL。
 - 后端默认只允许配置内或本机前端 Origin 跨域访问；如果前端部署在其他域名，需要设置 `server.cors_origins`。
-- Flask 后端适合本地或受控部署，不建议直接用于高并发生产环境。
+- API 使用 Gunicorn，并与任务 Worker 分进程运行；整体仍面向本地或受控部署。
 - `config.json` 可以调整安全过滤级别，但 Provider 侧仍可能有不可关闭的底线过滤。
 
 ## License

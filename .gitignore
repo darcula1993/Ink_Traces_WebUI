@@ -15,6 +15,8 @@ server/prompts.json
 # Build output
 client/dist/
 client/build/
+client/test-results/
+client/playwright-report/
 
 # Logs
 *.log
@@ -30,6 +32,7 @@ error_logs/
 # Process ID files
 .server.pid
 .client.pid
+.worker.pid
 
 # Editor directories and files
 .vscode/
