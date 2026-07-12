@@ -23,6 +23,15 @@ else
     echo "- output/ 不存在，跳过"
 fi
 
+# 清理工作区草稿素材
+if [ -d "workspace_assets" ]; then
+    count=$(find workspace_assets -type f | wc -l)
+    rm -rf workspace_assets/*
+    echo "✓ 已清理 workspace_assets/ ($count 个文件)"
+else
+    echo "- workspace_assets/ 不存在，跳过"
+fi
+
 # 清理错误日志
 if [ -d "error_logs" ]; then
     count=$(find error_logs -type f | wc -l)

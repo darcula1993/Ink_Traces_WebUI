@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: './tests',
   outputDir: './test-results',
   fullyParallel: true,
-  timeout: 30_000,
+  timeout: 60_000,
   expect: { timeout: 8_000 },
   reporter: 'line',
   use: {

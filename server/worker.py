@@ -29,6 +29,7 @@ class Worker:
         default_concurrency = server_config.get('worker_concurrency', 3)
         self.concurrency = max(1, int(os.environ.get('WORKER_CONCURRENCY', default_concurrency)))
         self.lease_seconds = max(60, int(server_config.get('worker_lease_seconds', 900)))
+        self.heartbeat_interval = max(5, min(20, int(server_config.get('worker_heartbeat_seconds', 10))))
         self.cleanup_interval = max(60, int(server_config.get('cleanup_interval_seconds', 3600)))
         self.orphan_grace_seconds = max(0, int(server_config.get('orphan_grace_hours', 24))) * 60 * 60
 
@@ -37,7 +38,7 @@ class Worker:
 
     def heartbeat(self, force=False):
         now = time.monotonic()
-        if not force and now - self.last_heartbeat < 5:
+        if not force and now - self.last_heartbeat < self.heartbeat_interval:
             return
         task_db.upsert_worker_heartbeat(self.worker_id, os.getpid(), self.started_at)
         self.last_heartbeat = now
@@ -78,6 +79,9 @@ class Worker:
             task['id'], task['type'], task.get('attempt_count'),
         )
         try:
+            if task_db.cancellation_requested(task['id']):
+                task_db.finalize_task_cancel(task['id'])
+                return
             with application.app.app_context():
                 if task['type'] == 'image':
                     self._process_image(task)
@@ -87,6 +91,9 @@ class Worker:
                     task_db.fail_task(task['id'], f'未知任务类型: {task["type"]}')
         except Exception as exc:
             LOG.exception('task_crashed id=%s', task['id'])
+            if task_db.cancellation_requested(task['id']):
+                task_db.finalize_task_cancel(task['id'])
+                return
             max_attempts = self._image_crash_max_attempts(task) if task['type'] == 'image' else self._video_max_attempts()
             if int(task.get('attempt_count') or 0) < max_attempts:
                 status = 'pending' if task['type'] == 'image' else 'processing'
@@ -94,10 +101,16 @@ class Worker:
             else:
                 task_db.fail_task(task['id'], str(exc))
         finally:
+            if task_db.cancellation_requested(task['id']):
+                task_db.finalize_task_cancel(task['id'])
             task_db.close_db()
 
     def _process_image(self, task):
         payload, status_code = application.execute_image_task(task['id'])
+        if payload.get('cancelled') or task_db.cancellation_requested(task['id']):
+            task_db.finalize_task_cancel(task['id'])
+            LOG.info('task_cancelled id=%s type=image', task['id'])
+            return
         if payload.get('success'):
             LOG.info('task_succeeded id=%s type=image', task['id'])
             return
@@ -123,7 +136,7 @@ class Worker:
     def _process_video(self, task):
         outcome = application.poll_video_task_once(task['id'])
         state = outcome.get('state')
-        if state in ('succeeded', 'failed'):
+        if state in ('succeeded', 'failed', 'cancelled'):
             LOG.info('task_terminal id=%s type=video state=%s', task['id'], state)
             return
 

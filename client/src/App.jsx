@@ -2,10 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
 import TextToImage from './components/TextToImage'
 import ImageToImage from './components/ImageToImage'
-import ResultDisplay from './components/ResultDisplay'
-import VideoResultDisplay from './components/VideoResultDisplay'
 import PromptCollection from './components/PromptCollection'
-import TaskHistory from './components/TaskHistory'
+import TaskGallery from './components/TaskGallery'
 import CodeRainCanvas from './components/CodeRainCanvas'
 import GlassBackdrop from './components/GlassBackdrop'
 import IconButton from './components/ui/IconButton'
@@ -13,10 +11,112 @@ import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Square, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, Clock, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert } from 'lucide-react'
-import { useLocalStorage } from './lib/useLocalStorage'
+import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert } from 'lucide-react'
+import { useWorkspaceState } from './lib/useWorkspaceState'
 
 axios.defaults.withCredentials = true
+
+function makeImgTab(id) {
+  return {
+    id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
+    chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', watermark: false,
+    loading: false, taskId: null, dbTaskId: null, taskStatus: null, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null,
+  }
+}
+
+function makeVideoTab(id) {
+  return {
+    id, prompt: '', ratio: 'adaptive', duration: 5, resolution: '720p',
+    fast: false, audio: true, returnLastFrame: false, mode: 'keyframe', search: false,
+    firstFrame: null, lastFrame: null, refImages: [], refVideos: [], refAudios: [],
+    loading: false, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0, error: null,
+    taskId: null, dbTaskId: null, taskProvider: null, taskStatus: null,
+  }
+}
+
+function selectPersistedImageTabs(tabs) {
+  return (tabs || []).map(({
+    loading, taskStatus, taskId, dbTaskId, generatedImages, thinkingText,
+    error, errorType, errorDetails, ...tab
+  }) => tab)
+}
+
+function hydrateImageTabs(savedTabs, _currentTabs = []) {
+  const sourceTabs = savedTabs?.length ? savedTabs : [makeImgTab(1)]
+  return sourceTabs.map(saved => {
+    return {
+      ...makeImgTab(saved.id),
+      ...saved,
+      loading: false,
+      taskId: null,
+      dbTaskId: null,
+      taskStatus: null,
+      generatedImages: [],
+      thinkingText: '',
+      error: null,
+      errorType: null,
+      errorDetails: null,
+    }
+  })
+}
+
+function selectPersistedVideoTabs(tabs) {
+  return (tabs || []).map(({
+    loading, taskStatus, taskId, dbTaskId, taskProvider, progress, eta,
+    videoUrl, lastFrameUrl, error, ...tab
+  }) => ({
+    ...tab,
+    refVideos: (tab.refVideos || [])
+      .filter(video => video.url && !video.uploading)
+      .map(({ progress: _progress, uploading: _uploading, ...video }) => video),
+  }))
+}
+
+function hydrateVideoTabs(savedTabs, currentTabs = []) {
+  const runtime = new Map((currentTabs || []).map(tab => [Number(tab.id), tab]))
+  const sourceTabs = savedTabs?.length ? savedTabs : [makeVideoTab(1)]
+  return sourceTabs.map(saved => {
+    const current = runtime.get(Number(saved.id))
+    const persistedVideos = saved.refVideos || []
+    const persistedIds = new Set(persistedVideos.map(video => video.uid))
+    const uploadingVideos = (current?.refVideos || []).filter(video => video.uploading && !persistedIds.has(video.uid))
+    return {
+      ...makeVideoTab(saved.id),
+      ...saved,
+      refVideos: [...persistedVideos, ...uploadingVideos],
+      loading: false,
+      taskId: null,
+      dbTaskId: null,
+      taskProvider: null,
+      taskStatus: null,
+      progress: 0,
+      eta: 0,
+      videoUrl: null,
+      lastFrameUrl: null,
+      error: null,
+    }
+  })
+}
+
+function mergeNormalizedImageTabs(currentTabs, normalizedTabs) {
+  return hydrateImageTabs(normalizedTabs, currentTabs)
+}
+
+function mergeNormalizedVideoTabs(currentTabs, normalizedTabs) {
+  return hydrateVideoTabs(normalizedTabs, currentTabs)
+}
+
+const IMAGE_WORKSPACE_OPTIONS = {
+  selectPersisted: selectPersistedImageTabs,
+  hydrate: hydrateImageTabs,
+  mergeNormalized: mergeNormalizedImageTabs,
+}
+
+const VIDEO_WORKSPACE_OPTIONS = {
+  selectPersisted: selectPersistedVideoTabs,
+  hydrate: hydrateVideoTabs,
+  mergeNormalized: mergeNormalizedVideoTabs,
+}
 
 function LoginPage({ onLogin }) {
   const [error, setError] = useState('')
@@ -85,7 +185,6 @@ function App({ onLogout }) {
   }
 
   const [showPromptCollection, setShowPromptCollection] = useState(false)
-  const [showTaskQueue, setShowTaskQueue] = useState(false)
   const [showFullEditor, setShowFullEditor] = useState(false)
   const [showEditorVault, setShowEditorVault] = useState(false)
   const [optimizingVideoPrompt, setOptimizingVideoPrompt] = useState(false)
@@ -132,16 +231,9 @@ function App({ onLogout }) {
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
   const [availableModels, setAvailableModels] = useState([])
 
-  // 图片多标签页系统
-  const makeImgTab = (id) => ({
-    id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
-    chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', watermark: false,
-    loading: false, taskId: null, taskStatus: null, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null
-  })
-
-  const [imgTabs, setImgTabs] = useLocalStorage('img_tabs', [makeImgTab(1)])
-  const [activeImgTabId, setActiveImgTabId] = useLocalStorage('img_activeTab', 1)
-  const nextImgTabId = useRef(Math.max(...(imgTabs || [{ id: 1 }]).map(t => t.id)) + 1)
+  // 图片生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
+  const [imgTabs, setImgTabs, imgWorkspace] = useWorkspaceState('img_tabs', [makeImgTab(1)], IMAGE_WORKSPACE_OPTIONS)
+  const [activeImgTabId, setActiveImgTabId] = useWorkspaceState('img_activeTab', 1)
 
   const activeImgTab = imgTabs.find(t => t.id === activeImgTabId) || imgTabs[0] || makeImgTab(1)
 
@@ -153,81 +245,36 @@ function App({ onLogout }) {
     }))
   }, [setImgTabs])
 
-  const addImgTab = () => {
-    const id = nextImgTabId.current++
-    setImgTabs(prev => [...prev, makeImgTab(id)])
-    setActiveImgTabId(id)
-  }
-
-  const closeImgTab = (id) => {
-    setImgTabs(prev => {
-      const remaining = prev.filter(t => t.id !== id)
-      if (remaining.length === 0) {
-        const newTab = makeImgTab(nextImgTabId.current++)
-        setActiveImgTabId(newTab.id)
-        return [newTab]
-      }
-      if (activeImgTabId === id) setActiveImgTabId(remaining[remaining.length - 1].id)
-      return remaining
-    })
-  }
-
   // 顶部模式切换：image / video
-  const [appMode, setAppMode] = useLocalStorage('appMode', 'image')
+  const [appMode, setAppMode] = useWorkspaceState('appMode', 'image')
 
   // 视频 Provider
-  const [videoProvider, setVideoProvider] = useLocalStorage('vid_provider', 'ark')
+  const [videoProvider, setVideoProvider] = useWorkspaceState('vid_provider', 'ark')
 
-  // 视频多标签页系统
-  const makeVideoTab = (id) => ({
-    id, prompt: '', ratio: 'adaptive', duration: 5, resolution: '720p',
-    fast: false, audio: true, returnLastFrame: false, mode: 'keyframe', search: false,
-    firstFrame: null, lastFrame: null, refImages: [], refVideos: [], refAudios: [],
-    loading: false, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0, error: null,
-    taskId: null, taskProvider: null, taskStatus: null
-  })
-
-  const [videoTabs, setVideoTabs] = useLocalStorage('vid_tabs', [makeVideoTab(1)])
-  const [activeVideoTabId, setActiveVideoTabId] = useLocalStorage('vid_activeTab', 1)
-  const nextTabId = useRef(Math.max(...(videoTabs || [{ id: 1 }]).map(t => t.id)) + 1)
+  // 视频生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
+  const [videoTabs, setVideoTabs, videoWorkspace] = useWorkspaceState('vid_tabs', [makeVideoTab(1)], VIDEO_WORKSPACE_OPTIONS)
+  const [activeVideoTabId, setActiveVideoTabId] = useWorkspaceState('vid_activeTab', 1)
 
   const activeTab = videoTabs.find(t => t.id === activeVideoTabId) || videoTabs[0] || makeVideoTab(1)
 
   const updateTab = useCallback((id, updates) => {
     setVideoTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t))
   }, [setVideoTabs])
-  const videoPollTimers = useRef(new Map())
-  const taskPollsInFlight = useRef(new Set())
-  const unmountedRef = useRef(false)
+  const [taskGalleryRevision, setTaskGalleryRevision] = useState(0)
 
   useEffect(() => {
-    // React Strict Mode runs setup -> cleanup -> setup in development.
-    unmountedRef.current = false
-    return () => {
-      unmountedRef.current = true
-      videoPollTimers.current.forEach(timer => clearTimeout(timer))
-      videoPollTimers.current.clear()
-    }
-  }, [])
+    if (!imgWorkspace.ready || imgTabs.length <= 1) return
+    const selected = imgTabs.find(tab => Number(tab.id) === Number(activeImgTabId)) || imgTabs[0]
+    setImgTabs([selected])
+    setActiveImgTabId(selected.id)
+  }, [activeImgTabId, imgTabs, imgWorkspace.ready, setActiveImgTabId, setImgTabs])
 
-  const addVideoTab = () => {
-    const id = nextTabId.current++
-    setVideoTabs(prev => [...prev, makeVideoTab(id)])
-    setActiveVideoTabId(id)
-  }
-
-  const closeVideoTab = (id) => {
-    setVideoTabs(prev => {
-      const remaining = prev.filter(t => t.id !== id)
-      if (remaining.length === 0) {
-        const newTab = makeVideoTab(nextTabId.current++)
-        setActiveVideoTabId(newTab.id)
-        return [newTab]
-      }
-      if (activeVideoTabId === id) setActiveVideoTabId(remaining[remaining.length - 1].id)
-      return remaining
-    })
-  }
+  useEffect(() => {
+    if (!videoWorkspace.ready || videoTabs.length <= 1) return
+    const selected = videoTabs.find(tab => Number(tab.id) === Number(activeVideoTabId)) || videoTabs[0]
+    setVideoTabs([selected])
+    setActiveVideoTabId(selected.id)
+  }, [activeVideoTabId, setActiveVideoTabId, setVideoTabs, videoTabs, videoWorkspace.ready])
 
   const isArk = apiProvider === 'ark'
   const standardAspectRatios = ['1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
@@ -321,62 +368,17 @@ function App({ onLogout }) {
     } catch (e) { notify('保存失败', 'error') }
   }
 
-  const pollImageTask = useCallback(async (tabId, taskId) => {
-    const timerKey = `image:${tabId}:${taskId}`
-    if (taskPollsInFlight.current.has(timerKey)) return
-    if (videoPollTimers.current.has(timerKey)) {
-      clearTimeout(videoPollTimers.current.get(timerKey))
-      videoPollTimers.current.delete(timerKey)
-    }
-    taskPollsInFlight.current.add(timerKey)
-    try {
-      const response = await axios.get(`/api/tasks/${taskId}`)
-      if (unmountedRef.current) return
-      const task = response.data.task
-      const result = task.result || {}
-      updateImgTab(tabId, { taskStatus: task.status })
-      if (task.status === 'succeeded') {
-        updateImgTab(tabId, {
-          loading: false,
-          taskId: null,
-          generatedImages: result.local_images || [],
-          thinkingText: result.thinking || '',
-          error: null
-        })
-      } else if (task.status === 'failed') {
-        updateImgTab(tabId, {
-          loading: false,
-          taskId: null,
-          error: task.error || '生成失败',
-          errorType: result.error_type,
-          errorDetails: result.error_details
-        })
-      } else {
-        const timer = setTimeout(() => pollImageTask(tabId, taskId), 1500)
-        videoPollTimers.current.set(timerKey, timer)
-      }
-    } catch (error) {
-      if (unmountedRef.current) return
-      if (error.response?.status === 404) {
-        updateImgTab(tabId, { loading: false, taskId: null, error: '任务已被删除或不存在' })
-        return
-      }
-      const timer = setTimeout(() => pollImageTask(tabId, taskId), 3000)
-      videoPollTimers.current.set(timerKey, timer)
-    } finally {
-      taskPollsInFlight.current.delete(timerKey)
-    }
-  }, [updateImgTab])
-
   const handleGenerate = async () => {
     const tab = activeImgTab
-    if (!tab.prompt.trim()) return
-    const requestModel = apiProvider === 'ark' ? undefined : currentModel
-
-    updateImgTab(tab.id, { loading: true, taskStatus: 'submitting', error: null, errorType: null, errorDetails: null })
-    if (!tab.chatMode) {
-      updateImgTab(tab.id, { generatedImages: [], thinkingText: '' })
+    if (!tab.prompt.trim()) {
+      notify('请先填写图片描述', 'error')
+      return
     }
+    const requestModel = apiProvider === 'ark' ? undefined : currentModel
+    const revealTimer = window.setTimeout(
+      () => setTaskGalleryRevision(revision => revision + 1),
+      500,
+    )
 
     try {
       let response
@@ -431,32 +433,15 @@ function App({ onLogout }) {
         })
       }
 
-      if (response.data.queued && response.data.task_id) {
-        updateImgTab(tab.id, { taskId: response.data.task_id, taskStatus: response.data.status || 'pending', loading: true })
-        pollImageTask(tab.id, response.data.task_id)
-      } else {
-        handleResponse(tab.id, response.data)
-        updateImgTab(tab.id, { loading: false })
-      }
+      if (response.data.session_id) updateImgTab(tab.id, { sessionId: response.data.session_id })
+      const taskId = response.data.task_id
+      notify(taskId ? `图片任务 #${taskId} 已创建` : '图片任务已创建')
     } catch (err) {
       const errorData = err.response?.data || {}
-      updateImgTab(tab.id, {
-        loading: false,
-        error: errorData.error || err.message || '生成失败',
-        errorType: errorData.error_type, errorDetails: errorData.error_details
-      })
-    }
-  }
-
-  const handleResponse = (tabId, data) => {
-    if (data.success) {
-      const updates = { generatedImages: data.images || [], thinkingText: data.thinking }
-      if (data.session_id) updates.sessionId = data.session_id
-      updateImgTab(tabId, updates)
-    } else {
-      updateImgTab(tabId, {
-        error: data.error || '生成失败', errorType: data.error_type, errorDetails: data.error_details
-      })
+      notify(errorData.error || err.message || '图片任务创建失败', 'error')
+    } finally {
+      window.clearTimeout(revealTimer)
+      setTaskGalleryRevision(revision => revision + 1)
     }
   }
 
@@ -493,68 +478,6 @@ function App({ onLogout }) {
     }
   }
 
-  // 视频生成
-  const pollVideoTask = useCallback(async (tabId, taskId, provider) => {
-    const timerKey = `video:${tabId}:${taskId}`
-    if (taskPollsInFlight.current.has(timerKey)) return
-    if (videoPollTimers.current.has(timerKey)) {
-      clearTimeout(videoPollTimers.current.get(timerKey))
-      videoPollTimers.current.delete(timerKey)
-    }
-    taskPollsInFlight.current.add(timerKey)
-    try {
-      let d
-      try {
-        const resp = await axios.get(`/api/tasks/${taskId}`)
-        const task = resp.data.task
-        const result = task.result || {}
-        updateTab(tabId, { taskStatus: task.status })
-        d = {
-          success: true,
-          status: task.status === 'succeeded' ? 'TASK_STATUS_SUCCEED' : task.status === 'failed' ? 'TASK_STATUS_FAILED' : 'TASK_STATUS_PROCESSING',
-          reason: task.error,
-          progress: task.progress || 0,
-          videos: result.local_video ? [{ video_url: result.local_video }] : (result.videos || []),
-          images: result.local_last_frame ? [{ image_url: result.local_last_frame }] : (result.images || [])
-        }
-      } catch (error) {
-        if (error.response?.status !== 404 || !provider) throw error
-        const resp = await axios.get('/api/video/task', { params: { task_id: taskId, provider } })
-        d = resp.data
-      }
-      if (unmountedRef.current) return
-      if (!d.success) { updateTab(tabId, { error: d.error, loading: false }); return }
-
-      updateTab(tabId, { progress: d.progress || 0, eta: d.eta || 0 })
-
-      if (d.status === 'TASK_STATUS_SUCCEED') {
-        const updates = { loading: false, taskId: null, taskProvider: null }
-        if (d.videos && d.videos.length > 0) {
-          updates.videoUrl = d.videos[0].video_url
-          if (d.images && d.images.length > 0) updates.lastFrameUrl = d.images[0].image_url
-        } else {
-          updates.error = '任务完成但未返回视频'
-        }
-        updateTab(tabId, updates)
-      } else if (d.status === 'TASK_STATUS_FAILED') {
-        updateTab(tabId, { loading: false, taskId: null, taskProvider: null, error: d.reason || '视频生成失败' })
-      } else {
-        const timer = setTimeout(() => pollVideoTask(tabId, taskId, provider), 3000)
-        videoPollTimers.current.set(timerKey, timer)
-      }
-    } catch (e) {
-      if (unmountedRef.current) return
-      if (e.response?.status === 404) {
-        updateTab(tabId, { loading: false, taskId: null, taskProvider: null, error: '任务已被删除或不存在' })
-        return
-      }
-      const timer = setTimeout(() => pollVideoTask(tabId, taskId, provider), 3000)
-      videoPollTimers.current.set(timerKey, timer)
-    } finally {
-      taskPollsInFlight.current.delete(timerKey)
-    }
-  }, [updateTab])
-
   // 视频模式粘贴上传图片
   useEffect(() => {
     if (appMode !== 'video') return
@@ -587,30 +510,16 @@ function App({ onLogout }) {
     return () => document.removeEventListener('paste', handlePaste)
   })
 
-  // 页面加载时恢复所有未完成的视频任务轮询
-  useEffect(() => {
-    imgTabs.forEach(tab => {
-      if (tab.taskId && !tab.error) {
-        updateImgTab(tab.id, { loading: true })
-        pollImageTask(tab.id, tab.taskId)
-      }
-    })
-    videoTabs.forEach(tab => {
-      if (tab.taskId && !tab.videoUrl && !tab.error) {
-        updateTab(tab.id, { loading: true })
-        pollVideoTask(tab.id, tab.taskId, tab.taskProvider)
-      } else if (tab.loading && !tab.taskId) {
-        // 清除无效的 loading 状态（上次关闭页面时残留）
-        updateTab(tab.id, { loading: false })
-      }
-    })
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleVideoGenerate = async () => {
     const tab = activeTab
-    if (!videoTabHasInput(tab)) return
-
-    updateTab(tab.id, { loading: true, taskStatus: 'submitting', error: null, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0 })
+    if (!videoTabHasInput(tab)) {
+      notify('请填写视频提示词或添加参考素材', 'error')
+      return
+    }
+    const revealTimer = window.setTimeout(
+      () => setTaskGalleryRevision(revision => revision + 1),
+      500,
+    )
 
     try {
       let resp
@@ -652,7 +561,15 @@ function App({ onLogout }) {
             return null
           }).filter(Boolean)
           pendingFetches.push(...refImgFetches)
-          tab.refAudios.forEach(aud => formData.append('ref_audios', aud.file))
+          tab.refAudios.forEach((aud, index) => {
+            if (aud.file) {
+              formData.append('ref_audios', aud.file)
+            } else if (aud.preview) {
+              pendingFetches.push(
+                ensureFetchOk(aud.preview).then(blob => formData.append('ref_audios', blob, aud.name || `audio_${index}.wav`))
+              )
+            }
+          })
         }
         if (videoUrls.length) formData.append('ref_video_urls', JSON.stringify(videoUrls))
         if (pendingFetches.length) await Promise.all(pendingFetches)
@@ -669,15 +586,16 @@ function App({ onLogout }) {
       }
 
       if (resp.data.success && (resp.data.db_task_id || resp.data.task_id)) {
-        const taskProvider = resp.data.provider || videoProvider
         const localTaskId = resp.data.db_task_id || resp.data.task_id
-        updateTab(tab.id, { taskId: localTaskId, taskProvider, taskStatus: 'pending' })
-        pollVideoTask(tab.id, localTaskId, taskProvider)
+        notify(`视频任务 #${localTaskId} 已创建`)
       } else {
-        updateTab(tab.id, { error: resp.data.error || '提交失败', loading: false })
+        notify(resp.data.error || '视频任务创建失败', 'error')
       }
     } catch (e) {
-      updateTab(tab.id, { error: e.response?.data?.error || e.message, loading: false })
+      notify(e.response?.data?.error || e.message || '视频任务创建失败', 'error')
+    } finally {
+      window.clearTimeout(revealTimer)
+      setTaskGalleryRevision(revision => revision + 1)
     }
   }
 
@@ -763,9 +681,8 @@ function App({ onLogout }) {
   const [panelWidth, setPanelWidth] = useState(400)
   const isDragging = useRef(false)
 
-  // 从 Task Queue 加载任务到主 UI
+  // 将历史任务参数覆盖到固定生成表单。
   const handleLoadTask = async (taskSummary) => {
-    // 从详情接口获取完整数据
     let task = taskSummary
     try {
       const resp = await axios.get(`/api/tasks/${taskSummary.id}`)
@@ -775,7 +692,7 @@ function App({ onLogout }) {
     const params = task.params || {}
 
     if (task.type === 'image') {
-      const id = nextImgTabId.current++
+      const id = activeImgTab.id || 1
       const restoredRefs = (result.local_refs || []).map((url, i) => ({ preview: url, name: `ref_${i}.png` }))
       const tab = {
         ...makeImgTab(id),
@@ -787,15 +704,12 @@ function App({ onLogout }) {
         useSearch: params.use_search || false,
         thinkLevel: params.think_level || 'minimal',
         uploadedImages: restoredRefs,
-        generatedImages: result.local_images || result.images || [],
-        thinkingText: result.thinking || '',
-        error: task.status === 'failed' ? task.error : null
       }
-      setImgTabs(prev => [...prev, tab])
+      setImgTabs([tab])
       setActiveImgTabId(id)
       setAppMode('image')
     } else {
-      const id = nextTabId.current++
+      const id = activeTab.id || 1
       const restoredVideos = (params.ref_video_urls || []).map((url, i) => ({
         uid: `restored_${i}_${Date.now()}`,
         name: `ref_video_${i}.mp4`, url, filepath: (params.ref_video_paths || [])[i] || null,
@@ -814,15 +728,11 @@ function App({ onLogout }) {
         mode: params.video_mode || 'keyframe',
         refVideos: restoredVideos,
         lastFrame: lastFrameSrc ? { file: null, preview: lastFrameSrc } : null,
-        videoUrl: result.videos?.[0]?.video_url || result.local_video || null,
-        lastFrameUrl: lastFrameSrc,
-        error: task.status === 'failed' ? task.error : null
       }
-      setVideoTabs(prev => [...prev, tab])
+      setVideoTabs([tab])
       setActiveVideoTabId(id)
       setAppMode('video')
     }
-    setShowTaskQueue(false)
   }
 
   const handleDragStart = (e) => {
@@ -852,7 +762,6 @@ function App({ onLogout }) {
     setPanelWidth(width => Math.min(560, Math.max(300, width + delta)))
   }
 
-  const activeTaskCount = imgTabs.filter(tab => tab.loading).length + videoTabs.filter(tab => tab.loading).length
   const handleSelectSavedPrompt = (prompt) => {
     if (appMode === 'video') updateTab(activeTab.id, { prompt })
     else updateImgTab(activeImgTab.id, { prompt })
@@ -904,11 +813,7 @@ function App({ onLogout }) {
             <span className="header-provider-label truncate">{currentProviderLabel}</span>
           </button>
           <div className="glass-control-group flex items-center gap-0.5">
-            <IconButton label="提示词库" onClick={() => { setShowPromptCollection(value => !value); setShowTaskQueue(false) }} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
-            <span className="relative inline-flex">
-              <IconButton label="任务历史" onClick={() => { setShowTaskQueue(value => !value); setShowPromptCollection(false) }} className={showTaskQueue ? 'text-nexus-green' : ''}><Clock size={16} /></IconButton>
-              {activeTaskCount > 0 && <span className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-nexus-amber text-[9px] font-semibold text-black">{activeTaskCount}</span>}
-            </span>
+            <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
             <IconButton label="退出登录" onClick={handleLogout} className="hover:text-nexus-red"><LogOut size={16} /></IconButton>
           </div>
         </div>
@@ -921,41 +826,12 @@ function App({ onLogout }) {
         
         {/* 左侧：提示词输入 */}
         <section className="prompt-pane relative z-20">
-          
-          {/* 图片标签页栏 */}
-          <div className="flex border-b border-nexus-border text-sm font-mono overflow-x-auto custom-scrollbar shrink-0" role="tablist" aria-label="图片任务标签">
-            {imgTabs.map(tab => (
-              <div key={tab.id}
-                onClick={() => setActiveImgTabId(tab.id)}
-                onDoubleClick={() => setShowFullEditor(true)}
-                role="tab"
-                tabIndex={tab.id === activeImgTabId ? 0 : -1}
-                aria-selected={tab.id === activeImgTabId}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    setActiveImgTabId(tab.id)
-                  }
-                }}
-                className={`px-3 py-2.5 flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 transition-colors ${tab.id === activeImgTabId ? 'border-nexus-green text-white bg-nexus-surface' : 'border-transparent text-nexus-text hover:bg-nexus-surface'}`}
-              >
-                {tab.loading ? <div className="w-3 h-3 border border-nexus-green border-t-transparent rounded-full animate-spin" /> : <Cpu size={12} className={tab.id === activeImgTabId ? 'text-nexus-green' : ''} />}
-                <span className="max-w-[80px] truncate text-xs">{tab.prompt ? tab.prompt.slice(0, 12) : `img_${tab.id}`}</span>
-                {imgTabs.length > 1 && (
-                  <button aria-label={`关闭图片标签 ${tab.id}`} title="关闭标签" onClick={e => { e.stopPropagation(); closeImgTab(tab.id) }} className="ml-1 rounded p-0.5 text-nexus-text hover:bg-nexus-red/10 hover:text-nexus-red transition-colors">
-                    <X size={10} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <button aria-label="新建图片标签" title="新建标签" onClick={addImgTab} className="px-2.5 py-2 text-nexus-text hover:bg-nexus-surface hover:text-nexus-green transition-colors shrink-0"><Plus size={14} /></button>
-          </div>
 
           {/* 编辑器主体 */}
           <div className="flex-grow flex flex-col min-h-0 relative z-10">
             <TextToImage 
               prompt={activeImgTab.prompt} setPrompt={v => updateImgTab(activeImgTab.id, { prompt: v })}
-              isGenerating={activeImgTab.loading} chatMode={activeImgTab.chatMode} 
+              isGenerating={false} chatMode={activeImgTab.chatMode}
               onSavePrompt={handleSavePrompt}
             />
           </div>
@@ -964,14 +840,9 @@ function App({ onLogout }) {
           <div className="prompt-actions p-3 border-t border-nexus-border z-10">
             <button
               onClick={handleGenerate}
-              disabled={activeImgTab.loading || !activeImgTab.prompt.trim()}
               className="btn-base btn-primary w-full min-h-11"
             >
-              {activeImgTab.loading ? (
-                <><Square size={14} className="animate-pulse" /> <span>生成中</span></>
-              ) : (
-                <><Play size={14} fill="currentColor" /> <span>生成图片</span></>
-              )}
+              <Play size={14} fill="currentColor" /> <span>生成图片</span>
             </button>
           </div>
 
@@ -994,15 +865,11 @@ function App({ onLogout }) {
         {/* 中间：生成画布 */}
         <section className="canvas-pane">
           <div className="canvas-grid" />
-
-          {/* 上部：输出终端画布 */}
-          <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-nexus-border bg-nexus-panel shadow-2xl">
-            <ResultDisplay
-              isLoading={activeImgTab.loading} generatedImages={activeImgTab.generatedImages} thinkingText={activeImgTab.thinkingText}
-              error={activeImgTab.error} errorType={activeImgTab.errorType} errorDetails={activeImgTab.errorDetails}
-              taskStatus={activeImgTab.taskStatus} taskId={activeImgTab.taskId} provider={apiProvider}
-            />
-          </div>
+          <TaskGallery
+            mode="image"
+            refreshToken={taskGalleryRevision}
+            onReuseTask={handleLoadTask}
+          />
         </section>
 
         {/* 右侧：图片参数 */}
@@ -1115,34 +982,6 @@ function App({ onLogout }) {
         <>
           {/* 左侧：视频提示词 */}
           <section className="prompt-pane relative z-20">
-            {/* 视频标签页栏 */}
-            <div className="flex border-b border-nexus-border text-sm font-mono overflow-x-auto custom-scrollbar shrink-0" role="tablist" aria-label="视频任务标签">
-              {videoTabs.map(tab => (
-                <div key={tab.id}
-                  onClick={() => setActiveVideoTabId(tab.id)}
-                  onDoubleClick={() => setShowFullEditor(true)}
-                  role="tab"
-                  tabIndex={tab.id === activeVideoTabId ? 0 : -1}
-                  aria-selected={tab.id === activeVideoTabId}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setActiveVideoTabId(tab.id)
-                    }
-                  }}
-                  className={`px-3 py-2.5 flex items-center gap-1.5 cursor-pointer shrink-0 border-b-2 transition-colors ${tab.id === activeVideoTabId ? 'border-nexus-green text-white bg-nexus-surface' : 'border-transparent text-nexus-text hover:bg-nexus-surface'}`}
-                >
-                  {tab.loading ? <div className="w-3 h-3 border border-nexus-green border-t-transparent rounded-full animate-spin" /> : <Film size={12} className={tab.id === activeVideoTabId ? 'text-nexus-green' : ''} />}
-                  <span className="max-w-[80px] truncate text-xs">{tab.prompt ? tab.prompt.slice(0, 12) : `vid_${tab.id}`}</span>
-                  {videoTabs.length > 1 && (
-                    <button aria-label={`关闭视频标签 ${tab.id}`} title="关闭标签" onClick={e => { e.stopPropagation(); closeVideoTab(tab.id) }} className="ml-1 rounded p-0.5 text-nexus-text hover:bg-nexus-red/10 hover:text-nexus-red transition-colors">
-                      <X size={10} />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button aria-label="新建视频标签" title="新建标签" onClick={addVideoTab} className="px-2.5 py-2 text-nexus-text hover:bg-nexus-surface hover:text-nexus-green transition-colors shrink-0"><Plus size={14} /></button>
-            </div>
             <div className="flex-grow flex flex-col min-h-0 relative z-10">
               <div className="flex-grow flex flex-col min-h-0 relative bg-transparent">
                 <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
@@ -1154,7 +993,6 @@ function App({ onLogout }) {
                     aria-label="视频提示词"
                     value={activeTab.prompt}
                     onChange={(e) => updateTab(activeTab.id, { prompt: e.target.value })}
-                    disabled={activeTab.loading}
                     className="absolute inset-0 resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
                     spellCheck="true"
                     placeholder="描述镜头、主体、动作、光线与节奏..."
@@ -1166,7 +1004,7 @@ function App({ onLogout }) {
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <button
                   onClick={handleOptimizeVideoPrompt}
-                  disabled={activeTab.loading || optimizingVideoPrompt || !activeTab.prompt.trim()}
+                  disabled={optimizingVideoPrompt || !activeTab.prompt.trim()}
                   className="btn-base btn-outline min-h-9 px-2 text-xs"
                 >
                   {optimizingVideoPrompt ? (
@@ -1177,7 +1015,7 @@ function App({ onLogout }) {
                 </button>
                 <button
                   onClick={openVideoPromptAgent}
-                  disabled={activeTab.loading || videoPromptAgentLoading || !videoTabHasInput(activeTab)}
+                  disabled={videoPromptAgentLoading || !videoTabHasInput(activeTab)}
                   className={`btn-base min-h-9 px-2 text-xs ${showVideoPromptAgent ? 'btn-active' : 'btn-outline'}`}
                 >
                   <Bot size={12} /> <span>{videoPromptAgentLoading ? '处理中' : '提示词助手'}</span>
@@ -1185,14 +1023,9 @@ function App({ onLogout }) {
               </div>
               <button
                 onClick={handleVideoGenerate}
-                disabled={activeTab.loading || !videoTabHasInput(activeTab)}
                 className="btn-base btn-primary w-full min-h-11"
               >
-                {activeTab.loading ? (
-                  <><Square size={14} className="animate-pulse" /> <span>生成中</span></>
-                ) : (
-                  <><Play size={14} fill="currentColor" /> <span>生成视频</span></>
-                )}
+                <Play size={14} fill="currentColor" /> <span>生成视频</span>
               </button>
             </div>
           </section>
@@ -1214,15 +1047,11 @@ function App({ onLogout }) {
           {/* 中间：视频画布 */}
           <section className="canvas-pane">
             <div className="canvas-grid" />
-
-            {/* 视频输出 */}
-            <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-nexus-border bg-nexus-panel shadow-2xl">
-              <VideoResultDisplay
-                isLoading={activeTab.loading} videoUrl={activeTab.videoUrl} lastFrameUrl={activeTab.lastFrameUrl}
-                progress={activeTab.progress} error={activeTab.error} eta={activeTab.eta}
-                taskStatus={activeTab.taskStatus} taskId={activeTab.taskId} provider={videoProvider}
-              />
-            </div>
+            <TaskGallery
+              mode="video"
+              refreshToken={taskGalleryRevision}
+              onReuseTask={handleLoadTask}
+            />
           </section>
 
           {/* 右侧：视频参数 */}
@@ -1469,7 +1298,7 @@ function App({ onLogout }) {
                       {activeTab.refAudios.map((aud, i) => (
                         <div key={i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0 bg-[#111] flex items-center justify-center">
                           <AudioLines size={15} className="text-nexus-cyan" />
-                          <span className="absolute bottom-0.5 text-[8px] font-mono text-nexus-text truncate w-full text-center">{aud.file.name.slice(0,6)}</span>
+                          <span className="absolute bottom-0.5 text-[8px] font-mono text-nexus-text truncate w-full text-center">{(aud.file?.name || aud.name || 'audio').slice(0,6)}</span>
                           <button aria-label={`删除参考音频 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
                             className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
@@ -1481,7 +1310,7 @@ function App({ onLogout }) {
                           <Plus size={14} />
                           <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={e => {
                             const files = Array.from(e.target.files).slice(0, 3 - activeTab.refAudios.length)
-                            updateTab(activeTab.id, { refAudios: [...activeTab.refAudios, ...files.map(f => ({ file: f }))] })
+                            updateTab(activeTab.id, { refAudios: [...activeTab.refAudios, ...files.map(f => ({ file: f, name: f.name }))] })
                           }} />
                         </label>
                       )}
@@ -1552,29 +1381,6 @@ function App({ onLogout }) {
             </div>
             <div className="relative flex-grow overflow-hidden">
               <PromptCollection onSelectPrompt={handleSelectSavedPrompt} />
-            </div>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
-      {/* 右侧抽屉：任务历史 */}
-      <AnimatePresence>
-        {showTaskQueue && (
-          <motion.aside
-            initial={{ x: '100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '100%', opacity: 0 }}
-            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-            className="drawer-panel liquid-glass-strong absolute bottom-0 right-0 top-0 z-40 flex flex-col"
-          >
-            <div className="glass-drawer-header flex h-12 shrink-0 items-center justify-between px-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
-                <Clock size={15} className="text-nexus-blue" /> 任务历史
-              </div>
-              <IconButton label="关闭任务历史" onClick={() => setShowTaskQueue(false)}><X size={16} /></IconButton>
-            </div>
-            <div className="flex-grow overflow-hidden relative">
-              <TaskHistory onLoadTask={handleLoadTask} />
             </div>
           </motion.aside>
         )}

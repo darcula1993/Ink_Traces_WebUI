@@ -87,3 +87,6 @@ tasks.db-wal
 
 # Uploaded video references
 upload_video/
+
+# Server-backed workspace draft assets
+workspace_assets/

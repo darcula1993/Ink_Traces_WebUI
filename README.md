@@ -59,7 +59,7 @@ cp config.json.example config.json
 
 # Edit config.json and fill in your provider credentials
 
-# Start backend and frontend
+# Build the frontend and start the worker plus Gunicorn
 ./start.sh
 ```
 
@@ -74,6 +74,10 @@ Stop services with:
 ```bash
 ./stop.sh
 ```
+
+`start.sh` defaults to production mode: Gunicorn serves both the API and the
+built SPA, so no Vite process stays resident. For frontend development with
+hot reload, start with `NANOBANANA_FRONTEND_MODE=dev ./start.sh`.
 
 ## Configuration
 
@@ -192,7 +196,7 @@ This removes expired/orphaned media, strips legacy inline Base64 results, checkp
 - Generated media stays on disk; SQLite stores task and asset metadata rather than Base64 payloads.
 - Ark reference-video workflows require a public URL that the provider can download.
 - The Flask backend restricts CORS to configured/local origins by default; set `server.cors_origins` when serving the UI from another host.
-- Gunicorn serves the API with a separate worker process; the stack remains intended for local or controlled deployments.
+- Gunicorn serves both the production SPA and API with a separate task worker; the stack remains intended for local or controlled deployments.
 - Safety filters can be configured in `config.json`, but provider-side baseline safety enforcement may still apply.
 
 ## License

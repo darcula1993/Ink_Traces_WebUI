@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, session, g
+from flask import Flask, request, jsonify, send_file, send_from_directory, session, g, after_this_request
 from flask_cors import CORS
 from werkzeug.exceptions import ClientDisconnected, RequestEntityTooLarge
 import os
@@ -10,6 +10,8 @@ import copy
 import secrets
 import re
 import time
+import tempfile
+import zipfile
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PIL import Image
 import uuid
@@ -34,6 +36,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # 加载配置文件
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+CLIENT_DIST_DIR = os.path.join(PROJECT_ROOT, 'client', 'dist')
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
 CONFIG_EXAMPLE_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json.example')
 SECRET_KEY_FILE = os.path.join(PROJECT_ROOT, '.flask_secret_key')
@@ -1436,7 +1439,6 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         'response_format': 'b64_json',
         'watermark': bool(watermark),
         'output_format': output_format,
-        'optimize_prompt_options': {'mode': 'standard'},
     }
 
     # 参考图（取 parts 中的 inlineData）
@@ -1551,6 +1553,9 @@ def execute_image_task(task_id):
     task = task_db.get_task(task_id)
     if not task:
         return {'success': False, 'error': '任务不存在'}, 404
+    if task_db.cancellation_requested(task_id):
+        task_db.finalize_task_cancel(task_id)
+        return {'success': False, 'cancelled': True, 'error': '任务已取消', 'task_id': task_id}, 409
 
     params = task.get('params') or {}
     provider, provider_config = get_image_provider_config(task.get('provider') or params.get('provider'))
@@ -1601,6 +1606,10 @@ def execute_image_task(task_id):
         task_db.fail_task(task_id, str(e))
         return {'success': False, 'error': str(e), 'error_type': 'request_error', 'task_id': task_id}, 500
 
+    if task_db.cancellation_requested(task_id):
+        task_db.finalize_task_cancel(task_id)
+        return {'success': False, 'cancelled': True, 'error': '任务已取消', 'task_id': task_id}, 409
+
     if not response_data.get('success'):
         error_result = {
             'error_type': response_data.get('error_type'),
@@ -1612,7 +1621,12 @@ def execute_image_task(task_id):
         return response_data, status_code
 
     local_images = []
+    local_thumbnails = []
     for index, data_url in enumerate(response_data.get('images') or []):
+        if task_db.cancellation_requested(task_id):
+            storage.remove_task_output_files(task_id)
+            task_db.finalize_task_cancel(task_id)
+            return {'success': False, 'cancelled': True, 'error': '任务已取消', 'task_id': task_id}, 409
         if not isinstance(data_url, str) or not data_url.startswith('data:'):
             continue
         header = data_url.split(',', 1)[0].lower()
@@ -1623,6 +1637,14 @@ def execute_image_task(task_id):
         storage.save_data_url(data_url, path)
         storage.register_file(task_id, 'output_image', path, mime_type)
         local_images.append(f'/api/tasks/{task_id}/file/{filename}')
+        thumbnail_name = f'thumb_{index}.webp'
+        thumbnail_path = os.path.join(output_dir, thumbnail_name)
+        try:
+            storage.create_image_thumbnail(path, thumbnail_path)
+            storage.register_file(task_id, 'output_thumbnail', thumbnail_path, 'image/webp')
+            local_thumbnails.append(f'/api/tasks/{task_id}/file/{thumbnail_name}')
+        except (OSError, ValueError):
+            app.logger.warning('thumbnail_generation_failed task_id=%s file=%s', task_id, filename)
 
     if not local_images:
         task_db.fail_task(task_id, '未能保存生成图片')
@@ -1630,11 +1652,15 @@ def execute_image_task(task_id):
 
     result = {
         'local_images': local_images,
+        'local_thumbnails': local_thumbnails,
         'local_refs': local_refs,
         'thinking': response_data.get('thinking', ''),
         'output_format': response_data.get('output_format', params.get('output_format', 'png')),
     }
-    task_db.complete_task(task_id, result, output_dir)
+    if not task_db.complete_task(task_id, result, output_dir):
+        storage.remove_task_output_files(task_id)
+        task_db.finalize_task_cancel(task_id)
+        return {'success': False, 'cancelled': True, 'error': '任务已取消', 'task_id': task_id}, 409
 
     payload = {
         'success': True,
@@ -1724,7 +1750,6 @@ def generate():
         if provider == 'ark':
             params['output_format'] = output_format
             params['watermark'] = watermark
-            params['prompt_optimization'] = 'standard'
         db_task_id = task_db.create_task('image', prompt, params, provider=provider, status='preparing')
         output_dir = storage.task_output_dir('image', db_task_id)
         task_db.update_task(db_task_id, output_dir=output_dir)
@@ -2046,13 +2071,14 @@ def video_generate():
             task_db.fail_task(db_task_id, '供应商未返回任务 ID')
             return jsonify({'success': False, 'error': '供应商未返回任务 ID', 'db_task_id': db_task_id}), 502
 
-        task_db.update_task(
-            db_task_id,
-            status='processing',
-            external_task_id=external_id,
-            progress=0,
-            next_run_at=task_db.utcnow(),
-        )
+        if not task_db.activate_video_task(db_task_id, external_id):
+            task_db.finalize_task_cancel(db_task_id)
+            return jsonify({
+                'success': False,
+                'cancelled': True,
+                'error': '任务已取消，本地将不再轮询供应商任务',
+                'db_task_id': db_task_id,
+            }), 409
 
         return jsonify({'success': True, 'task_id': external_id, 'db_task_id': db_task_id, 'provider': provider})
 
@@ -2089,8 +2115,10 @@ def video_task_status():
     status_map = {
         'pending': 'TASK_STATUS_QUEUED',
         'processing': 'TASK_STATUS_PROCESSING',
+        'cancel_requested': 'TASK_STATUS_PROCESSING',
         'succeeded': 'TASK_STATUS_SUCCEED',
         'failed': 'TASK_STATUS_FAILED',
+        'cancelled': 'TASK_STATUS_CANCELLED',
     }
     stored_result = task.get('result') or {}
     videos = stored_result.get('videos') or []
@@ -2115,28 +2143,172 @@ def video_task_status():
 # Task Management API
 # ============================================================
 
+WORKSPACE_STATE_KEYS = {
+    'img_tabs', 'img_activeTab', 'appMode',
+    'vid_provider', 'vid_tabs', 'vid_activeTab',
+    'gallery_preferences',
+}
+
+TASK_VIEWS = {'all', 'favorite', 'active', 'trash'}
+TASK_SORTS = {'newest', 'oldest', 'updated'}
+FAVORITE_GROUP_COLORS = {'green', 'cyan', 'blue', 'violet', 'rose', 'amber'}
+
+
+def _task_group_filter():
+    raw_group = request.args.get('favorite_group')
+    if raw_group is None or raw_group == '':
+        return None, None
+    try:
+        group_id = int(raw_group)
+    except (TypeError, ValueError):
+        return None, (jsonify({'success': False, 'error': 'favorite_group 必须是正整数'}), 400)
+    if group_id <= 0:
+        return None, (jsonify({'success': False, 'error': 'favorite_group 必须是正整数'}), 400)
+    return group_id, None
+
+
+def _parse_task_ids(data, maximum=500):
+    raw_ids = data.get('ids') if isinstance(data, dict) else None
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return None, (jsonify({'success': False, 'error': 'ids 必须是非空数组'}), 400)
+    if len(raw_ids) > maximum:
+        return None, (jsonify({'success': False, 'error': f'单次最多处理 {maximum} 个任务'}), 400)
+    task_ids = []
+    for raw_id in raw_ids:
+        if isinstance(raw_id, bool):
+            return None, (jsonify({'success': False, 'error': '任务 ID 必须是正整数'}), 400)
+        try:
+            task_id = int(raw_id)
+        except (TypeError, ValueError):
+            return None, (jsonify({'success': False, 'error': '任务 ID 必须是正整数'}), 400)
+        if task_id <= 0:
+            return None, (jsonify({'success': False, 'error': '任务 ID 必须是正整数'}), 400)
+        if task_id not in task_ids:
+            task_ids.append(task_id)
+    return task_ids, None
+
 @app.route('/api/tasks', methods=['GET'])
 def api_list_tasks():
     task_type = request.args.get('type')
     status = request.args.get('status')
+    favorite_arg = request.args.get('favorite')
+    favorite = None if favorite_arg is None else favorite_arg.lower() in ('1', 'true', 'yes')
+    active = request.args.get('active', '').lower() in ('1', 'true', 'yes')
+    deleted = request.args.get('deleted', '').lower() in ('1', 'true', 'yes')
+    ungrouped = request.args.get('ungrouped', '').lower() in ('1', 'true', 'yes')
+    search = request.args.get('q', '').strip()
+    sort = request.args.get('sort', 'newest')
+    if sort not in TASK_SORTS:
+        return jsonify({'success': False, 'error': '未知排序方式'}), 400
+    favorite_group, group_error = _task_group_filter()
+    if group_error:
+        return group_error
     try:
         limit = max(1, min(int(request.args.get('limit', 50)), 100))
         offset = max(0, int(request.args.get('offset', 0)))
     except ValueError:
         return jsonify({'success': False, 'error': 'limit 和 offset 必须是整数'}), 400
-    tasks, total = task_db.list_tasks(task_type, status, limit, offset, summary=True)
+    tasks, total = task_db.list_tasks(
+        task_type, status, limit, offset, summary=True, favorite=favorite, active=active,
+        search=search, deleted=deleted, favorite_group=favorite_group,
+        ungrouped=ungrouped, sort=sort,
+    )
     # 列表接口剥离大字段，只保留缩略图路径
     for t in tasks:
         if isinstance(t.get('result'), dict):
             r = t['result']
             t['result'] = {
                 'local_images': r.get('local_images', []),
+                'local_thumbnails': r.get('local_thumbnails', []),
                 'local_refs': r.get('local_refs', []),
                 'local_video': r.get('local_video'),
                 'local_last_frame': r.get('local_last_frame'),
+                'local_thumbnail': r.get('local_thumbnail'),
                 'thinking': r.get('thinking', '')[:100]
             }
     return jsonify({'success': True, 'tasks': tasks, 'total': total})
+
+
+@app.route('/api/tasks/status', methods=['GET'])
+def api_task_statuses():
+    raw_ids = request.args.get('ids', '')
+    if not raw_ids:
+        return jsonify({'success': False, 'error': '缺少任务 ids'}), 400
+    task_ids = []
+    for raw_id in raw_ids.split(','):
+        try:
+            task_id = int(raw_id)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': '任务 ID 必须是正整数'}), 400
+        if task_id <= 0:
+            return jsonify({'success': False, 'error': '任务 ID 必须是正整数'}), 400
+        if task_id not in task_ids:
+            task_ids.append(task_id)
+    if len(task_ids) > 100:
+        return jsonify({'success': False, 'error': '单次最多查询 100 个任务'}), 400
+    statuses = task_db.get_task_statuses(task_ids)
+    found = {int(task['id']) for task in statuses}
+    return jsonify({
+        'success': True,
+        'tasks': statuses,
+        'missing_ids': [task_id for task_id in task_ids if task_id not in found],
+    })
+
+
+@app.route('/api/tasks/navigation', defaults={'task_id': None}, methods=['GET'])
+@app.route('/api/tasks/<int:task_id>/navigation', methods=['GET'])
+def api_task_navigation(task_id):
+    task_type = request.args.get('type')
+    view = request.args.get('view', 'all')
+    search = request.args.get('q', '').strip()
+    sort = request.args.get('sort', 'newest')
+    if view not in TASK_VIEWS:
+        return jsonify({'success': False, 'error': '未知任务分类'}), 400
+    if sort not in TASK_SORTS:
+        return jsonify({'success': False, 'error': '未知排序方式'}), 400
+    favorite_group, group_error = _task_group_filter()
+    if group_error:
+        return group_error
+    ungrouped = request.args.get('ungrouped', '').lower() in ('1', 'true', 'yes')
+    navigation = task_db.get_task_navigation(
+        task_id=task_id,
+        task_type=task_type,
+        favorite=True if view == 'favorite' else None,
+        active=view == 'active',
+        search=search,
+        deleted=view == 'trash',
+        favorite_group=favorite_group if view == 'favorite' else None,
+        ungrouped=ungrouped if view == 'favorite' else False,
+        sort=sort,
+    )
+    return jsonify({'success': True, 'navigation': navigation})
+
+
+@app.route('/api/tasks/selection', methods=['GET'])
+def api_task_selection():
+    task_type = request.args.get('type')
+    view = request.args.get('view', 'all')
+    search = request.args.get('q', '').strip()
+    sort = request.args.get('sort', 'newest')
+    if view not in TASK_VIEWS:
+        return jsonify({'success': False, 'error': '未知任务分类'}), 400
+    if sort not in TASK_SORTS:
+        return jsonify({'success': False, 'error': '未知排序方式'}), 400
+    favorite_group, group_error = _task_group_filter()
+    if group_error:
+        return group_error
+    ungrouped = request.args.get('ungrouped', '').lower() in ('1', 'true', 'yes')
+    task_ids = task_db.list_task_ids(
+        task_type=task_type,
+        favorite=True if view == 'favorite' else None,
+        active=view == 'active',
+        search=search,
+        deleted=view == 'trash',
+        favorite_group=favorite_group if view == 'favorite' else None,
+        ungrouped=ungrouped if view == 'favorite' else False,
+        sort=sort,
+    )
+    return jsonify({'success': True, 'ids': task_ids, 'total': len(task_ids)})
 
 
 @app.route('/api/tasks/<int:task_id>', methods=['GET'])
@@ -2147,24 +2319,337 @@ def api_get_task(task_id):
     return jsonify({'success': True, 'task': t})
 
 
+@app.route('/api/tasks/<int:task_id>/favorite', methods=['PATCH'])
+def api_favorite_task(task_id):
+    task = task_db.get_task(task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data.get('favorite'), bool):
+        return jsonify({'success': False, 'error': 'favorite 必须是布尔值'}), 400
+    task_db.set_task_favorite(task_id, data['favorite'])
+    return jsonify({'success': True, 'favorite': data['favorite'], 'task': task_db.get_task(task_id)})
+
+
+@app.route('/api/favorite-groups', methods=['GET'])
+def api_list_favorite_groups():
+    return jsonify({
+        'success': True,
+        'groups': task_db.list_favorite_groups(request.args.get('type')),
+    })
+
+
+@app.route('/api/favorite-groups', methods=['POST'])
+def api_create_favorite_group():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name') or '').strip()
+    color = str(data.get('color') or 'green').strip().lower()
+    if not name or len(name) > 40:
+        return jsonify({'success': False, 'error': '分组名称长度必须为 1-40 个字符'}), 400
+    if color not in FAVORITE_GROUP_COLORS:
+        return jsonify({'success': False, 'error': '未知分组颜色'}), 400
+    try:
+        group = task_db.create_favorite_group(name, color)
+    except Exception as error:
+        if 'UNIQUE constraint failed' in str(error):
+            return jsonify({'success': False, 'error': '收藏分组名称已存在'}), 409
+        raise
+    return jsonify({'success': True, 'group': group}), 201
+
+
+@app.route('/api/favorite-groups/<int:group_id>', methods=['PATCH'])
+def api_update_favorite_group(group_id):
+    if not task_db.get_favorite_group(group_id):
+        return jsonify({'success': False, 'error': '收藏分组不存在'}), 404
+    data = request.get_json(silent=True) or {}
+    name = None
+    color = None
+    if 'name' in data:
+        name = str(data.get('name') or '').strip()
+        if not name or len(name) > 40:
+            return jsonify({'success': False, 'error': '分组名称长度必须为 1-40 个字符'}), 400
+    if 'color' in data:
+        color = str(data.get('color') or '').strip().lower()
+        if color not in FAVORITE_GROUP_COLORS:
+            return jsonify({'success': False, 'error': '未知分组颜色'}), 400
+    try:
+        group = task_db.update_favorite_group(group_id, name=name, color=color)
+    except Exception as error:
+        if 'UNIQUE constraint failed' in str(error):
+            return jsonify({'success': False, 'error': '收藏分组名称已存在'}), 409
+        raise
+    return jsonify({'success': True, 'group': group})
+
+
+@app.route('/api/favorite-groups/<int:group_id>', methods=['DELETE'])
+def api_delete_favorite_group(group_id):
+    if not task_db.delete_favorite_group(group_id):
+        return jsonify({'success': False, 'error': '收藏分组不存在'}), 404
+    return jsonify({'success': True})
+
+
+@app.route('/api/tasks/<int:task_id>/favorite-groups', methods=['PATCH'])
+def api_set_task_favorite_groups(task_id):
+    if not task_db.get_task(task_id):
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    data = request.get_json(silent=True) or {}
+    raw_group_ids = data.get('group_ids')
+    if not isinstance(raw_group_ids, list):
+        return jsonify({'success': False, 'error': 'group_ids 必须是数组'}), 400
+    group_ids = []
+    for raw_group_id in raw_group_ids:
+        if isinstance(raw_group_id, bool):
+            return jsonify({'success': False, 'error': '分组 ID 必须是正整数'}), 400
+        try:
+            group_id = int(raw_group_id)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': '分组 ID 必须是正整数'}), 400
+        if group_id <= 0:
+            return jsonify({'success': False, 'error': '分组 ID 必须是正整数'}), 400
+        group_ids.append(group_id)
+    try:
+        task_db.replace_task_favorite_groups(task_id, group_ids)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    return jsonify({'success': True, 'task': task_db.get_task(task_id)})
+
+
+@app.route('/api/tasks/bulk-favorite-groups', methods=['POST'])
+def api_bulk_favorite_groups():
+    data = request.get_json(silent=True) or {}
+    task_ids, id_error = _parse_task_ids(data)
+    if id_error:
+        return id_error
+    raw_group_ids = data.get('group_ids')
+    if not isinstance(raw_group_ids, list):
+        return jsonify({'success': False, 'error': 'group_ids 必须是数组'}), 400
+    try:
+        group_ids = [int(group_id) for group_id in raw_group_ids]
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': '分组 ID 必须是整数'}), 400
+    if any(group_id <= 0 for group_id in group_ids):
+        return jsonify({'success': False, 'error': '分组 ID 必须是正整数'}), 400
+    mode = data.get('mode', 'add')
+    if mode not in ('add', 'remove', 'replace'):
+        return jsonify({'success': False, 'error': '未知分组更新方式'}), 400
+    try:
+        updated = task_db.update_tasks_favorite_groups(task_ids, group_ids, mode)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    return jsonify({'success': True, 'updated': len(updated), 'updated_ids': updated})
+
+
+@app.route('/api/tasks/bulk-delete', methods=['POST'])
+def api_bulk_delete_tasks():
+    data = request.get_json(silent=True) or {}
+    task_ids, id_error = _parse_task_ids(data)
+    if id_error:
+        return id_error
+    permanent = bool(data.get('permanent', False))
+    if not permanent:
+        moved_ids = task_db.move_tasks_to_trash(task_ids)
+        missing_ids = [task_id for task_id in task_ids if task_id not in moved_ids]
+        return jsonify({
+            'success': True,
+            'deleted': len(moved_ids),
+            'trashed': len(moved_ids),
+            'deleted_ids': moved_ids,
+            'trashed_ids': moved_ids,
+            'missing_ids': missing_ids,
+        })
+
+    deleted_ids = []
+    missing_ids = []
+    skipped_ids = []
+    for task_id in task_ids:
+        task = task_db.get_task(task_id)
+        if not task:
+            missing_ids.append(task_id)
+            continue
+        if task.get('deleted_at') is None or task.get('status') == 'cancel_requested':
+            skipped_ids.append(task_id)
+            continue
+        storage.remove_task_files(task)
+        task_db.delete_task(task_id)
+        deleted_ids.append(task_id)
+
+    return jsonify({
+        'success': True,
+        'deleted': len(deleted_ids),
+        'deleted_ids': deleted_ids,
+        'missing_ids': missing_ids,
+        'skipped_ids': skipped_ids,
+    })
+
+
 @app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
 def api_delete_task(task_id):
     t = task_db.get_task(task_id)
     if not t:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
-    storage.remove_task_files(t)
-    task_db.delete_task(task_id)
-    return jsonify({'success': True})
+    permanent = request.args.get('permanent', '').lower() in ('1', 'true', 'yes')
+    if permanent:
+        if t.get('deleted_at') is None:
+            return jsonify({'success': False, 'error': '任务需要先移入回收站'}), 409
+        if t.get('status') == 'cancel_requested':
+            return jsonify({'success': False, 'error': '任务仍在取消中，请稍后再彻底删除'}), 409
+        storage.remove_task_files(t)
+        task_db.delete_task(task_id)
+        return jsonify({'success': True, 'permanent': True})
+    moved = task_db.move_tasks_to_trash([task_id])
+    return jsonify({'success': True, 'trashed': bool(moved)})
+
+
+@app.route('/api/tasks/<int:task_id>/cancel', methods=['POST'])
+def api_cancel_task(task_id):
+    status = task_db.request_task_cancel(task_id)
+    if status is None:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    return jsonify({'success': True, 'status': status, 'task': task_db.get_task(task_id)})
+
+
+@app.route('/api/tasks/<int:task_id>/restore', methods=['POST'])
+def api_restore_task(task_id):
+    task = task_db.get_task(task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    if task.get('deleted_at') is None:
+        return jsonify({'success': False, 'error': '任务不在回收站'}), 409
+    restored = task_db.restore_tasks([task_id])
+    if not restored:
+        return jsonify({'success': False, 'error': '任务仍在取消中，请稍后再恢复'}), 409
+    return jsonify({'success': True, 'task': task_db.get_task(task_id)})
+
+
+@app.route('/api/tasks/bulk-restore', methods=['POST'])
+def api_bulk_restore_tasks():
+    data = request.get_json(silent=True) or {}
+    task_ids, id_error = _parse_task_ids(data)
+    if id_error:
+        return id_error
+    restored_ids = task_db.restore_tasks(task_ids)
+    return jsonify({
+        'success': True,
+        'restored': len(restored_ids),
+        'restored_ids': restored_ids,
+        'skipped_ids': [task_id for task_id in task_ids if task_id not in restored_ids],
+    })
+
+
+@app.route('/api/tasks/<int:task_id>/retry', methods=['POST'])
+def api_retry_task(task_id):
+    task = task_db.get_task(task_id)
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    if task.get('deleted_at') is not None:
+        return jsonify({'success': False, 'error': '请先从回收站恢复任务'}), 409
+    if task['type'] != 'image':
+        return jsonify({'success': False, 'error': '视频任务请复用参数后重新提交'}), 409
+    if task['status'] not in ('failed', 'cancelled'):
+        return jsonify({'success': False, 'error': '仅失败或已取消的任务可以重试'}), 409
+
+    retry_id = task_db.create_task(
+        'image', task.get('prompt') or '', task.get('params') or {},
+        provider=task.get('provider'), status='preparing', retry_of=task_id,
+    )
+    output_dir, _ = storage.clone_image_inputs(task_id, retry_id)
+    task_db.update_task(
+        retry_id, output_dir=output_dir, status='pending', next_run_at=task_db.utcnow(),
+    )
+    if task.get('favorite'):
+        task_db.set_task_favorite(retry_id, True)
+        task_db.replace_task_favorite_groups(
+            retry_id,
+            [group['id'] for group in task.get('favorite_groups', [])],
+        )
+    return jsonify({'success': True, 'task_id': retry_id, 'task': task_db.get_task(retry_id)}), 202
+
+
+@app.route('/api/tasks/bulk-download', methods=['POST'])
+def api_bulk_download_tasks():
+    data = request.get_json(silent=True) or {}
+    task_ids, id_error = _parse_task_ids(data, maximum=5000)
+    if id_error:
+        return id_error
+
+    archive = tempfile.NamedTemporaryFile(prefix='ink-traces-', suffix='.zip', delete=False)
+    archive_path = archive.name
+    archive.close()
+    file_count = 0
+    try:
+        assets_by_task = {}
+        for asset in task_db.list_assets_for_tasks(task_ids, ('output_image', 'output_video')):
+            assets_by_task.setdefault(asset['task_id'], []).append(asset)
+        # Generated media is already compressed; deflating it again wastes CPU.
+        with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
+            for task_id in task_ids:
+                for asset in assets_by_task.get(task_id, []):
+                    if not os.path.isfile(asset['path']):
+                        continue
+                    filename = os.path.basename(asset['path'])
+                    bundle.write(asset['path'], arcname=f'{asset["task_type"]}-task-{task_id}/{filename}')
+                    file_count += 1
+        if file_count == 0:
+            os.remove(archive_path)
+            return jsonify({'success': False, 'error': '所选任务没有可下载的结果'}), 404
+    except Exception:
+        if os.path.exists(archive_path):
+            os.remove(archive_path)
+        raise
+
+    @after_this_request
+    def remove_archive(response):
+        try:
+            os.remove(archive_path)
+        except OSError:
+            pass
+        return response
+
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    return send_file(
+        archive_path,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'ink-traces-tasks-{timestamp}.zip',
+        max_age=0,
+    )
 
 
 @app.route('/api/tasks/clear', methods=['DELETE'])
 def api_clear_tasks():
-    """清空所有任务及其输出文件"""
+    """Move all visible tasks to trash; permanent removal stays explicit."""
     tasks, _ = task_db.list_tasks(limit=None)
-    for t in tasks:
-        storage.remove_task_files(t)
-    deleted = task_db.delete_all_tasks()
-    return jsonify({'success': True, 'deleted': deleted})
+    moved = task_db.move_tasks_to_trash([task['id'] for task in tasks])
+    return jsonify({'success': True, 'deleted': len(moved), 'trashed': len(moved)})
+
+
+@app.route('/api/workspace/state/<key>', methods=['GET'])
+def api_get_workspace_state(key):
+    if key not in WORKSPACE_STATE_KEYS:
+        return jsonify({'success': False, 'error': '未知工作区状态键'}), 404
+    state = task_db.get_workspace_state(key)
+    return jsonify({'success': True, 'state': state})
+
+
+@app.route('/api/workspace/state/<key>', methods=['PUT'])
+def api_set_workspace_state(key):
+    if key not in WORKSPACE_STATE_KEYS:
+        return jsonify({'success': False, 'error': '未知工作区状态键'}), 404
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or 'value' not in data:
+        return jsonify({'success': False, 'error': '缺少工作区状态 value'}), 400
+    normalized = storage.persist_workspace_value(key, data['value'])
+    state = task_db.set_workspace_state(key, normalized)
+    storage.cleanup_workspace_assets(key, normalized)
+    return jsonify({'success': True, 'state': state})
+
+
+@app.route('/api/workspace/assets/<key>/<path:filename>', methods=['GET'])
+def api_workspace_asset(key, filename):
+    if key not in WORKSPACE_STATE_KEYS:
+        return jsonify({'success': False, 'error': '未知工作区状态键'}), 404
+    directory = os.path.join(storage.WORKSPACE_ASSET_DIR, key)
+    return send_from_directory(directory, filename, max_age=3600)
 
 
 @app.route('/api/tasks/<int:task_id>/file/<path:filename>', methods=['GET'])
@@ -2179,7 +2664,10 @@ def api_task_file(task_id, filename):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
     if not os.path.isfile(filepath):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
-    return send_file(filepath)
+    response = send_file(filepath, conditional=True, max_age=31536000)
+    response.cache_control.public = True
+    response.cache_control.immutable = True
+    return response
 
 
 @app.route('/api/upload_video', methods=['POST'])
@@ -2239,6 +2727,9 @@ def poll_video_task_once(task_id):
     task = task_db.get_task(task_id)
     if not task:
         return {'state': 'failed', 'error': '任务不存在'}
+    if task_db.cancellation_requested(task_id):
+        task_db.finalize_task_cancel(task_id)
+        return {'state': 'cancelled'}
 
     external_task_id = task.get('external_task_id')
     provider = task.get('provider') or 'ark'
@@ -2269,6 +2760,10 @@ def poll_video_task_once(task_id):
         response_data = {}
     if not isinstance(response_data, dict):
         response_data = {}
+
+    if task_db.cancellation_requested(task_id):
+        task_db.finalize_task_cancel(task_id)
+        return {'state': 'cancelled'}
 
     if response.status_code >= 400:
         error_obj = response_data.get('error', {})
@@ -2306,9 +2801,19 @@ def poll_video_task_once(task_id):
         return {'state': 'pending', 'progress': progress}
 
     output_dir = task.get('output_dir') or storage.task_output_dir('video', task_id)
-    result = {'videos': videos, 'images': images, 'local_videos': [], 'local_images': []}
+    result = {
+        'videos': videos,
+        'images': images,
+        'local_videos': [],
+        'local_images': [],
+        'local_thumbnails': [],
+    }
     try:
         for index, video in enumerate(videos):
+            if task_db.cancellation_requested(task_id):
+                storage.remove_task_output_files(task_id)
+                task_db.finalize_task_cancel(task_id)
+                return {'state': 'cancelled'}
             url = video.get('video_url')
             if not url:
                 continue
@@ -2322,6 +2827,10 @@ def poll_video_task_once(task_id):
             result['local_videos'].append(f'/api/tasks/{task_id}/file/{filename}')
 
         for index, image in enumerate(images):
+            if task_db.cancellation_requested(task_id):
+                storage.remove_task_output_files(task_id)
+                task_db.finalize_task_cancel(task_id)
+                return {'state': 'cancelled'}
             url = image.get('image_url')
             if not url:
                 continue
@@ -2333,6 +2842,14 @@ def poll_video_task_once(task_id):
                 storage.stream_response_to_file(download, path)
             storage.register_file(task_id, 'output_image', path, 'image/png')
             result['local_images'].append(f'/api/tasks/{task_id}/file/{filename}')
+            thumbnail_name = 'thumbnail.webp' if index == 0 else f'thumbnail_{index}.webp'
+            thumbnail_path = os.path.join(output_dir, thumbnail_name)
+            try:
+                storage.create_image_thumbnail(path, thumbnail_path)
+                storage.register_file(task_id, 'output_thumbnail', thumbnail_path, 'image/webp')
+                result['local_thumbnails'].append(f'/api/tasks/{task_id}/file/{thumbnail_name}')
+            except (OSError, ValueError):
+                app.logger.warning('thumbnail_generation_failed task_id=%s file=%s', task_id, filename)
     except requests.RequestException as e:
         return {'state': 'retry', 'error': str(e)}
 
@@ -2340,8 +2857,38 @@ def poll_video_task_once(task_id):
         result['local_video'] = result['local_videos'][0]
     if result['local_images']:
         result['local_last_frame'] = result['local_images'][0]
-    task_db.complete_task(task_id, result, output_dir)
+    if result['local_thumbnails']:
+        result['local_thumbnail'] = result['local_thumbnails'][0]
+    if not task_db.complete_task(task_id, result, output_dir):
+        storage.remove_task_output_files(task_id)
+        task_db.finalize_task_cancel(task_id)
+        return {'state': 'cancelled'}
     return {'state': 'succeeded', 'result': result}
+
+
+@app.route('/', defaults={'client_path': ''}, methods=['GET', 'HEAD'])
+@app.route('/<path:client_path>', methods=['GET', 'HEAD'])
+def serve_client_application(client_path):
+    """Serve the production SPA without a resident Vite process."""
+    if client_path == 'api' or client_path.startswith('api/'):
+        return jsonify({'success': False, 'error': '接口不存在'}), 404
+    if not os.path.isfile(os.path.join(CLIENT_DIST_DIR, 'index.html')):
+        return jsonify({'success': False, 'error': '前端尚未构建，请运行 npm run build'}), 503
+
+    requested = os.path.abspath(os.path.join(CLIENT_DIST_DIR, client_path))
+    if os.path.commonpath([CLIENT_DIST_DIR, requested]) == CLIENT_DIST_DIR and os.path.isfile(requested):
+        response = send_from_directory(
+            CLIENT_DIST_DIR,
+            client_path,
+            max_age=31536000 if client_path.startswith('assets/') else 3600,
+            conditional=True,
+        )
+        if client_path.startswith('assets/'):
+            response.cache_control.public = True
+            response.cache_control.immutable = True
+        return response
+
+    return send_from_directory(CLIENT_DIST_DIR, 'index.html', max_age=0, conditional=True)
 
 if __name__ == '__main__':
     print('=' * 60)

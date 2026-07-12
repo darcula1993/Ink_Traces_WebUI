@@ -4,8 +4,6 @@ const KATAKANA = 'ｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹ�
 const LATIN = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 const DIGITS = '0123456789'
 const SYMBOLS = ':・.=*+-<>¦｜'
-const FRAME_INTERVAL = 1000 / 24
-
 function randomBetween(min, max) {
   return min + Math.random() * (max - min)
 }
@@ -22,17 +20,19 @@ function makeGlyph() {
   return { character: randomCharacter(SYMBOLS), mirrored: false }
 }
 
-function makeStream(x, rowCount, speedScale, startOnScreen = true) {
-  const length = Math.floor(randomBetween(10, 29))
+function makeStream(x, rowCount, speedScale, startOnScreen = true, compact = false) {
+  const length = Math.floor(randomBetween(compact ? 8 : 10, compact ? 19 : 29))
   const initialHead = startOnScreen
-    ? randomBetween(-length, rowCount + length)
+    ? compact
+      ? randomBetween(0, rowCount + length * 0.72)
+      : randomBetween(-length, rowCount + length)
     : -randomBetween(length, rowCount * 2.2)
 
   return {
     x,
     head: initialHead,
     length,
-    speed: randomBetween(5.2, 10.8) * speedScale,
+    speed: randomBetween(compact ? 6.4 : 5.2, compact ? 12.2 : 10.8) * speedScale,
     intensity: randomBetween(0.78, 1),
     glyphs: Array.from({ length }, makeGlyph),
     mutationElapsed: 0,
@@ -40,8 +40,8 @@ function makeStream(x, rowCount, speedScale, startOnScreen = true) {
   }
 }
 
-function resetStream(stream, rowCount, speedScale) {
-  const replacement = makeStream(stream.x, rowCount, speedScale, false)
+function resetStream(stream, rowCount, speedScale, compact) {
+  const replacement = makeStream(stream.x, rowCount, speedScale, false, compact)
   Object.assign(stream, replacement)
 }
 
@@ -105,7 +105,7 @@ function drawStream(context, stream, viewport) {
   context.shadowBlur = 0
 }
 
-export default function CodeRainCanvas({ status = 'processing' }) {
+export default function CodeRainCanvas({ status = 'processing', compact = false, className = '' }) {
   const canvasRef = useRef(null)
 
   useEffect(() => {
@@ -116,11 +116,14 @@ export default function CodeRainCanvas({ status = 'processing' }) {
     const context = canvas.getContext('2d', { alpha: false })
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     const speedScale = status === 'pending' ? 0.62 : status === 'submitting' ? 0.72 : status === 'preparing' ? 0.86 : 1
+    const frameInterval = 1000 / (compact ? 10 : 24)
     let viewport = null
     let streams = []
     let frameId = null
     let previousFrame = performance.now()
-    let visible = !document.hidden
+    let pageVisible = !document.hidden
+    let inViewport = true
+    let visible = pageVisible
 
     const configureText = () => {
       context.font = `600 ${viewport.fontSize}px "MS Gothic", "Noto Sans Mono CJK JP", "Yu Gothic", monospace`
@@ -132,18 +135,27 @@ export default function CodeRainCanvas({ status = 'processing' }) {
       const columnCount = Math.ceil(viewport.width / viewport.columnWidth)
       streams = Array.from({ length: columnCount }, (_, index) => {
         const x = viewport.fontSize * 0.7 + index * viewport.columnWidth + randomBetween(-2, 2)
-        return makeStream(x, viewport.rowCount, speedScale, Math.random() > 0.18)
+        const stream = makeStream(x, viewport.rowCount, speedScale, compact ? true : Math.random() > 0.18, compact)
+        if (compact) {
+          const phase = (index * 0.618 + Math.random() * 0.1) % 1
+          stream.head = phase * (viewport.rowCount + stream.length)
+        }
+        return stream
       })
     }
 
     const resize = () => {
       const rect = container.getBoundingClientRect()
-      const ratio = Math.min(window.devicePixelRatio || 1, 1.5)
-      const fontSize = rect.width < 520 ? 18 : 20
+      const ratio = compact ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)
+      const fontSize = compact ? (rect.width < 230 ? 10 : 11) : (rect.width < 520 ? 18 : 20)
       const cellHeight = fontSize * 1.02
+      const pixelWidth = Math.max(1, Math.round(rect.width * ratio))
+      const pixelHeight = Math.max(1, Math.round(rect.height * ratio))
 
-      canvas.width = Math.max(1, Math.round(rect.width * ratio))
-      canvas.height = Math.max(1, Math.round(rect.height * ratio))
+      if (viewport && canvas.width === pixelWidth && canvas.height === pixelHeight) return
+
+      canvas.width = pixelWidth
+      canvas.height = pixelHeight
       canvas.style.width = `${rect.width}px`
       canvas.style.height = `${rect.height}px`
       context.setTransform(ratio, 0, 0, ratio, 0, 0)
@@ -153,7 +165,7 @@ export default function CodeRainCanvas({ status = 'processing' }) {
         height: rect.height,
         fontSize,
         cellHeight,
-        columnWidth: fontSize * 1.3,
+        columnWidth: fontSize * (compact ? 1.16 : 1.3),
         rowCount: Math.ceil(rect.height / cellHeight),
       }
 
@@ -161,6 +173,7 @@ export default function CodeRainCanvas({ status = 'processing' }) {
       context.fillRect(0, 0, viewport.width, viewport.height)
       configureText()
       buildStreams()
+      render(0, false)
     }
 
     const render = (elapsedMs, advance) => {
@@ -175,7 +188,7 @@ export default function CodeRainCanvas({ status = 'processing' }) {
           stream.head += stream.speed * (elapsedMs / 1000)
           mutateStream(stream, elapsedMs)
           if (stream.head - stream.length > viewport.rowCount + 2) {
-            resetStream(stream, viewport.rowCount, speedScale)
+            resetStream(stream, viewport.rowCount, speedScale, compact)
           }
         }
         drawStream(context, stream, viewport)
@@ -185,39 +198,47 @@ export default function CodeRainCanvas({ status = 'processing' }) {
     const animate = (time) => {
       if (!visible) return
       const elapsed = time - previousFrame
-      if (elapsed >= FRAME_INTERVAL) {
-        previousFrame = time - (elapsed % FRAME_INTERVAL)
+      if (elapsed >= frameInterval) {
+        previousFrame = time - (elapsed % frameInterval)
         render(Math.min(elapsed, 100), true)
       }
       frameId = requestAnimationFrame(animate)
     }
 
-    const onVisibilityChange = () => {
-      visible = !document.hidden
+    const syncAnimation = () => {
+      visible = pageVisible && inViewport
+      cancelAnimationFrame(frameId)
+      frameId = null
       if (visible && !reducedMotion) {
         previousFrame = performance.now()
-        cancelAnimationFrame(frameId)
         frameId = requestAnimationFrame(animate)
       }
     }
 
-    const observer = new ResizeObserver(() => {
-      resize()
-      if (reducedMotion) render(0, false)
-    })
+    const onVisibilityChange = () => {
+      pageVisible = !document.hidden
+      syncAnimation()
+    }
+
+    const observer = new ResizeObserver(resize)
     observer.observe(container)
+    const intersectionObserver = new IntersectionObserver(entries => {
+      inViewport = entries[0]?.isIntersecting !== false
+      syncAnimation()
+    }, { rootMargin: '80px' })
+    intersectionObserver.observe(canvas)
     resize()
 
-    if (reducedMotion) render(0, false)
-    else frameId = requestAnimationFrame(animate)
+    if (!reducedMotion) syncAnimation()
     document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       observer.disconnect()
+      intersectionObserver.disconnect()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       cancelAnimationFrame(frameId)
     }
-  }, [status])
+  }, [compact, status])
 
-  return <canvas ref={canvasRef} className="absolute inset-0 size-full" aria-hidden="true" />
+  return <canvas ref={canvasRef} className={`absolute inset-0 size-full ${className}`} aria-hidden="true" />
 }

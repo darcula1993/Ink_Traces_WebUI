@@ -16,6 +16,7 @@
     "download_timeout_seconds": 120,
     "worker_concurrency": 3,
     "worker_lease_seconds": 900,
+    "worker_heartbeat_seconds": 10,
     "cleanup_interval_seconds": 3600,
     "orphan_grace_hours": 24
   },
