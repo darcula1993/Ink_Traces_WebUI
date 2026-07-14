@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import axios from 'axios'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 import {
   AlertTriangle,
   ArchiveRestore,
@@ -352,17 +352,33 @@ function TaskDetailModal({
   trash,
 }) {
   const [outputIndex, setOutputIndex] = useState(0)
+  const [referenceIndex, setReferenceIndex] = useState(null)
   const [openedAt] = useState(() => new Date())
-  useEffect(() => setOutputIndex(0), [item.key])
+  const backdropRef = useRef(null)
+  const dragControls = useDragControls()
+  useEffect(() => {
+    setOutputIndex(0)
+    setReferenceIndex(null)
+  }, [item.key])
   useEffect(() => {
     const onKeyDown = event => {
+      if (referenceIndex !== null) {
+        if (event.key === 'Escape') setReferenceIndex(null)
+        if (event.key === 'ArrowLeft') {
+          setReferenceIndex(index => (index - 1 + item.refs.length) % item.refs.length)
+        }
+        if (event.key === 'ArrowRight') {
+          setReferenceIndex(index => (index + 1) % item.refs.length)
+        }
+        return
+      }
       if (event.key === 'Escape') onClose()
       if (event.key === 'ArrowLeft') onPrevious()
       if (event.key === 'ArrowRight') onNext()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, onNext, onPrevious])
+  }, [item.refs.length, onClose, onNext, onPrevious, referenceIndex])
 
   const params = item.params || {}
   const download = item.type === 'video' ? item.video : item.images?.[outputIndex]
@@ -377,6 +393,7 @@ function TaskDetailModal({
 
   return ReactDOM.createPortal(
     <motion.div
+      ref={backdropRef}
       className="task-detail-backdrop fixed inset-0 z-[220] flex items-center justify-center p-5"
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
@@ -386,11 +403,24 @@ function TaskDetailModal({
         aria-modal="true"
         aria-label="任务详情"
         className="task-detail-modal liquid-glass-strong grid overflow-hidden"
+        drag
+        dragConstraints={backdropRef}
+        dragControls={dragControls}
+        dragElastic={0}
+        dragListener={false}
+        dragMomentum={false}
         initial={{ opacity: 0, scale: 0.97, y: 12 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.98, y: 8 }}
       >
-        <header className="task-detail-toolbar col-span-2 flex h-12 items-center border-b border-white/10 px-3">
+        <header
+          className="task-detail-toolbar col-span-2 flex h-12 items-center border-b border-white/10 px-3"
+          data-testid="task-detail-drag-handle"
+          onPointerDown={event => {
+            if (event.button !== 0 || event.target.closest('button, a')) return
+            dragControls.start(event)
+          }}
+        >
           <IconButton label="上一个任务" onClick={onPrevious}><ChevronLeft size={17} /></IconButton>
           <span className="min-w-16 text-center font-mono text-xs text-nexus-text">{position + 1} / {total}</span>
           <IconButton label="下一个任务" onClick={onNext}><ChevronRight size={17} /></IconButton>
@@ -437,7 +467,18 @@ function TaskDetailModal({
               <section className="p-4">
                 <div className="mb-3 text-xs font-semibold text-nexus-text-light">参考素材</div>
                 <div className="grid grid-cols-4 gap-2">
-                  {item.refs.slice(0, 8).map((url, index) => <img key={url} src={url} className="aspect-square w-full rounded object-cover" alt={`参考素材 ${index + 1}`} />)}
+                  {item.refs.slice(0, 8).map((url, index) => (
+                    <button
+                      key={url}
+                      type="button"
+                      aria-label={`打开参考素材 ${index + 1}`}
+                      title={`参考素材 ${index + 1}`}
+                      onClick={() => setReferenceIndex(index)}
+                      className="task-reference-thumbnail aspect-square w-full overflow-hidden"
+                    >
+                      <img src={url} className="size-full object-cover" alt={`参考素材 ${index + 1}`} />
+                    </button>
+                  ))}
                 </div>
               </section>
             )}
@@ -467,6 +508,65 @@ function TaskDetailModal({
           </footer>
         </aside>
       </motion.section>
+
+      <AnimatePresence>
+        {referenceIndex !== null && item.refs[referenceIndex] && (
+          <motion.div
+            className="task-reference-backdrop fixed inset-0 z-[240] flex items-center justify-center p-12"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onMouseDown={event => {
+              event.stopPropagation()
+              if (event.target === event.currentTarget) setReferenceIndex(null)
+            }}
+          >
+            <motion.section
+              role="dialog"
+              aria-modal="true"
+              aria-label="参考素材预览"
+              className="task-reference-modal liquid-glass-strong flex min-h-0 flex-col overflow-hidden"
+              initial={{ opacity: 0, scale: 0.97, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.98, y: 6 }}
+            >
+              <header className="flex h-11 shrink-0 items-center border-b border-white/10 px-3">
+                <span className="font-mono text-xs text-nexus-muted">
+                  REF {referenceIndex + 1} / {item.refs.length}
+                </span>
+                <span className="ml-auto">
+                  <IconButton label="关闭参考素材预览" onClick={() => setReferenceIndex(null)}><X size={17} /></IconButton>
+                </span>
+              </header>
+              <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black/55 p-5">
+                {item.refs.length > 1 && (
+                  <IconButton
+                    label="上一个参考素材"
+                    onClick={() => setReferenceIndex(index => (index - 1 + item.refs.length) % item.refs.length)}
+                    className="absolute left-3 z-10 bg-black/65"
+                  >
+                    <ChevronLeft size={19} />
+                  </IconButton>
+                )}
+                <img
+                  src={item.refs[referenceIndex]}
+                  className="max-h-full max-w-full object-contain"
+                  alt={`参考素材全图 ${referenceIndex + 1}`}
+                />
+                {item.refs.length > 1 && (
+                  <IconButton
+                    label="下一个参考素材"
+                    onClick={() => setReferenceIndex(index => (index + 1) % item.refs.length)}
+                    className="absolute right-3 z-10 bg-black/65"
+                  >
+                    <ChevronRight size={19} />
+                  </IconButton>
+                )}
+              </div>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>,
     document.body,
   )

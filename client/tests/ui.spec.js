@@ -224,7 +224,15 @@ test('login keeps content legible on a glass layer', async ({ page }, testInfo) 
 
 test('task gallery favorites persist and details open in a large modal', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Gallery interaction only needs one desktop run')
-  const preview = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const preview = `data:image/svg+xml,${encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
+      <rect width="800" height="1200" fill="#07110d"/>
+      <rect x="48" y="48" width="704" height="1104" rx="18" fill="#10251d" stroke="#5bf2ab" stroke-width="8"/>
+      <circle cx="400" cy="420" r="210" fill="#1d5541"/>
+      <path d="M180 940 L400 610 L620 940 Z" fill="#44c98b"/>
+      <text x="400" y="1080" fill="#dfffee" font-size="54" text-anchor="middle" font-family="monospace">REFERENCE 01</text>
+    </svg>
+  `)}`
   const task = {
     id: 42,
     type: 'image',
@@ -236,7 +244,7 @@ test('task gallery favorites persist and details open in a large modal', async (
     favorite_groups: [],
     progress: 100,
     created_at: '2026-07-12T08:30:00+00:00',
-    result: { local_images: [preview], local_refs: [] },
+    result: { local_images: [preview], local_refs: [preview] },
   }
   const nextTask = {
     ...task,
@@ -344,6 +352,23 @@ test('task gallery favorites persist and details open in a large modal', async (
   const modal = page.getByRole('dialog', { name: '任务详情' })
   await expect(modal).toBeVisible()
   await expect(modal.getByText(task.prompt)).toBeVisible()
+  await expect.poll(async () => (await modal.boundingBox()).width).toBeGreaterThan(1340)
+  const modalBeforeDrag = await modal.boundingBox()
+  const dragHandle = modal.getByTestId('task-detail-drag-handle')
+  const dragHandleBox = await dragHandle.boundingBox()
+  await page.mouse.move(dragHandleBox.x + dragHandleBox.width * 0.62, dragHandleBox.y + dragHandleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(dragHandleBox.x + dragHandleBox.width * 0.62 + 28, dragHandleBox.y + dragHandleBox.height / 2 + 20, { steps: 6 })
+  await page.mouse.up()
+  await expect.poll(async () => (await modal.boundingBox()).x).toBeGreaterThan(modalBeforeDrag.x + 10)
+  await modal.getByRole('button', { name: '打开参考素材 1' }).click()
+  const referenceModal = page.getByRole('dialog', { name: '参考素材预览' })
+  await expect(referenceModal).toBeVisible()
+  await expect(referenceModal.getByAltText('参考素材全图 1')).toBeVisible()
+  await referenceModal.screenshot({ path: testInfo.outputPath('desktop-reference-preview-modal.png') })
+  await page.keyboard.press('Escape')
+  await expect(referenceModal).toBeHidden()
+  await expect(modal).toBeVisible()
   await modal.getByRole('checkbox', { name: '角色设计' }).click()
   await expect(modal.getByRole('checkbox', { name: '角色设计' })).toHaveAttribute('aria-checked', 'true')
   await expect(modal.getByRole('link', { name: '下载任务结果' })).toHaveAttribute(
