@@ -12,7 +12,7 @@ import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
 import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert } from 'lucide-react'
-import { useWorkspaceState } from './lib/useWorkspaceState'
+import { persistWorkspaceBlob, useWorkspaceState } from './lib/useWorkspaceState'
 
 axios.defaults.withCredentials = true
 
@@ -393,43 +393,23 @@ function App({ onLogout }) {
           } : {})
         })
       } else {
-        const formData = new FormData()
-        formData.append('prompt', tab.prompt)
-        formData.append('aspect_ratio', tab.aspectRatio)
-        formData.append('resolution', tab.resolution)
-        formData.append('use_search', tab.useSearch)
-        formData.append('enable_chat', tab.chatMode)
-        formData.append('think_level', tab.thinkLevel)
-        formData.append('provider', apiProvider)
-        if (apiProvider === 'ark') {
-          formData.append('output_format', tab.outputFormat || 'png')
-          formData.append('watermark', Boolean(tab.watermark))
-        }
-        if (requestModel) formData.append('model', requestModel)
-        if (tab.sessionId) formData.append('session_id', tab.sessionId)
-        const pendingFetches = []
-        tab.uploadedImages.forEach((img) => {
-          if (img.file) {
-            formData.append('images', img.file)
-          } else if (img.preview && img.preview.startsWith('data:')) {
-            // Restored from localStorage — reconstruct from base64
-            const [header, b64] = img.preview.split(',')
-            const mime = header.match(/:(.*?);/)?.[1] || 'image/png'
-            const bytes = atob(b64)
-            const arr = new Uint8Array(bytes.length)
-            for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
-            formData.append('images', new Blob([arr], { type: mime }), img.name || 'image.png')
-          } else if (img.preview) {
-            // URL reference — fetch and append
-            pendingFetches.push(
-              ensureFetchOk(img.preview).then(blob => formData.append('images', blob, img.name || 'image.png'))
-            )
+        const imageUrls = await Promise.all(tab.uploadedImages.map(async image => {
+          if (image.preview?.startsWith('/api/workspace/assets/img_tabs/') && !image.file) {
+            return image.preview
           }
-        })
-        if (pendingFetches.length) await Promise.all(pendingFetches)
-        
-        response = await axios.post('/api/generate', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+          const blob = image.file || await ensureFetchOk(image.preview)
+          const asset = await persistWorkspaceBlob('img_tabs', blob, image.name || 'image.png')
+          return asset.url
+        }))
+        response = await axios.post('/api/generate', {
+          prompt: tab.prompt, aspect_ratio: tab.aspectRatio, resolution: tab.resolution,
+          use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId,
+          think_level: tab.thinkLevel, provider: apiProvider, model: requestModel,
+          image_urls: imageUrls,
+          ...(apiProvider === 'ark' ? {
+            output_format: tab.outputFormat || 'png',
+            watermark: Boolean(tab.watermark)
+          } : {})
         })
       }
 

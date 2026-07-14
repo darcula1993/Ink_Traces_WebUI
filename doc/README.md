@@ -99,13 +99,14 @@ http://localhost:4545
       "api_key": "<your-byteplus-ark-key>",
       "model": "seedream-5-0-pro",
       "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "upload_timeout_seconds": 120,
       "request_timeout_seconds": 600
     }
   }
 }
 ```
 
-Ark 图片生成的上游接口是同步请求，耗时可能超过两分钟。读取超时会被视为“结果未知”且不会自动重放，避免 Provider 已接收原始 POST 时产生重复生成。
+Ark 图片生成的上游接口是同步请求，耗时可能超过两分钟。多参考图会形成较大的 JSON 请求，因此素材上传和响应读取分别设置超时；任一阶段超时都会被视为“结果未知”且不会自动重放，避免 Provider 已接收原始 POST 时产生重复生成。
 
 如果使用 Ark 视频参考素材上传，需要配置 `server.public_host`、`server.public_port` 和 `server.public_scheme`，确保外部服务能够下载参考视频文件。
 

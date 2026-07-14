@@ -133,6 +133,24 @@ def test_workspace_state_round_trip():
     assert stored['value'] == 'video'
     assert stored['revision'] == 1
 
+    unchanged = task_db.set_workspace_state('appMode', 'video')
+    assert unchanged['value'] == 'video'
+    assert unchanged['revision'] == 1
+
     updated = task_db.set_workspace_state('appMode', 'image')
     assert updated['value'] == 'image'
     assert updated['revision'] == 2
+
+
+def test_workspace_state_ignores_object_key_order():
+    stored = task_db.set_workspace_state('gallery_preferences', {
+        'cardSize': 'standard',
+        'cardDetails': 'clean',
+    })
+    unchanged = task_db.set_workspace_state('gallery_preferences', {
+        'cardDetails': 'clean',
+        'cardSize': 'standard',
+    })
+
+    assert unchanged['value'] == stored['value']
+    assert unchanged['revision'] == 1

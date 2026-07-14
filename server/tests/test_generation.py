@@ -72,6 +72,59 @@ def test_image_generation_is_queued_and_result_is_lightweight(monkeypatch):
     assert media.cache_control.max_age == 31536000
 
 
+def test_workspace_upload_is_reused_by_image_task(monkeypatch):
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'api_key': 'test-key',
+        'endpoint': 'https://provider.invalid',
+        'model': 'test-model',
+    })
+    client = application.app.test_client()
+
+    upload = client.post('/api/workspace/assets/img_tabs', data={
+        'file': (io.BytesIO(_png_bytes()), 'reference.png'),
+    })
+    assert upload.status_code == 201
+    asset = upload.get_json()['asset']
+    assert asset['url'].startswith('/api/workspace/assets/img_tabs/')
+    assert asset['mime_type'] == 'image/png'
+    stored_workspace_path = storage.resolve_workspace_asset_url('img_tabs', asset['url'])
+    with Image.open(io.BytesIO(client.get(asset['url']).data)) as image:
+        assert image.size == (2, 2)
+
+    response = client.post('/api/generate', json={
+        'prompt': 'reuse workspace reference',
+        'provider': 'ark',
+        'aspect_ratio': '1:1',
+        'resolution': '1K',
+        'image_urls': [asset['url']],
+    })
+    assert response.status_code == 202
+    task_id = response.get_json()['task_id']
+    input_assets = [asset for asset in task_db.list_assets(task_id) if asset['kind'] == 'input_image']
+    assert len(input_assets) == 1
+    assert os.stat(input_assets[0]['path']).st_ino == os.stat(stored_workspace_path).st_ino
+    with Image.open(input_assets[0]['path']) as image:
+        assert image.size == (2, 2)
+
+
+def test_image_task_rejects_non_workspace_reference_url(monkeypatch):
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'api_key': 'test-key',
+        'endpoint': 'https://provider.invalid',
+        'model': 'test-model',
+    })
+    response = application.app.test_client().post('/api/generate', json={
+        'prompt': 'invalid reference',
+        'provider': 'ark',
+        'aspect_ratio': '1:1',
+        'resolution': '1K',
+        'image_urls': ['https://example.com/reference.png'],
+    })
+
+    assert response.status_code == 400
+    assert '不属于当前工作区' in response.get_json()['error']
+
+
 def test_running_image_cancellation_discards_provider_result(monkeypatch):
     monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
         'api_key': 'test-key',
@@ -138,6 +191,7 @@ def test_ark_read_timeout_is_longer_and_not_retryable(monkeypatch):
         'api_key': 'test-key',
         'endpoint': 'https://provider.invalid',
         'model': 'test-model',
+        'upload_timeout_seconds': 123,
         'request_timeout_seconds': 321,
     }
 
@@ -147,9 +201,40 @@ def test_ark_read_timeout_is_longer_and_not_retryable(monkeypatch):
         )
         payload, status_code = application._response_payload(response)
 
-    assert observed['timeout'] == (10, 321)
+    assert observed['timeout'] == (123, 321)
     assert status_code == 504
     assert payload['error_type'] == 'upstream_timeout'
+    assert payload['retryable'] is False
+    assert payload['result_unknown'] is True
+
+
+def test_ark_write_timeout_is_reported_as_ambiguous_and_not_retryable(monkeypatch):
+    observed = {}
+
+    def fake_post(_url, **kwargs):
+        observed['timeout'] = kwargs['timeout']
+        raise requests.exceptions.ConnectionError(
+            "('Connection aborted.', TimeoutError('The write operation timed out'))"
+        )
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    provider = {
+        'api_key': 'test-key',
+        'endpoint': 'https://provider.invalid',
+        'model': 'test-model',
+        'upload_timeout_seconds': 135,
+        'request_timeout_seconds': 360,
+    }
+
+    with application.app.app_context():
+        response = application._generate_ark_image(
+            'test', '1:1', '1K', [{'text': 'test'}], provider_config=provider
+        )
+        payload, status_code = application._response_payload(response)
+
+    assert observed['timeout'] == (135, 360)
+    assert status_code == 504
+    assert payload['error_type'] == 'upload_timeout'
     assert payload['retryable'] is False
     assert payload['result_unknown'] is True
 

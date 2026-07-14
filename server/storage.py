@@ -1,6 +1,8 @@
 """Filesystem storage helpers for task inputs, outputs, and maintenance."""
 
 import base64
+import ctypes
+import gc
 import hashlib
 import mimetypes
 import os
@@ -23,6 +25,19 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output')
 UPLOAD_VIDEO_DIR = os.path.join(PROJECT_ROOT, 'upload_video')
 WORKSPACE_ASSET_DIR = os.path.join(PROJECT_ROOT, 'workspace_assets')
 DATA_URL_PATTERN = re.compile(r'^data:([^;,]+)?;base64,(.+)$', re.DOTALL)
+
+try:
+    _MALLOC_TRIM = ctypes.CDLL(None).malloc_trim
+    _MALLOC_TRIM.argtypes = [ctypes.c_size_t]
+    _MALLOC_TRIM.restype = ctypes.c_int
+except (AttributeError, OSError):
+    _MALLOC_TRIM = None
+
+
+def release_process_memory():
+    gc.collect()
+    if _MALLOC_TRIM is not None:
+        _MALLOC_TRIM(0)
 
 
 def ensure_storage_dirs():
@@ -100,6 +115,75 @@ def _workspace_asset_extension(mime_type):
     return '.jpg' if extension in ('.jpe', '.jpeg') else extension
 
 
+def persist_workspace_upload(key, file_storage, chunk_size=1024 * 1024, normalize_image=False):
+    """Stream one browser asset to content-addressed workspace storage."""
+    directory = os.path.join(WORKSPACE_ASSET_DIR, key)
+    os.makedirs(directory, exist_ok=True)
+    temp_path = os.path.join(directory, f'.{uuid.uuid4().hex}.tmp')
+    digest = hashlib.sha256()
+    size_bytes = 0
+    mime_type = file_storage.mimetype or mimetypes.guess_type(file_storage.filename or '')[0] or 'application/octet-stream'
+    stream = file_storage.stream
+    stream.seek(0)
+    try:
+        with open(temp_path, 'wb') as handle:
+            while True:
+                chunk = stream.read(chunk_size)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                size_bytes += len(chunk)
+                handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if normalize_image:
+            normalized_path = os.path.join(directory, f'.{uuid.uuid4().hex}.normalized')
+            try:
+                with Image.open(temp_path) as image:
+                    image.load()
+                    save_normalized_image(image, normalized_path)
+                os.remove(temp_path)
+                temp_path = normalized_path
+                mime_type = 'image/png'
+                size_bytes = os.path.getsize(temp_path)
+                digest = hashlib.sha256()
+                with open(temp_path, 'rb') as handle:
+                    for chunk in iter(lambda: handle.read(chunk_size), b''):
+                        digest.update(chunk)
+            finally:
+                if os.path.exists(normalized_path) and normalized_path != temp_path:
+                    os.remove(normalized_path)
+        filename = f'{digest.hexdigest()}{_workspace_asset_extension(mime_type)}'
+        path = os.path.join(directory, filename)
+        if os.path.isfile(path):
+            os.remove(temp_path)
+        else:
+            os.replace(temp_path, path)
+        return {
+            'url': f'/api/workspace/assets/{key}/{filename}',
+            'name': file_storage.filename or filename,
+            'mime_type': mime_type,
+            'size_bytes': size_bytes,
+        }
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def resolve_workspace_asset_url(key, url):
+    prefix = f'/api/workspace/assets/{key}/'
+    if not isinstance(url, str) or not url.startswith(prefix):
+        return None
+    filename = url[len(prefix):]
+    if not filename or filename != os.path.basename(filename):
+        return None
+    directory = os.path.abspath(os.path.join(WORKSPACE_ASSET_DIR, key))
+    path = os.path.abspath(os.path.join(directory, filename))
+    if os.path.commonpath((directory, path)) != directory or not os.path.isfile(path):
+        return None
+    return path
+
+
 def persist_workspace_value(key, value):
     """Write embedded data URLs to disk and return JSON-safe state with local URLs."""
     directory = os.path.join(WORKSPACE_ASSET_DIR, key)
@@ -149,12 +233,31 @@ def cleanup_workspace_assets(key, value):
 
     collect(value)
     removed = 0
+    now = time.time()
     for filename in os.listdir(directory):
         path = os.path.join(directory, filename)
-        if filename not in referenced and os.path.isfile(path):
+        if filename not in referenced and os.path.isfile(path) and now - os.path.getmtime(path) >= 300:
             os.remove(path)
             removed += 1
     return removed
+
+
+def save_image_file(source_path, target_path):
+    with Image.open(source_path) as image:
+        image.load()
+        save_normalized_image(image, target_path)
+    return target_path
+
+
+def clone_workspace_image(source_path, target_path):
+    if os.path.splitext(source_path)[1].lower() != '.png':
+        return save_image_file(source_path, target_path)
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    try:
+        os.link(source_path, target_path)
+    except OSError:
+        shutil.copy2(source_path, target_path)
+    return target_path
 
 
 def stream_response_to_file(response, path, chunk_size=1024 * 1024):

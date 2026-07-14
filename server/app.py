@@ -24,6 +24,7 @@ from logging_config import configure_logging
 configure_logging()
 
 app = Flask(__name__)
+app.json.sort_keys = False
 
 
 @app.teardown_appcontext
@@ -55,6 +56,8 @@ BUILTIN_DEFAULT_CONFIG = {
         'download_timeout_seconds': 120,
         'worker_concurrency': 3,
         'worker_lease_seconds': 900,
+        'gunicorn_max_requests': 1500,
+        'gunicorn_max_requests_jitter': 150,
         'cleanup_interval_seconds': 3600,
         'orphan_grace_hours': 24,
     },
@@ -89,6 +92,7 @@ BUILTIN_DEFAULT_CONFIG = {
             'api_key': '',
             'model': 'seedream-5-0-pro',
             'endpoint': 'https://ark.ap-southeast.bytepluses.com',
+            'upload_timeout_seconds': 120,
             'request_timeout_seconds': 600,
         },
     },
@@ -366,6 +370,10 @@ DOWNLOAD_TIMEOUT = int(config.get('server', {}).get('download_timeout_seconds', 
 ARK_IMAGE_TIMEOUT = max(
     REQUEST_TIMEOUT,
     int(config.get('api', {}).get('ark', {}).get('request_timeout_seconds', 600) or 600),
+)
+ARK_IMAGE_UPLOAD_TIMEOUT = max(
+    30,
+    int(config.get('api', {}).get('ark', {}).get('upload_timeout_seconds', 120) or 120),
 )
 ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.webm'}
 ALLOWED_VIDEO_MIMES = {'video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm'}
@@ -1394,7 +1402,7 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     }
     if enable_chat:
         response_payload['session_id'] = current_session_id
-    return jsonify(response_payload)
+    return response_payload, 200
 
 
 ARK_SEEDREAM_PRO_MAX_REFERENCES = 10
@@ -1420,6 +1428,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     endpoint = ark_cfg.get('endpoint', '').rstrip('/')
     model = model_id or ark_cfg.get('model') or 'seedream-5-0-pro'
     request_timeout = max(30, int(ark_cfg.get('request_timeout_seconds', ARK_IMAGE_TIMEOUT) or ARK_IMAGE_TIMEOUT))
+    upload_timeout = max(30, int(ark_cfg.get('upload_timeout_seconds', ARK_IMAGE_UPLOAD_TIMEOUT) or ARK_IMAGE_UPLOAD_TIMEOUT))
     resolution = str(resolution or '1K').upper()
     output_format = str(output_format or 'png').lower()
 
@@ -1458,10 +1467,12 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     req_info = {
         'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
         'size': size, 'output_format': output_format, 'watermark': bool(watermark),
+        'reference_count': len(ref_images),
+        'reference_base64_bytes': sum(len(image) for image in ref_images),
     }
 
     try:
-        response = HTTP.post(url, headers=headers, json=body, timeout=(10, request_timeout))
+        response = HTTP.post(url, headers=headers, json=body, timeout=(upload_timeout, request_timeout))
     except requests.exceptions.ConnectTimeout as e:
         save_error_log('ark_request_error', req_info, {}, str(e))
         return jsonify({
@@ -1469,7 +1480,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
             'error': '连接 Ark API 超时，系统将自动重试',
             'error_type': 'connect_timeout',
             'retryable': True,
-            'error_details': {'message': str(e), 'timeout_seconds': 10},
+            'error_details': {'message': str(e), 'timeout_seconds': upload_timeout},
         }), 503
     except requests.exceptions.ReadTimeout as e:
         save_error_log('ark_request_timeout', req_info, {}, str(e))
@@ -1486,6 +1497,18 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         }), 504
     except requests.exceptions.RequestException as e:
         save_error_log('ark_request_error', req_info, {}, str(e))
+        if 'write operation timed out' in str(e).lower():
+            return jsonify({
+                'success': False,
+                'error': f'Ark 请求体在 {upload_timeout} 秒内未上传完成，任务结果未知；系统未自动重试',
+                'error_type': 'upload_timeout',
+                'retryable': False,
+                'result_unknown': True,
+                'error_details': {
+                    'message': '参考素材上传到 Ark 时连接过慢。请确认 Ark 控制台结果后再决定是否重新生成。',
+                    'timeout_seconds': upload_timeout,
+                },
+            }), 504
         return jsonify({
             'success': False,
             'error': f'Ark API 网络请求失败: {e}',
@@ -1537,7 +1560,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         save_error_log('ark_generation_failed', req_info, resp_data, '未能生成图片')
         return jsonify({'success': False, 'error': '未能生成图片', 'error_type': 'generation_failed'}), 500
 
-    return jsonify({'success': True, 'images': images, 'thinking': '', 'output_format': output_format})
+    return {'success': True, 'images': images, 'thinking': '', 'output_format': output_format}, 200
 
 
 def _response_payload(response):
@@ -1545,6 +1568,8 @@ def _response_payload(response):
         response_obj, status_code = response
     else:
         response_obj, status_code = response, 200
+    if isinstance(response_obj, dict):
+        return response_obj, status_code
     return response_obj.get_json(), status_code
 
 
@@ -1682,9 +1707,9 @@ def generate():
     """Queue normal image jobs; keep chat generations synchronous for compatibility."""
     db_task_id = None
     try:
-        has_images = bool(request.files.getlist('images'))
+        is_form_request = request.mimetype == 'multipart/form-data'
 
-        if has_images:
+        if is_form_request:
             prompt = request.form.get('prompt')
             aspect_ratio = request.form.get('aspect_ratio', '3:4')
             resolution = request.form.get('resolution', '1K')
@@ -1696,6 +1721,11 @@ def generate():
             think_level = request.form.get('think_level', 'minimal')
             provider = request.form.get('provider', get_session_image_provider())
             model_id = request.form.get('model', None)
+            raw_image_urls = request.form.get('image_urls', '[]')
+            try:
+                image_urls = json.loads(raw_image_urls)
+            except (TypeError, json.JSONDecodeError):
+                return jsonify({'success': False, 'error': 'image_urls 格式错误'}), 400
         else:
             data = request.get_json(silent=True) or {}
             prompt = data.get('prompt')
@@ -1709,6 +1739,10 @@ def generate():
             think_level = data.get('think_level', 'minimal')
             provider = data.get('provider', get_session_image_provider())
             model_id = data.get('model')
+            image_urls = data.get('image_urls') or []
+
+        if not isinstance(image_urls, list) or any(not isinstance(url, str) for url in image_urls):
+            return jsonify({'success': False, 'error': 'image_urls 必须是字符串数组'}), 400
 
         if not prompt:
             return jsonify({'success': False, 'error': '请提供图片描述'}), 400
@@ -1734,10 +1768,16 @@ def generate():
         else:
             model_id = model_id or get_provider_default_model(provider, provider_config)
 
-        images_files = request.files.getlist('images') if has_images else []
-        if has_images:
+        images_files = request.files.getlist('images') if is_form_request else []
+        workspace_image_paths = []
+        for image_url in image_urls:
+            image_path = storage.resolve_workspace_asset_url('img_tabs', image_url)
+            if not image_path:
+                return jsonify({'success': False, 'error': '参考图片不存在或不属于当前工作区'}), 400
+            workspace_image_paths.append(image_path)
+        if images_files or workspace_image_paths:
             max_reference_images = ARK_SEEDREAM_PRO_MAX_REFERENCES if provider == 'ark' else 14
-            if len(images_files) > max_reference_images:
+            if len(images_files) + len(workspace_image_paths) > max_reference_images:
                 return jsonify({'success': False, 'error': f'当前 Provider 最多只能上传{max_reference_images}张图片'}), 400
 
         params = {
@@ -1757,6 +1797,10 @@ def generate():
         for index, image_file in enumerate(images_files):
             path = os.path.join(output_dir, f'ref_{index}.png')
             storage.save_uploaded_image(image_file, path)
+            storage.register_file(db_task_id, 'input_image', path, 'image/png')
+        for offset, image_path in enumerate(workspace_image_paths, start=len(images_files)):
+            path = os.path.join(output_dir, f'ref_{offset}.png')
+            storage.clone_workspace_image(image_path, path)
             storage.register_file(db_task_id, 'input_image', path, 'image/png')
 
         if enable_chat and provider != 'ark':
@@ -1787,6 +1831,8 @@ def generate():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        storage.release_process_memory()
 
 
 # ============================================================
@@ -2640,8 +2686,27 @@ def api_set_workspace_state(key):
         return jsonify({'success': False, 'error': '缺少工作区状态 value'}), 400
     normalized = storage.persist_workspace_value(key, data['value'])
     state = task_db.set_workspace_state(key, normalized)
+    # Preserve the request's field order so pre-fix clients do not mistake a
+    # semantically identical, reordered response for another local change.
+    state['value'] = normalized
     storage.cleanup_workspace_assets(key, normalized)
     return jsonify({'success': True, 'state': state})
+
+
+@app.route('/api/workspace/assets/<key>', methods=['POST'])
+def api_upload_workspace_asset(key):
+    if key not in WORKSPACE_STATE_KEYS:
+        return jsonify({'success': False, 'error': '未知工作区状态键'}), 404
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': '缺少工作区素材文件'}), 400
+    try:
+        asset = storage.persist_workspace_upload(key, upload, normalize_image=key == 'img_tabs')
+        return jsonify({'success': True, 'asset': asset}), 201
+    except (OSError, ValueError):
+        return jsonify({'success': False, 'error': '工作区图片格式无效或文件已损坏'}), 400
+    finally:
+        storage.release_process_memory()
 
 
 @app.route('/api/workspace/assets/<key>/<path:filename>', methods=['GET'])

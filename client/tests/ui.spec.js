@@ -7,8 +7,22 @@ function authConfig() {
   return JSON.parse(fs.readFileSync(configPath, 'utf8')).auth
 }
 
-async function login(page, { mockTasks = true, mockGroups = true } = {}) {
-  const workspaceState = new Map()
+function sortJsonValue(value) {
+  if (Array.isArray(value)) return value.map(sortJsonValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.keys(value).sort().reduce((sorted, key) => {
+    sorted[key] = sortJsonValue(value[key])
+    return sorted
+  }, {})
+}
+
+async function login(page, {
+  mockTasks = true,
+  mockGroups = true,
+  initialWorkspaceState = {},
+  onWorkspacePut = null,
+} = {}) {
+  const workspaceState = new Map(Object.entries(initialWorkspaceState))
   await page.route('**/api/workspace/state/*', async route => {
     const key = decodeURIComponent(new URL(route.request().url()).pathname.split('/').pop())
     if (route.request().method() === 'GET') {
@@ -18,7 +32,12 @@ async function login(page, { mockTasks = true, mockGroups = true } = {}) {
         contentType: 'application/json',
         body: JSON.stringify({
           success: true,
-          state: value === undefined ? null : { key, value, revision: 1, updated_at: new Date().toISOString() },
+          state: value === undefined ? null : {
+            key,
+            value: sortJsonValue(value),
+            revision: 1,
+            updated_at: new Date().toISOString(),
+          },
         }),
       })
       return
@@ -26,10 +45,14 @@ async function login(page, { mockTasks = true, mockGroups = true } = {}) {
     if (route.request().method() === 'PUT') {
       const { value } = route.request().postDataJSON()
       workspaceState.set(key, value)
+      onWorkspacePut?.(key, value)
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ success: true, state: { key, value, revision: 1, updated_at: new Date().toISOString() } }),
+        body: JSON.stringify({
+          success: true,
+          state: { key, value: sortJsonValue(value), revision: 1, updated_at: new Date().toISOString() },
+        }),
       })
       return
     }
@@ -65,6 +88,50 @@ async function login(page, { mockTasks = true, mockGroups = true } = {}) {
   await expect(workspace).toBeVisible()
   return workspaceState
 }
+
+test('workspace persistence ignores server JSON key ordering', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Persistence only needs one browser run')
+  const workspacePuts = []
+  await login(page, {
+    initialWorkspaceState: {
+      img_tabs: [{
+        watermark: false,
+        outputFormat: 'png',
+        uploadedImages: [],
+        sessionId: null,
+        chatMode: false,
+        thinkLevel: 'minimal',
+        useSearch: false,
+        resolution: '1K',
+        aspectRatio: '1:1',
+        prompt: '',
+        id: 1,
+      }],
+      vid_tabs: [{
+        refAudios: [],
+        refVideos: [],
+        refImages: [],
+        lastFrame: null,
+        firstFrame: null,
+        search: false,
+        mode: 'keyframe',
+        returnLastFrame: false,
+        audio: true,
+        fast: false,
+        resolution: '720p',
+        duration: 5,
+        ratio: 'adaptive',
+        prompt: '',
+        id: 1,
+      }],
+    },
+    onWorkspacePut: (key) => workspacePuts.push(key),
+  })
+
+  await page.waitForTimeout(1_600)
+  expect(workspacePuts.filter(key => key === 'img_tabs')).toHaveLength(0)
+  expect(workspacePuts.filter(key => key === 'vid_tabs')).toHaveLength(0)
+})
 
 test('workspace adapts without horizontal overflow', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'The current workspace redesign targets desktop')
@@ -483,8 +550,38 @@ test('large reference assets persist through backend workspace state', async ({ 
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64',
   )
+  const workspaceAssetUrl = '/api/workspace/assets/img_tabs/test-reference.png'
   let submittedImageTabs = null
   let normalizedImageTabs = null
+  let submittedStateBytes = 0
+  let workspaceUploadCount = 0
+  let workspaceUploadBytes = 0
+  let submittedGeneration = null
+  await page.route('**/api/workspace/assets/img_tabs', async route => {
+    workspaceUploadCount += 1
+    workspaceUploadBytes += route.request().postDataBuffer()?.length || 0
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        asset: {
+          url: workspaceAssetUrl,
+          name: 'large-reference.png',
+          mime_type: 'image/png',
+          size_bytes: onePixelPng.length + 300 * 1024,
+        },
+      }),
+    })
+  })
+  await page.route('**/api/generate', async route => {
+    submittedGeneration = route.request().postDataJSON()
+    await route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, task_id: 901, status: 'pending' }),
+    })
+  })
   await page.route('**/api/workspace/state/img_tabs', async route => {
     if (route.request().method() === 'GET') {
       await route.fulfill({
@@ -497,13 +594,14 @@ test('large reference assets persist through backend workspace state', async ({ 
       })
       return
     }
+    submittedStateBytes = route.request().postDataBuffer()?.length || 0
     submittedImageTabs = route.request().postDataJSON().value
     normalizedImageTabs = submittedImageTabs.map(tab => ({
       ...tab,
       uploadedImages: (tab.uploadedImages || []).map(image => ({
         ...image,
         file: null,
-        preview: '/normalized-reference.png',
+        preview: workspaceAssetUrl,
       })),
     }))
     await route.fulfill({
@@ -512,7 +610,7 @@ test('large reference assets persist through backend workspace state', async ({ 
       body: JSON.stringify({ success: true, state: { key: 'img_tabs', value: normalizedImageTabs, revision: 1 } }),
     })
   })
-  await page.route('**/normalized-reference.png', route => route.fulfill({
+  await page.route(`**${workspaceAssetUrl}`, route => route.fulfill({
     status: 200,
     contentType: 'image/png',
     body: onePixelPng,
@@ -535,14 +633,22 @@ test('large reference assets persist through backend workspace state', async ({ 
   await transfer.dispose()
   await expect(page.getByAltText('参考图片 1')).toBeVisible()
 
-  await expect.poll(() => submittedImageTabs?.[0]?.uploadedImages?.[0]?.preview?.length || 0)
-    .toBeGreaterThan(300 * 1024)
+  await expect.poll(() => submittedImageTabs?.[0]?.uploadedImages?.[0]?.preview || '')
+    .toBe(workspaceAssetUrl)
   expect(submittedImageTabs[0].uploadedImages[0].file).toBeNull()
-  await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', '/normalized-reference.png')
+  expect(workspaceUploadCount).toBe(1)
+  expect(workspaceUploadBytes).toBeGreaterThan(300 * 1024)
+  expect(submittedStateBytes).toBeLessThan(100_000)
+  await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', workspaceAssetUrl)
+
+  await page.getByLabel('图片提示词').fill('Reuse the uploaded workspace asset')
+  await page.getByRole('button', { name: '生成图片' }).click()
+  await expect.poll(() => submittedGeneration?.image_urls || []).toEqual([workspaceAssetUrl])
+  expect(workspaceUploadCount).toBe(1)
 
   await page.reload()
   await expect(page.locator('.workspace-main')).toBeVisible()
-  await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', '/normalized-reference.png')
+  await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', workspaceAssetUrl)
 
   const fallbackSize = await page.evaluate(() => localStorage.getItem('img_tabs')?.length || 0)
   expect(fallbackSize).toBeLessThan(100_000)

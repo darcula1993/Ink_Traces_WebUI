@@ -25,6 +25,7 @@ class Worker:
         self.stopping = False
         self.last_cleanup = 0.0
         self.last_heartbeat = 0.0
+        self.last_memory_trim = 0.0
         server_config = application.config.get('server', {})
         default_concurrency = server_config.get('worker_concurrency', 3)
         self.concurrency = max(1, int(os.environ.get('WORKER_CONCURRENCY', default_concurrency)))
@@ -58,7 +59,11 @@ class Worker:
                 while not self.stopping:
                     self.heartbeat()
                     self._maybe_cleanup()
-                    futures = {future for future in futures if not future.done()}
+                    completed = {future for future in futures if future.done()}
+                    futures -= completed
+                    if completed and time.monotonic() - self.last_memory_trim >= 30:
+                        storage.release_process_memory()
+                        self.last_memory_trim = time.monotonic()
                     while len(futures) < self.concurrency and not self.stopping:
                         task = task_db.claim_next_task(self.worker_id, lease_seconds=self.lease_seconds)
                         if task is None:

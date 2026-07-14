@@ -903,14 +903,15 @@ def get_workspace_state(key):
 
 def set_workspace_state(key, value):
     now = utcnow()
-    encoded = _json(value)
+    encoded = json.dumps(value, ensure_ascii=False, separators=(',', ':'), sort_keys=True)
     get_db().execute(
         '''INSERT INTO workspace_state (key, value, revision, updated_at)
            VALUES (?, ?, 1, ?)
            ON CONFLICT(key) DO UPDATE SET
              value = excluded.value,
              revision = workspace_state.revision + 1,
-             updated_at = excluded.updated_at''',
+             updated_at = excluded.updated_at
+           WHERE workspace_state.value <> excluded.value''',
         (key, encoded, now),
     )
     get_db().commit()

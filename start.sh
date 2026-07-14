@@ -50,6 +50,8 @@ if [ -f "$CONFIG_FILE" ]; then
     CLIENT_HOST=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("client", {}).get("host", "0.0.0.0"))' "$CONFIG_FILE")
     SERVER_HOST=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("host", "0.0.0.0"))' "$CONFIG_FILE")
     REQUEST_TIMEOUT=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("request_timeout_seconds", 120))' "$CONFIG_FILE")
+    GUNICORN_MAX_REQUESTS=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("gunicorn_max_requests", 1500))' "$CONFIG_FILE")
+    GUNICORN_MAX_REQUESTS_JITTER=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("gunicorn_max_requests_jitter", 150))' "$CONFIG_FILE")
 else
     echo -e "${YELLOW}Warning: config.json not found, using default ports${NC}"
     SERVER_PORT=5000
@@ -57,6 +59,8 @@ else
     CLIENT_HOST=0.0.0.0
     SERVER_HOST=0.0.0.0
     REQUEST_TIMEOUT=120
+    GUNICORN_MAX_REQUESTS=1500
+    GUNICORN_MAX_REQUESTS_JITTER=150
 fi
 
 # production: Gunicorn 同时提供构建后的 SPA；dev: 保留 Vite 热更新。
@@ -147,7 +151,7 @@ GUNICORN_BINDS=(--bind "$SERVER_HOST:$SERVER_PORT")
 if [ "$FRONTEND_MODE" = "production" ]; then
     GUNICORN_BINDS+=(--bind "$CLIENT_HOST:$CLIENT_PORT")
 fi
-setsid $PYTHON_CMD -m gunicorn "${GUNICORN_BINDS[@]}" --workers 1 --threads 8 --timeout "$GUNICORN_TIMEOUT" --access-logfile /dev/null --error-logfile - app:app > "$PROJECT_ROOT/server.log" 2>&1 < /dev/null &
+setsid $PYTHON_CMD -m gunicorn "${GUNICORN_BINDS[@]}" --workers 1 --threads 8 --timeout "$GUNICORN_TIMEOUT" --max-requests "$GUNICORN_MAX_REQUESTS" --max-requests-jitter "$GUNICORN_MAX_REQUESTS_JITTER" --access-logfile /dev/null --error-logfile - app:app > "$PROJECT_ROOT/server.log" 2>&1 < /dev/null &
 SERVER_PID=$!
 echo -e "${GREEN}✓ 后端服务已启动 (PID: $SERVER_PID)${NC}"
 echo -e "${CYAN}  后端地址: http://0.0.0.0:$SERVER_PORT${NC}"

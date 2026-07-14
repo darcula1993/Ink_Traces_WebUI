@@ -103,13 +103,14 @@ Minimal image provider setup:
       "api_key": "<your-byteplus-ark-key>",
       "model": "seedream-5-0-pro",
       "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "upload_timeout_seconds": 120,
       "request_timeout_seconds": 600
     }
   }
 }
 ```
 
-Ark image generation is synchronous upstream and may take more than two minutes. A read timeout is treated as an unknown result and is not replayed automatically, which avoids duplicate generations when the provider accepted the original POST.
+Ark image generation is synchronous upstream and may take more than two minutes. Reference uploads and response reads have separate timeouts because multi-image JSON requests can be large. Either timeout is treated as an unknown result and is not replayed automatically, which avoids duplicate generations when the provider accepted the original POST.
 
 For video reference uploads through Ark, set `server.public_host`, `server.public_port`, and `server.public_scheme` so external services can fetch uploaded reference files.
 

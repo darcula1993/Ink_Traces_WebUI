@@ -6,6 +6,7 @@ const DATABASE_VERSION = 1
 const STORE_NAME = 'state'
 
 let databasePromise
+const workspaceBlobUploads = new WeakMap()
 
 function openLegacyDatabase() {
   if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB unavailable'))
@@ -53,38 +54,81 @@ function readLegacyLocalValue(key, fallback) {
   }
 }
 
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(blob)
-  })
+export function persistWorkspaceBlob(key, blob, preferredName = '') {
+  let uploadsByKey = workspaceBlobUploads.get(blob)
+  if (!uploadsByKey) {
+    uploadsByKey = new Map()
+    workspaceBlobUploads.set(blob, uploadsByKey)
+  }
+  if (uploadsByKey.has(key)) return uploadsByKey.get(key)
+
+  const formData = new FormData()
+  const name = preferredName || (blob instanceof File ? blob.name : 'asset')
+  formData.append('file', blob, name)
+  const upload = axios.post(`/api/workspace/assets/${key}`, formData)
+    .then(response => response.data.asset)
+    .catch(error => {
+      uploadsByKey.delete(key)
+      throw error
+    })
+  uploadsByKey.set(key, upload)
+  return upload
 }
 
-async function serializeWorkspaceValue(value) {
-  if (Array.isArray(value)) return Promise.all(value.map(serializeWorkspaceValue))
+function containsBlob(value) {
+  if (typeof Blob !== 'undefined' && value instanceof Blob) return true
+  if (Array.isArray(value)) return value.some(containsBlob)
+  if (!value || typeof value !== 'object') return false
+  return Object.values(value).some(containsBlob)
+}
+
+async function serializeWorkspaceValue(value, workspaceKey) {
+  if (Array.isArray(value)) return Promise.all(value.map(child => serializeWorkspaceValue(child, workspaceKey)))
   if (!value || typeof value !== 'object') return value
   if (value instanceof Blob) {
+    const asset = await persistWorkspaceBlob(workspaceKey, value)
     return {
       name: value instanceof File ? value.name : 'asset',
       mimeType: value.type || 'application/octet-stream',
-      preview: await blobToDataUrl(value),
+      preview: asset.url,
     }
   }
 
   const output = {}
+  let uploadedAsset = null
   for (const [key, child] of Object.entries(value)) {
     if (child instanceof Blob) {
+      uploadedAsset = uploadedAsset || await persistWorkspaceBlob(workspaceKey, child, value.name)
       output[key] = null
       if (!output.name && child instanceof File) output.name = child.name
       if (!output.mimeType) output.mimeType = child.type || 'application/octet-stream'
-      if (!value.preview) output.preview = await blobToDataUrl(child)
     } else {
-      output[key] = await serializeWorkspaceValue(child)
+      output[key] = await serializeWorkspaceValue(child, workspaceKey)
     }
   }
+  if (uploadedAsset) output.preview = uploadedAsset.url
   return output
+}
+
+function stableStringify(value) {
+  return JSON.stringify(value, (_key, child) => {
+    if (typeof Blob !== 'undefined' && child instanceof Blob) {
+      return {
+        __workspaceBlob: true,
+        name: child instanceof File ? child.name : '',
+        type: child.type,
+        size: child.size,
+        lastModified: child instanceof File ? child.lastModified : 0,
+      }
+    }
+    if (!child || typeof child !== 'object' || Array.isArray(child)) return child
+    const prototype = Object.getPrototypeOf(child)
+    if (prototype !== Object.prototype && prototype !== null) return child
+    return Object.keys(child).sort().reduce((sorted, name) => {
+      sorted[name] = child[name]
+      return sorted
+    }, {})
+  })
 }
 
 export function useWorkspaceState(key, defaultValue, options = {}) {
@@ -107,7 +151,7 @@ export function useWorkspaceState(key, defaultValue, options = {}) {
         if (cancelled) return
         const serverState = response.data.state
         if (serverState) {
-          lastSavedRef.current = JSON.stringify(serverState.value)
+          lastSavedRef.current = stableStringify(serverState.value)
           const hydrate = optionsRef.current.hydrate || ((serverValue) => serverValue)
           setValue(current => hydrate(serverState.value, current))
           await deleteLegacyValue(key)
@@ -130,17 +174,18 @@ export function useWorkspaceState(key, defaultValue, options = {}) {
     if (!ready) return undefined
     const selectPersisted = optionsRef.current.selectPersisted || ((currentValue) => currentValue)
     const persistedValue = selectPersisted(value)
-    if (JSON.stringify(persistedValue) === lastSavedRef.current) return undefined
+    const persistedFingerprint = stableStringify(persistedValue)
+    if (persistedFingerprint === lastSavedRef.current) return undefined
     const sequence = ++saveSequenceRef.current
     const controller = new AbortController()
     let cancelled = false
     const timer = window.setTimeout(async () => {
       try {
         setSaving(true)
-        const serialized = await serializeWorkspaceValue(persistedValue)
+        const serialized = await serializeWorkspaceValue(persistedValue, key)
         if (cancelled || sequence !== saveSequenceRef.current) return
-        const serializedJson = JSON.stringify(serialized)
-        if (serializedJson === lastSavedRef.current) return
+        const serializedFingerprint = stableStringify(serialized)
+        if (serializedFingerprint === lastSavedRef.current) return
         const response = await axios.put(
           `/api/workspace/state/${key}`,
           { value: serialized },
@@ -148,10 +193,10 @@ export function useWorkspaceState(key, defaultValue, options = {}) {
         )
         if (cancelled || sequence !== saveSequenceRef.current) return
         const normalized = response.data.state.value
-        const normalizedJson = JSON.stringify(normalized)
-        lastSavedRef.current = normalizedJson
+        const normalizedFingerprint = stableStringify(normalized)
+        lastSavedRef.current = normalizedFingerprint
         await deleteLegacyValue(key)
-        if (sequence === saveSequenceRef.current && normalizedJson !== JSON.stringify(persistedValue)) {
+        if (sequence === saveSequenceRef.current && normalizedFingerprint !== persistedFingerprint) {
           const mergeNormalized = optionsRef.current.mergeNormalized || ((_current, serverValue) => serverValue)
           setValue(current => mergeNormalized(current, normalized))
         }
@@ -161,7 +206,7 @@ export function useWorkspaceState(key, defaultValue, options = {}) {
       } finally {
         if (!cancelled && sequence === saveSequenceRef.current) setSaving(false)
       }
-    }, 450)
+    }, containsBlob(persistedValue) ? 0 : 450)
 
     return () => {
       cancelled = true

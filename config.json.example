@@ -17,6 +17,8 @@
     "worker_concurrency": 3,
     "worker_lease_seconds": 900,
     "worker_heartbeat_seconds": 10,
+    "gunicorn_max_requests": 1500,
+    "gunicorn_max_requests_jitter": 150,
     "cleanup_interval_seconds": 3600,
     "orphan_grace_hours": 24
   },
@@ -54,6 +56,7 @@
       "api_key": "",
       "model": "seedream-5-0-pro",
       "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "upload_timeout_seconds": 120,
       "request_timeout_seconds": 600
     }
   },
