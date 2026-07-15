@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import io
+import json
 import os
 
 from flask import jsonify
@@ -106,6 +108,70 @@ def test_workspace_upload_is_reused_by_image_task(monkeypatch):
     with Image.open(input_assets[0]['path']) as image:
         assert image.size == (2, 2)
 
+
+def test_png_download_embeds_only_reusable_generation_metadata():
+    task_id = task_db.create_task(
+        'image', '带有细节的测试 Prompt', {
+            'aspect_ratio': '9:16',
+            'resolution': '2K',
+            'output_format': 'png',
+            'watermark': False,
+            'use_search': True,
+            'think_level': 'high',
+            'provider': 'ark',
+            'model': 'private-model-name',
+            'session_id': 'private-session',
+            'api_key': 'private-key',
+        },
+        provider='ark',
+    )
+    output_dir = storage.task_output_dir('image', task_id)
+    path = os.path.join(output_dir, 'image_0.png')
+    with open(path, 'wb') as handle:
+        handle.write(_png_bytes())
+    original_digest = hashlib.sha256(_png_bytes()).hexdigest()
+    storage.register_file(task_id, 'output_image', path, 'image/png')
+    task_db.complete_task(task_id, {'local_images': [f'/api/tasks/{task_id}/file/image_0.png']}, output_dir)
+
+    client = application.app.test_client()
+    response = client.get(f'/api/tasks/{task_id}/download/image_0.png')
+
+    assert response.status_code == 200
+    assert response.headers['Content-Disposition'].startswith(
+        f'attachment; filename="ink-traces-image-task-{task_id}-'
+    )
+    assert response.headers['Content-Disposition'].endswith('-output-01.png"')
+    with Image.open(io.BytesIO(response.data)) as image:
+        embedded = json.loads(image.text['ink_traces'])
+        readable = image.text['parameters']
+        assert image.size == (2, 2)
+    assert embedded == {
+        'schema': 'ink-traces/png-info/v1',
+        'prompt': '带有细节的测试 Prompt',
+        'params': {
+            'aspect_ratio': '9:16',
+            'resolution': '2K',
+            'output_format': 'png',
+            'watermark': False,
+            'use_search': True,
+            'think_level': 'high',
+        },
+    }
+    assert 'provider' not in readable
+    assert 'private-model-name' not in readable
+    with open(path, 'rb') as handle:
+        assert hashlib.sha256(handle.read()).hexdigest() == original_digest
+
+    info = client.post('/api/png-info', data={
+        'file': (io.BytesIO(response.data), 'metadata-image.png'),
+    })
+    assert info.status_code == 200
+    payload = info.get_json()
+    assert payload['metadata']['source'] == 'ink_traces'
+    assert payload['metadata']['prompt'] == '带有细节的测试 Prompt'
+    assert payload['metadata']['params']['aspect_ratio'] == '9:16'
+    assert payload['image']['width'] == 2
+    assert payload['image']['height'] == 2
 
 def test_image_task_rejects_non_workspace_reference_url(monkeypatch):
     monkeypatch.setitem(application.API_PROVIDERS, 'ark', {

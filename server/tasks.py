@@ -309,6 +309,23 @@ def get_task(task_id):
     return task
 
 
+def get_tasks_by_ids(task_ids):
+    normalized_ids = list(dict.fromkeys(int(task_id) for task_id in task_ids))
+    if not normalized_ids:
+        return []
+    tasks = []
+    for start in range(0, len(normalized_ids), 900):
+        chunk = normalized_ids[start:start + 900]
+        placeholders = ','.join('?' for _ in chunk)
+        rows = get_db().execute(
+            f'SELECT * FROM tasks WHERE id IN ({placeholders})',
+            chunk,
+        ).fetchall()
+        tasks.extend(_row_to_dict(row) for row in rows)
+    task_map = {task['id']: task for task in tasks}
+    return [task_map[task_id] for task_id in normalized_ids if task_id in task_map]
+
+
 def get_task_statuses(task_ids):
     """Fetch polling fields for multiple tasks without params or favorite joins."""
     task_ids = list(dict.fromkeys(int(task_id) for task_id in task_ids))

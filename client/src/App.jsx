@@ -4,6 +4,7 @@ import TextToImage from './components/TextToImage'
 import ImageToImage from './components/ImageToImage'
 import PromptCollection from './components/PromptCollection'
 import TaskGallery from './components/TaskGallery'
+import PngInfoModal from './components/PngInfoModal'
 import CodeRainCanvas from './components/CodeRainCanvas'
 import GlassBackdrop from './components/GlassBackdrop'
 import IconButton from './components/ui/IconButton'
@@ -11,7 +12,7 @@ import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert } from 'lucide-react'
+import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert, FileSearch } from 'lucide-react'
 import { persistWorkspaceBlob, useWorkspaceState } from './lib/useWorkspaceState'
 
 axios.defaults.withCredentials = true
@@ -185,6 +186,7 @@ function App({ onLogout }) {
   }
 
   const [showPromptCollection, setShowPromptCollection] = useState(false)
+  const [showPngInfo, setShowPngInfo] = useState(false)
   const [showFullEditor, setShowFullEditor] = useState(false)
   const [showEditorVault, setShowEditorVault] = useState(false)
   const [optimizingVideoPrompt, setOptimizingVideoPrompt] = useState(false)
@@ -281,6 +283,39 @@ function App({ onLogout }) {
   const arkAspectRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9']
   const aspectRatios = isArk ? arkAspectRatios : standardAspectRatios
   const resolutions = isArk ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
+
+  const handleApplyPngInfo = metadata => {
+    const params = metadata?.params || {}
+    const updates = {}
+    const skipped = []
+
+    if (typeof metadata?.prompt === 'string' && metadata.prompt.trim()) updates.prompt = metadata.prompt
+
+    if (params.aspect_ratio !== undefined) {
+      const ratio = String(params.aspect_ratio)
+      if (aspectRatios.includes(ratio)) updates.aspectRatio = ratio
+      else skipped.push('画幅')
+    }
+    if (params.resolution !== undefined) {
+      const resolution = String(params.resolution).toUpperCase()
+      if (resolutions.includes(resolution)) updates.resolution = resolution
+      else skipped.push('分辨率')
+    }
+    if (isArk) {
+      if (params.output_format !== undefined) {
+        const outputFormat = String(params.output_format).toLowerCase().replace('jpg', 'jpeg')
+        if (['png', 'jpeg'].includes(outputFormat)) updates.outputFormat = outputFormat
+      }
+      if (typeof params.watermark === 'boolean') updates.watermark = params.watermark
+    } else {
+      if (typeof params.use_search === 'boolean') updates.useSearch = params.use_search
+      if (['minimal', 'high'].includes(params.think_level)) updates.thinkLevel = params.think_level
+    }
+
+    updateImgTab(activeImgTab.id, updates)
+    setAppMode('image')
+    notify(skipped.length ? `PNG Info 已载入，已忽略不兼容的${skipped.join('、')}` : 'PNG Info 已载入')
+  }
 
   // 切换 provider 或标签页时修正不兼容的参数。
   useEffect(() => {
@@ -793,6 +828,7 @@ function App({ onLogout }) {
             <span className="header-provider-label truncate">{currentProviderLabel}</span>
           </button>
           <div className="glass-control-group flex items-center gap-0.5">
+            <IconButton label="PNG Info" onClick={() => setShowPngInfo(true)}><FileSearch size={16} /></IconButton>
             <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
             <IconButton label="退出登录" onClick={handleLogout} className="hover:text-nexus-red"><LogOut size={16} /></IconButton>
           </div>
@@ -1469,6 +1505,12 @@ function App({ onLogout }) {
       </AnimatePresence>
 
       </main>
+
+      <PngInfoModal
+        open={showPngInfo}
+        onClose={() => setShowPngInfo(false)}
+        onApply={handleApplyPngInfo}
+      />
 
       {/* 全屏 Prompt 编辑器弹窗 */}
       {ReactDOM.createPortal(

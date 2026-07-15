@@ -1,6 +1,9 @@
 import os
 import io
+import json
 import zipfile
+
+from PIL import Image
 
 import app as application
 import storage
@@ -147,8 +150,7 @@ def test_bulk_download_builds_unique_task_paths():
     for task_id in (first, second):
         output_dir = storage.task_output_dir('image', task_id)
         path = os.path.join(output_dir, 'image_0.png')
-        with open(path, 'wb') as handle:
-            handle.write(f'image-{task_id}'.encode())
+        Image.new('RGB', (2, 2), (task_id, 20, 30)).save(path, format='PNG')
         storage.register_file(task_id, 'output_image', path, 'image/png')
         task_db.complete_task(task_id, {'local_images': [f'/api/tasks/{task_id}/file/image_0.png']}, output_dir)
 
@@ -158,10 +160,18 @@ def test_bulk_download_builds_unique_task_paths():
     assert response.status_code == 200
     assert response.mimetype == 'application/zip'
     with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
-        assert archive.namelist() == [
-            f'image-task-{first}/image_0.png',
-            f'image-task-{second}/image_0.png',
-        ]
+        names = archive.namelist()
+        assert len(names) == 2
+        for task_id, prompt in ((first, 'first'), (second, 'second')):
+            name = next(name for name in names if name.startswith(
+                f'image-task-{task_id}/ink-traces-image-task-{task_id}-'
+            ))
+            assert name.endswith('-output-01.png')
+            with Image.open(io.BytesIO(archive.read(name))) as image:
+                metadata = json.loads(image.text['ink_traces'])
+            assert metadata['prompt'] == prompt
+            assert 'provider' not in metadata
+            assert 'model' not in metadata
 
 
 def test_workspace_state_externalizes_data_urls():

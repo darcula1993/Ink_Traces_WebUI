@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, send_from_directory, session, g, after_this_request
+from flask import Flask, Response, request, jsonify, send_file, send_from_directory, session, g, after_this_request, stream_with_context
 from flask_cors import CORS
 from werkzeug.exceptions import ClientDisconnected, RequestEntityTooLarge
 import os
@@ -13,11 +13,12 @@ import time
 import tempfile
 import zipfile
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import uuid
 from datetime import datetime, timezone
 import tasks as task_db
 import storage
+import png_metadata
 from http_client import HTTP
 from logging_config import configure_logging
 
@@ -2200,6 +2201,36 @@ TASK_SORTS = {'newest', 'oldest', 'updated'}
 FAVORITE_GROUP_COLORS = {'green', 'cyan', 'blue', 'violet', 'rose', 'amber'}
 
 
+def _task_download_name(task, filename):
+    extension = os.path.splitext(filename)[1].lower().lstrip('.') or 'bin'
+    if extension == 'jpeg':
+        extension = 'jpg'
+    match = re.search(r'_(\d+)(?:\.[^.]+)?$', filename)
+    output_index = int(match.group(1)) + 1 if match else 1
+    try:
+        created_at = datetime.fromisoformat(str(task.get('created_at') or '').replace('Z', '+00:00'))
+    except ValueError:
+        created_at = datetime.now(timezone.utc)
+    timestamp = created_at.strftime('%Y%m%d%H%M%S')
+    return (
+        f'ink-traces-{task.get("type") or "media"}-task-{task["id"]}-'
+        f'{timestamp}-output-{output_index:02d}.{extension}'
+    )
+
+
+def _task_png_text_entries(task):
+    return png_metadata.build_text_entries(task.get('prompt'), task.get('params'))
+
+
+def _task_output_asset(task_id, filename):
+    for asset in task_db.list_assets(task_id):
+        if asset['kind'] not in ('output_image', 'output_video'):
+            continue
+        if os.path.basename(asset['path']) == filename and os.path.isfile(asset['path']):
+            return asset
+    return None
+
+
 def _task_group_filter():
     raw_group = request.args.get('favorite_group')
     if raw_group is None or raw_group == '':
@@ -2623,6 +2654,7 @@ def api_bulk_download_tasks():
     archive.close()
     file_count = 0
     try:
+        tasks_by_id = {task['id']: task for task in task_db.get_tasks_by_ids(task_ids)}
         assets_by_task = {}
         for asset in task_db.list_assets_for_tasks(task_ids, ('output_image', 'output_video')):
             assets_by_task.setdefault(asset['task_id'], []).append(asset)
@@ -2632,8 +2664,20 @@ def api_bulk_download_tasks():
                 for asset in assets_by_task.get(task_id, []):
                     if not os.path.isfile(asset['path']):
                         continue
+                    task = tasks_by_id.get(task_id)
+                    if not task:
+                        continue
                     filename = os.path.basename(asset['path'])
-                    bundle.write(asset['path'], arcname=f'{asset["task_type"]}-task-{task_id}/{filename}')
+                    download_name = _task_download_name(task, filename)
+                    archive_name = f'{asset["task_type"]}-task-{task_id}/{download_name}'
+                    if filename.lower().endswith('.png'):
+                        with bundle.open(archive_name, 'w') as target:
+                            for chunk in storage.iter_png_with_text(
+                                asset['path'], _task_png_text_entries(task),
+                            ):
+                                target.write(chunk)
+                    else:
+                        bundle.write(asset['path'], arcname=archive_name)
                     file_count += 1
         if file_count == 0:
             os.remove(archive_path)
@@ -2652,11 +2696,12 @@ def api_bulk_download_tasks():
         return response
 
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')
+    archive_id = uuid.uuid4().hex[:8]
     return send_file(
         archive_path,
         mimetype='application/zip',
         as_attachment=True,
-        download_name=f'ink-traces-tasks-{timestamp}.zip',
+        download_name=f'ink-traces-tasks-{timestamp}-{archive_id}.zip',
         max_age=0,
     )
 
@@ -2733,6 +2778,62 @@ def api_task_file(task_id, filename):
     response.cache_control.public = True
     response.cache_control.immutable = True
     return response
+
+
+@app.route('/api/tasks/<int:task_id>/download/<path:filename>', methods=['GET'])
+def api_download_task_file(task_id, filename):
+    task = task_db.get_task(task_id)
+    asset = _task_output_asset(task_id, filename) if task else None
+    if not task or not asset:
+        return jsonify({'success': False, 'error': '下载文件不存在'}), 404
+    download_name = _task_download_name(task, filename)
+    if filename.lower().endswith('.png'):
+        response = Response(
+            stream_with_context(storage.iter_png_with_text(
+                asset['path'], _task_png_text_entries(task),
+            )),
+            mimetype='image/png',
+        )
+        response.headers['Content-Disposition'] = f'attachment; filename="{download_name}"'
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
+    return send_file(
+        asset['path'],
+        mimetype=asset.get('mime_type'),
+        as_attachment=True,
+        download_name=download_name,
+        max_age=0,
+    )
+
+
+@app.route('/api/png-info', methods=['POST'])
+def api_png_info():
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': '请选择 PNG 文件'}), 400
+    try:
+        upload.stream.seek(0, os.SEEK_END)
+        size_bytes = upload.stream.tell()
+        upload.stream.seek(0)
+        with Image.open(upload.stream) as image:
+            if image.format != 'PNG':
+                return jsonify({'success': False, 'error': '文件不是有效的 PNG'}), 400
+            width, height = image.size
+            entries = dict(getattr(image, 'text', {}) or {})
+        parsed = png_metadata.parse_text_entries(entries)
+        return jsonify({
+            'success': True,
+            'image': {
+                'name': upload.filename,
+                'width': width,
+                'height': height,
+                'size_bytes': size_bytes,
+            },
+            'metadata': parsed,
+        })
+    except (UnidentifiedImageError, OSError, ValueError):
+        return jsonify({'success': False, 'error': 'PNG 文件已损坏或无法解析'}), 400
 
 
 @app.route('/api/upload_video', methods=['POST'])

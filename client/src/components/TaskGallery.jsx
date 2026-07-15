@@ -99,6 +99,13 @@ function uniqueDownloadName(item, outputIndex, url, openedAt) {
   return `ink-traces-${item.type}-${identity}-${timestamp}${output}.${downloadExtension(item, url)}`
 }
 
+function taskDownloadUrl(item, url) {
+  const prefix = `/api/tasks/${item.taskId}/file/`
+  if (!item.taskId || !String(url || '').startsWith(prefix)) return url
+  const filename = String(url).slice(prefix.length).split('?', 1)[0]
+  return `/api/tasks/${item.taskId}/download/${encodeURIComponent(filename)}`
+}
+
 function serverItem(task) {
   const result = task.result || {}
   const params = task.params || {}
@@ -383,6 +390,7 @@ function TaskDetailModal({
   const params = item.params || {}
   const download = item.type === 'video' ? item.video : item.images?.[outputIndex]
   const downloadName = download ? uniqueDownloadName(item, outputIndex, download, openedAt) : ''
+  const downloadUrl = download ? taskDownloadUrl(item, download) : ''
   const rows = [
     ['画幅', params.aspect_ratio || params.ratio],
     ['分辨率', params.resolution],
@@ -489,7 +497,7 @@ function TaskDetailModal({
                 <Heart size={17} fill={item.favorite ? 'currentColor' : 'none'} />
               </IconButton>
             )}
-            {download && <a href={download} download={downloadName} aria-label="下载任务结果" title={downloadName} className="icon-button"><Download size={17} /></a>}
+            {download && <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="icon-button"><Download size={17} /></a>}
             {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (
               <IconButton label="取消任务" onClick={() => onCancel(item)} className="hover:text-nexus-amber"><Ban size={17} /></IconButton>

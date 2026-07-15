@@ -222,6 +222,64 @@ test('login keeps content legible on a glass layer', async ({ page }, testInfo) 
   await page.screenshot({ path: testInfo.outputPath('desktop-liquid-glass-login.png') })
 })
 
+test('PNG Info applies reusable parameters without changing provider or model', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'PNG Info only needs one desktop run')
+  await page.route('**/api/provider', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, current_provider: 'ark' }),
+  }))
+  await page.route('**/api/model', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, current_model: 'ignored-model', available_models: [] }),
+  }))
+  await page.route('**/api/png-info', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      image: { name: 'portable.png', width: 1024, height: 1536, size_bytes: 1280 },
+      metadata: {
+        source: 'ink_traces',
+        prompt: 'Imported PNG prompt',
+        params: {
+          aspect_ratio: '9:16',
+          resolution: '2K',
+          output_format: 'jpeg',
+          watermark: true,
+          use_search: true,
+          think_level: 'high',
+        },
+        chunks: { ink_traces: '{"schema":"ink-traces/png-info/v1"}' },
+      },
+    }),
+  }))
+  await login(page)
+
+  const modelBefore = await page.locator('.header-model-label').textContent()
+  const providerBefore = await page.locator('.header-provider-label').textContent()
+  await page.getByRole('button', { name: 'PNG Info' }).click()
+  const dialog = page.getByRole('dialog', { name: 'PNG Info' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByLabel('选择 PNG 文件').setInputFiles({
+    name: 'portable.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  })
+  await expect(dialog.getByText('Imported PNG prompt')).toBeVisible()
+  await expect(dialog.getByText('9:16')).toBeVisible()
+  await dialog.screenshot({ path: testInfo.outputPath('desktop-png-info-modal.png') })
+  await dialog.getByRole('button', { name: '发送到图片生成' }).click()
+
+  await expect(dialog).toBeHidden()
+  await expect(page.getByLabel('图片提示词')).toHaveValue('Imported PNG prompt')
+  await expect(page.locator('.inspector-header')).toContainText('9:16 · 2K')
+  await expect(page.getByRole('switch', { name: '添加水印' })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.locator('.header-model-label')).toHaveText(modelBefore)
+  await expect(page.locator('.header-provider-label')).toHaveText(providerBefore)
+})
+
 test('task gallery favorites persist and details open in a large modal', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Gallery interaction only needs one desktop run')
   const preview = `data:image/svg+xml,${encodeURIComponent(`
@@ -233,6 +291,7 @@ test('task gallery favorites persist and details open in a large modal', async (
       <text x="400" y="1080" fill="#dfffee" font-size="54" text-anchor="middle" font-family="monospace">REFERENCE 01</text>
     </svg>
   `)}`
+  const outputPreview = '/api/tasks/42/file/image_0.png'
   const task = {
     id: 42,
     type: 'image',
@@ -244,7 +303,7 @@ test('task gallery favorites persist and details open in a large modal', async (
     favorite_groups: [],
     progress: 100,
     created_at: '2026-07-12T08:30:00+00:00',
-    result: { local_images: [preview], local_refs: [preview] },
+    result: { local_images: [outputPreview], local_refs: [preview] },
   }
   const nextTask = {
     ...task,
@@ -339,6 +398,11 @@ test('task gallery favorites persist and details open in a large modal', async (
       body: JSON.stringify({ success: true, task }),
     })
   })
+  await page.route('**/api/tasks/42/file/image_0.png', route => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: decodeURIComponent(preview.split(',', 2)[1]),
+  }))
 
   const workspaceState = await login(page, { mockTasks: false, mockGroups: false })
   const historyCard = page.getByTestId('task-gallery-card').filter({ hasText: task.prompt })
@@ -374,6 +438,10 @@ test('task gallery favorites persist and details open in a large modal', async (
   await expect(modal.getByRole('link', { name: '下载任务结果' })).toHaveAttribute(
     'download',
     'ink-traces-image-task-42-20260712083000-output-01.png',
+  )
+  await expect(modal.getByRole('link', { name: '下载任务结果' })).toHaveAttribute(
+    'href',
+    '/api/tasks/42/download/image_0.png',
   )
   await modal.getByRole('button', { name: '下一个任务' }).click()
   await expect(modal.getByText(nextTask.prompt)).toBeVisible()

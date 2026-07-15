@@ -8,8 +8,10 @@ import mimetypes
 import os
 import re
 import shutil
+import struct
 import time
 import uuid
+import zlib
 from datetime import datetime, timedelta, timezone
 
 from PIL import Image
@@ -25,6 +27,7 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'output')
 UPLOAD_VIDEO_DIR = os.path.join(PROJECT_ROOT, 'upload_video')
 WORKSPACE_ASSET_DIR = os.path.join(PROJECT_ROOT, 'workspace_assets')
 DATA_URL_PATTERN = re.compile(r'^data:([^;,]+)?;base64,(.+)$', re.DOTALL)
+PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
 
 try:
     _MALLOC_TRIM = ctypes.CDLL(None).malloc_trim
@@ -38,6 +41,70 @@ def release_process_memory():
     gc.collect()
     if _MALLOC_TRIM is not None:
         _MALLOC_TRIM(0)
+
+
+def iter_png_with_text(path, text_entries, chunk_size=1024 * 1024):
+    """Yield a PNG with selected iTXt chunks replaced, preserving image bytes."""
+    replacements = {str(keyword) for keyword in text_entries}
+    with open(path, 'rb') as handle:
+        signature = handle.read(len(PNG_SIGNATURE))
+        if signature != PNG_SIGNATURE:
+            yield signature
+            for chunk in iter(lambda: handle.read(chunk_size), b''):
+                yield chunk
+            return
+
+        yield signature
+        while True:
+            length_bytes = handle.read(4)
+            if not length_bytes:
+                return
+            if len(length_bytes) != 4:
+                yield length_bytes
+                return
+            length = struct.unpack('>I', length_bytes)[0]
+            chunk_type = handle.read(4)
+            if len(chunk_type) != 4:
+                yield length_bytes + chunk_type
+                return
+            if chunk_type in (b'tEXt', b'zTXt', b'iTXt', b'IEND'):
+                data = handle.read(length)
+                checksum = handle.read(4)
+                if len(data) != length or len(checksum) != 4:
+                    yield length_bytes + chunk_type + data + checksum
+                    return
+                keyword = _png_text_keyword(chunk_type, data)
+                if keyword in replacements:
+                    continue
+                if chunk_type == b'IEND':
+                    for name, value in text_entries.items():
+                        yield _png_itxt_chunk(name, value)
+                yield length_bytes + chunk_type + data + checksum
+                continue
+
+            yield length_bytes + chunk_type
+            remaining = length + 4
+            while remaining:
+                chunk = handle.read(min(chunk_size, remaining))
+                if not chunk:
+                    return
+                yield chunk
+                remaining -= len(chunk)
+
+
+def _png_text_keyword(chunk_type, data):
+    if chunk_type not in (b'tEXt', b'zTXt', b'iTXt') or b'\x00' not in data:
+        return None
+    return data.split(b'\x00', 1)[0].decode('latin-1', errors='ignore')
+
+
+def _png_itxt_chunk(keyword, value):
+    encoded_keyword = str(keyword).encode('latin-1')[:79]
+    encoded_value = str(value).encode('utf-8')
+    data = encoded_keyword + b'\x00\x00\x00\x00\x00' + encoded_value
+    chunk_type = b'iTXt'
+    checksum = zlib.crc32(chunk_type + data) & 0xffffffff
+    return struct.pack('>I', len(data)) + chunk_type + data + struct.pack('>I', checksum)
 
 
 def ensure_storage_dirs():
