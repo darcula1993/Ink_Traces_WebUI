@@ -27,8 +27,8 @@ Ink Traces WebUI is a local web workstation for prompt-driven image and video cr
 | Area | What it supports |
 |---|---|
 | Image generation | Text-to-image and image-to-image through one unified workflow |
-| Video generation | Keyframe mode and reference mode for video, image, and audio inputs |
-| Providers | Google Vertex AI, Google AI Studio, BytePlus Ark Seedream 5.0 Pro, BytePlus Ark/Jiekou Seedance |
+| Video generation | Seedance 2.0/2.5 keyframe and multimodal reference workflows with image, video, and audio inputs |
+| Providers | Google Vertex AI, Google AI Studio, BytePlus Ark Seedream 5.0 Pro, BytePlus Ark Seedance 2.0/2.5, Jiekou Seedance |
 | Prompt workflow | Prompt Vault, fullscreen editor, multi-tab workspaces, reusable saved prompts |
 | Runtime history | SQLite task queue for image/video results, local file recovery, task restore |
 | Controls | Aspect ratio, resolution, thinking level, Google Search grounding, chat mode |
@@ -113,6 +113,8 @@ Minimal image provider setup:
 Ark image generation is synchronous upstream and may take more than two minutes. Reference uploads and response reads have separate timeouts because multi-image JSON requests can be large. Either timeout is treated as an unknown result and is not replayed automatically, which avoids duplicate generations when the provider accepted the original POST.
 
 For video reference uploads through Ark, set `server.public_host`, `server.public_port`, and `server.public_scheme` so external services can fetch uploaded reference files.
+
+Dreamina Seedance 2.5 reuses `video.ark.api_key`. Configure its endpoint ID in `video.ark.seedance_2_5_model`; `config.json.example` includes the current default. The UI applies the model-specific limits for resolution, duration, output format, and reference counts.
 
 Set `auth.secret_key` or `INK_TRACES_SECRET_KEY` for controlled deployments. If neither is set, the backend creates an ignored local `.flask_secret_key` file so browser sessions survive restarts without committing secrets.
 

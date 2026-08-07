@@ -106,6 +106,13 @@ function taskDownloadUrl(item, url) {
   return `/api/tasks/${item.taskId}/download/${encodeURIComponent(filename)}`
 }
 
+function taskDisplayUrl(taskId, url) {
+  const value = String(url || '')
+  const prefix = `/api/tasks/${taskId}/file/`
+  if (!taskId || !value.startsWith(prefix) || value.includes('png_info=1')) return url
+  return `${value}${value.includes('?') ? '&' : '?'}png_info=1`
+}
+
 function serverItem(task) {
   const result = task.result || {}
   const params = task.params || {}
@@ -125,10 +132,10 @@ function serverItem(task) {
     progress: Number(task.progress) || 0,
     error: task.error || '',
     params,
-    images: result.local_images || [],
+    images: (result.local_images || []).map(url => taskDisplayUrl(task.id, url)),
     thumbnail: result.local_thumbnail || result.local_thumbnails?.[0] || null,
-    video: result.local_video || null,
-    poster: result.local_last_frame || null,
+    video: taskDisplayUrl(task.id, result.local_video) || null,
+    poster: taskDisplayUrl(task.id, result.local_last_frame) || null,
     refs: result.local_refs || [],
     source: task,
   }
@@ -391,8 +398,12 @@ function TaskDetailModal({
   const download = item.type === 'video' ? item.video : item.images?.[outputIndex]
   const downloadName = download ? uniqueDownloadName(item, outputIndex, download, openedAt) : ''
   const downloadUrl = download ? taskDownloadUrl(item, download) : ''
+  const aspectRatio = params.aspect_ratio === 'auto'
+    ? 'Auto'
+    : params.aspect_ratio === 'custom' ? '自定义' : (params.aspect_ratio || params.ratio)
   const rows = [
-    ['画幅', params.aspect_ratio || params.ratio],
+    ['画幅', aspectRatio],
+    ['尺寸', params.size],
     ['分辨率', params.resolution],
     ['时长', params.duration ? `${params.duration}s` : null],
     ['格式', params.output_format?.toUpperCase()],
@@ -617,6 +628,7 @@ export default function TaskGallery({
   const groupMenuRef = useRef(null)
   const bulkGroupMenuRef = useRef(null)
   const fetchSequenceRef = useRef(0)
+  const navigationRequestRef = useRef({ controller: null, sequence: 0 })
   const handledRefreshTokenRef = useRef(refreshToken)
   const cardSize = CARD_SIZE_OPTIONS.some(option => option.value === galleryPreferences?.cardSize)
     ? galleryPreferences.cardSize
@@ -836,17 +848,62 @@ export default function TaskGallery({
   }, [cardSort, debouncedQuery, favoriteGroup, mode, view])
 
   const loadNavigation = useCallback(async taskId => {
+    navigationRequestRef.current.controller?.abort()
+    const controller = new AbortController()
+    const sequence = navigationRequestRef.current.sequence + 1
+    navigationRequestRef.current = { controller, sequence }
     setNavigationLoading(true)
-    try {
-      const path = taskId ? `/api/tasks/${taskId}/navigation` : '/api/tasks/navigation'
-      const response = await axios.get(path, { params: buildSelectionParams() })
-      if (response.data.success) setNavigation({ ...EMPTY_NAVIGATION, ...(response.data.navigation || {}) })
-    } catch (requestError) {
-      setError(requestError.response?.data?.error || '任务导航加载失败')
-    } finally {
+    setNavigation(EMPTY_NAVIGATION)
+    const path = taskId ? `/api/tasks/${taskId}/navigation` : '/api/tasks/navigation'
+    let requestError = null
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await axios.get(path, {
+          params: buildSelectionParams(),
+          signal: controller.signal,
+        })
+        if (navigationRequestRef.current.sequence !== sequence) return
+        if (response.data.success) {
+          setNavigation({ ...EMPTY_NAVIGATION, ...(response.data.navigation || {}) })
+        }
+        requestError = null
+        break
+      } catch (error) {
+        if (controller.signal.aborted || axios.isCancel(error) || error.code === 'ERR_CANCELED') return
+        requestError = error
+        const retryable = !error.response || Number(error.response.status) >= 500
+        if (!retryable || attempt === 1) break
+        await new Promise(resolve => window.setTimeout(resolve, 180))
+        if (controller.signal.aborted || navigationRequestRef.current.sequence !== sequence) return
+      }
+    }
+
+    if (navigationRequestRef.current.sequence !== sequence) return
+    if (requestError?.response) {
+      setError(requestError.response.data?.error || '任务导航参数无效')
+    } else if (requestError) {
+      console.warn('Task navigation temporarily unavailable', requestError.message)
+    }
+    if (navigationRequestRef.current.sequence === sequence) {
       setNavigationLoading(false)
     }
   }, [buildSelectionParams])
+
+  useEffect(() => {
+    if (selectedKey) return
+    navigationRequestRef.current.controller?.abort()
+    navigationRequestRef.current = {
+      controller: null,
+      sequence: navigationRequestRef.current.sequence + 1,
+    }
+    setNavigationLoading(false)
+  }, [selectedKey])
+
+  useEffect(() => () => {
+    navigationRequestRef.current.controller?.abort()
+    navigationRequestRef.current.sequence += 1
+  }, [])
 
   const openItem = useCallback(async (item, refreshNavigation = true) => {
     setSelectedKey(item.key)

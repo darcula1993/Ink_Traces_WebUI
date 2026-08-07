@@ -8,6 +8,9 @@ import IconButton from './ui/IconButton'
 const PARAM_LABELS = {
   aspect_ratio: '画幅',
   resolution: '分辨率',
+  size: '输出尺寸',
+  custom_width: '自定义宽度',
+  custom_height: '自定义高度',
   output_format: '格式',
   watermark: '水印',
   use_search: '联网搜索',
@@ -22,6 +25,7 @@ function formatBytes(value) {
 
 function formatValue(key, value) {
   if (typeof value === 'boolean') return value ? '开启' : '关闭'
+  if (key === 'aspect_ratio') return value === 'auto' ? 'Auto' : value === 'custom' ? '自定义' : String(value)
   if (key === 'think_level') return value === 'high' ? '深入' : value === 'minimal' ? '快速' : String(value)
   if (key === 'output_format') return String(value).toUpperCase()
   return String(value)

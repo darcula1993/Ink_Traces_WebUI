@@ -1,649 +1,1098 @@
-`POST https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`   [ ](https://api.volcengine.com/api-explorer/?action=CreateContentsGenerationsTasks&data=%7B%7D&groupName=%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90API&query=%7B%7D&serviceCode=ark&version=2024-01-01)[运行](https://api.volcengine.com/api-explorer/?action=CreateContentsGenerationsTasks&data=%7B%7D&groupName=%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90API&query=%7B%7D&serviceCode=ark&version=2024-01-01)
-本文介绍创建视频生成任务 API 的输入输出参数，供您使用接口时查阅字段含义。模型会依据传入的图片及文本信息生成视频，待生成完成后，您可以按条件查询任务并获取生成的视频。
-:::tip
-请确保您的账户余额大于等于 200 元（[前往充值](https://console.volcengine.com/finance/fund/recharge)），或已[购买资源包](https://console.volcengine.com/common-buy/fast/ark_bd%7C%7Cd682ppeeq1mp7kd5q0e0)，否则无法开通 seedance 2.0 及 seedance 2.0 fast 模型。
+`POST https://ark.ap-southeast.bytepluses.com/api/v3/contents/generations/tasks` [Try](https://api.byteplus.com/api-explorer/?action=CreateContentsGenerationsTasks&groupName=Video%20Generation%20API&serviceCode=ark&version=2024-01-01)
 
-:::
-**模型能力==^new^==**
+This topic describes the input and output parameters of the API for creating video generation tasks. The model generates a video based on the input text, images, audio, videos, or sample task ID. After generation is complete, you can query the task and obtain the generated video.
 
-* **seedance 2.0 & 2.0 fast==^new^==** ** (有声视频/无声视频)** 
-   * **多模态参考生视频==^new^==**：输入++参考图片（0~9）+参考视频（0~3）+ 参考音频（0~3）+ 文本提示词（可选）++ 生成 1 个目标视频。注意不可单独输入音频，应至少包含 1 个参考视频或图片。支持生成全新视频、编辑视频、延长视频，[阅读教程](https://www.volcengine.com/docs/82379/2291680) 获取详细代码示例。
-   * **图生视频\-首尾帧**：输入++首帧图片+尾帧图片+文本提示词（可选）++ 生成 1 个目标视频。
-   * **图生视频\-首帧**：输入++首帧图片+文本提示词（可选）++ 生成 1 个目标视频。
-   * **文生视频**：输入++文本提示词++生成 1 个目标视频。
-* **seedance 1.5 pro (有声视频/无声视频)** 
-   【图生视频\-首尾帧】【图生视频\-首帧】【文生视频】
-* **seedance 1.0 pro**
-   【图生视频\-首尾帧】【图生视频\-首帧】【文生视频】
-* **seedance 1.0 pro fast**
-   【图生视频\-首帧】【文生视频】
-* **seedance 1.0 lite**
-   * **doubao\-seedance\-1\-0\-lite\-t2v：** 文生视频
-   * **doubao\-seedance\-1\-0\-lite\-i2v：** 
-      * 参考图生视频：根据您输入的**++参考图片（1\-4张）++ **  +++文本提示词（可选）++ 生成 1 个目标视频。
-      * 图生视频\-首尾帧
-      * 图生视频\-首帧
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">New model available</div>
 
 
-Tips：一键展开折叠，快速检索内容
-打开页面右上角开关，**ctrl ** + **f** 可检索页面内所有内容。
-<span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_cae7ddb0e1977b68b353f17897b8574c.png) </span>
+<div data-tips="true" data-tips-type="warning">Dreamina Seedance 2.5 is now fully available to the public. You can call the API and try the model online on the BytePlus ModelArk platform. Before calling the model, <strong>please carefully read </strong><a href="https://docs.byteplus.com/en/docs/ModelArk/2607688#2.5_compatibility"><strong>Must\-read before use</strong></a><strong> to ensure that you correctly set the task type and configure parameters</strong> .</div>
 
 
-```mixin-react
-return (<Tabs>
-<Tabs.TabPane title="在线调试" key="4rK5FhUg"><RenderMd content={`<APILink link="https://api.volcengine.com/api-explorer/?action=CreateContentsGenerationsTasks&data=%7B%7D&groupName=%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90API&query=%7B%7D&serviceCode=ark&version=2024-01-01" description="API Explorer 您可以通过 API Explorer 在线发起调用，无需关注签名生成过程，快速获取调用结果。">去调试</APILink>
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Model activation</div>
 
-`}></RenderMd></Tabs.TabPane>
-<Tabs.TabPane title="鉴权说明" key="iRuPtuk6"><RenderMd content={`本接口仅支持 API Key 鉴权，请在 [获取 API Key](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey) 页面，获取长效 API Key。
-`}></RenderMd></Tabs.TabPane>
-<Tabs.TabPane title="快速入口" key="5LZLMN0J"><RenderMd content={` [ ](#)[体验中心](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_2abecd05ca2779567c6d32f0ddc7874d.png =20x) </span>[模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh#2705b333)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_a5fdd3028d35cc512a10bd71b982b6eb.png =20x) </span>[模型计费](https://www.volcengine.com/docs/82379/1544106?redirect=1&lang=zh#02affcb8)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_afbcf38bdec05c05089d5de5c3fd8fc8.png =20x) </span>[API Key](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D)
- <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_57d0bca8e0d122ab1191b40101b5df75.png =20x) </span>[调用教程](https://www.volcengine.com/docs/82379/1366799)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_f45b5cd5863d1eed3bc3c81b9af54407.png =20x) </span>[接口文档](https://www.volcengine.com/docs/82379/1520758)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_1609c71a747f84df24be1e6421ce58f0.png =20x) </span>[常见问题](https://www.volcengine.com/docs/82379/1359411)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_bef4bc3de3535ee19d0c5d6c37b0ffdd.png =20x) </span>[开通模型](https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&OpenTokenDrawer=false)
-`}></RenderMd></Tabs.TabPane></Tabs>);
+
+<div data-tips="true" data-tips-type="tip">Before activating Dreamina Seedance 2.5 or Dreamina Seedance 2.0 series models, make sure that you have purchased a corresponding <a href="https://console.byteplus.com/common-buy/ModelArk%7C%7Cd7d6aanpgiftptb9ajcg">resource pack</a> with available quota.</div>
+
+
+<div data-tips="true" data-tips-type="tip">For detailed rules, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2191775">Resource packs for Dreamina Seedance 2.0 series models</a>.</div>
+
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Limited\-time discount</div>
+
+
+<div data-tips="true" data-tips-type="warning">Dreamina Seedance 2.0 mini and Dreamina Seedance 2.0 fast are available at limited\-time discounted rates from 14:00 (UTC+8) on August 7 through 14:00 (UTC+8) on September 7:</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning"><strong>Seedance 2.0 mini</strong> : 40% of the list price, starting at approximately USD 0.032 per second for 720p output.</div>
+
+
+* <div data-tips="true" data-tips-type="warning"><strong>Seedance 2.0 fast</strong> : 75% of the list price, starting at approximately USD 0.09 per second for 720p output.</div>
+
+
+
+
+**Model capabilities**
+
+
+* **Dreamina Seedance 2.5<mark><sup>new</sup></mark>** (video with audio / silent video)
+
+   * **Multimodal reference\-to\-video** : Input reference images (0–30), reference videos (0–10), reference audio clips (0–10), and an optional text prompt to generate one target video. Audio\-only input is supported. The model supports generating new videos, editing videos, extending videos, and coherently generating videos up to 30 seconds long.
+
+   * **Image\-to\-video (first and last frames)**  : Input a first\-frame image, a last\-frame image, and an optional text prompt to generate one target video.
+
+   * **Image\-to\-video (first frame)**  : Input a first\-frame image and an optional text prompt to generate one target video.
+
+   * **Text\-to\-video** : Input a text prompt to generate one target video.
+
+* **Dreamina Seedance 2.0 series** (video with audio / silent video)
+
+   * **Multimodal reference\-to\-video** : Input reference images (0–9), reference videos (0–3), reference audio clips (0–3), and an optional text prompt to generate one target video. Audio\-only input is not supported; include at least one reference image or video. The models support generating new videos, editing videos, and extending videos.
+
+   * **Image\-to\-video (first and last frames)**  : Input a first\-frame image, a last\-frame image, and an optional text prompt to generate one target video.
+
+   * **Image\-to\-video (first frame)**  : Input a first\-frame image and an optional text prompt to generate one target video.
+
+   * **Text\-to\-video** : Input a text prompt to generate one target video.
+
+* **Dreamina Seedance 1.5 pro** (video with audio / silent video)
+
+   * Supports image\-to\-video (first and last frames), image\-to\-video (first frame), and text\-to\-video.
+
+* **Dreamina Seedance 1.0 pro**
+
+   * Supports image\-to\-video (first and last frames), image\-to\-video (first frame), and text\-to\-video.
+
+* **Dreamina Seedance 1.0 pro fast**
+
+   * Supports image\-to\-video (first frame) and text\-to\-video.
+
+
+
+**Parameter input methods**
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">tip</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip">For <code>resolution</code>, <code>ratio</code>, <code>duration</code>, <code>frames</code>, <code>seed</code>, <code>camera_fixed</code>, and <code>watermark</code>, all models support both passing parameters directly in the request body and appending <code>--[parameters]</code> after the text prompt.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Supported parameters and values vary by model. For details, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2298881#9fe4cce0">Set video output specifications</a>. When a parameter or value is invalid or unsupported:</div>
+
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Conventional method (recommended)</strong> : Pass parameters directly in the request body. This method uses strict validation and returns an error for invalid parameters.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Legacy method</strong> : Append <code>--[parameters]</code> after the text prompt. Invalid parameters are ignored or cause an error.</div>
+
+
+
+**Conventional method (recommended): Pass parameters directly in the request body**
+
+```json
+{
+    "model": "seedance-1-5-pro-251215",
+    "content": [
+        {
+            "type": "text",
+            "text": "The kitten is yawning at the camera."
+        }
+    ],
+    "resolution": "720p",
+    "ratio": "16:9",
+    "duration": 5,
+    "seed": 11,
+    "camera_fixed": false,
+    "watermark": true
+}
 ```
 
 
----
-
-
-<span id="5qndT7DS"></span>
-## 请求参数 
-> 跳转 [响应参数](#y2hhTyHB)
-
-<span id="wsGzv1pD"></span>
-### 请求体
-
----
-
-
-**model** `string` %%require%%
-您需要调用的模型的 ID （Model ID），[开通模型服务](https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&OpenTokenDrawer=false)，并[查询 Model ID](https://www.volcengine.com/docs/82379/1330310) 。
-您也可通过 Endpoint ID 来调用模型，获得限流、计费类型（前付费/后付费）、运行状态查询、监控、安全等高级能力，可参考[获取 Endpoint ID](https://www.volcengine.com/docs/82379/1099522)。
-
----
-
-
-**content** `object[]` %%require%%
-输入给模型，生成视频的信息，支持文本、图片、音频、视频、样片任务 ID。
-:::warning
-seedance 2.0 系列模型不支持直接上传含有真人人脸的参考图/视频。为了便利创作者对肖像的使用，平台推出了以下解决方案，详情参见 [教程](https://www.volcengine.com/docs/82379/2291680?lang=zh#5c67c9a1)。
-
-* 支持使用部分模型的含人脸原始产物作为输入素材
-* 支持使用预置虚拟人像作为输入素材
-* 支持使用已授权真人素材作为输入
-
-:::
-支持以下几种组合：
-
-* **文本**
-* **文本（可选）+ 图片**
-* **文本（可选）+ 视频**
-* **文本（可选）+ 图片 + 音频**
-* **文本（可选）+ 图片 + 视频**
-* **文本（可选）+ 视频 + 音频**
-* **文本（可选）+ 图片 + 视频 + 音频**
-* **样片任务 ID**：样片指使用 seedance 模型成功生成的样片视频，模型可基于样片生成高质量正式视频。
-
-
-信息类型
-
----
-
-
-**文本信息** `object`
-输入给模型的提示词信息。
-
-属性
-
----
-
-
-content.**type ** `string` %%require%%
-输入内容的类型，此处应为 `text`。
-
----
-
-
-content.**text ** `string` %%require%%
-输入给模型的文本提示词，描述期望生成的视频。
-:::tip
-
-* 提示词语言支持：所有模型均支持中英文提示词；seedance 2.0 及 seedance 2.0 fast 额外支持日语、印尼语、西班牙语、葡萄牙语。
-* 提示词字数建议：中文提示词不超过500字，英文提示词不超过1000词。字数过多易导致信息分散，模型可能忽略细节、仅关注重点，进而造成视频缺失部分元素。
-* 更多使用技巧：提示词的详细使用技巧，请参见 [seedance 提示词指南](https://www.volcengine.com/docs/82379/2222480?lang=zh)。
-
-
-
-:::
-
----
-
-
-**图片信息==^new^==** `object`
-输入给模型的图片信息。
-
-属性
-
----
-
-
-content.**type ** `string` %%require%%
-输入内容的类型，此处应为 `image_url`。
-
----
-
-
-content.**image_url ** `object` %%require%%
-输入给模型的图片对象。
-
-属性
-
----
-
-
-content.image_url.**url ** `string` %%require%%
-图片 URL 、图片 Base64 编码、素材 ID。
-
-* 图片 URL：填入图片的公网 URL。
-* Base64 编码：将本地文件转换为 Base64 编码字符串，然后提交给大模型。遵循格式：`data:image/<图片格式>;base64,<Base64编码>`，注意 `<图片格式>` 需小写，如 `data:image/png;base64,{base64_image}`。
-* 素材 ID：用于视频生成的预置素材及虚拟人像的 ID，遵循格式：asset://<ASSET_ID\>。可从 [素材&虚拟人像库](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision?modelId=doubao-seedance-2-0-260128) 获取。
-
-:::tip 传入单张图片要求
-
-* 格式：jpeg、png、webp、bmp、tiff、gif。其中，seedance 1.5 pro 新增支持 heic 和 heif。
-* 宽高比（宽/高）： (0.4, 2.5) 
-* 宽高长度（px）：(300, 6000)
-* 大小：单张图片小于 30 MB。请求体大小不超过 64 MB。大文件请勿使用Base64编码。
-* 图片数量：
-   * 图生视频\-首帧：1 张
-   * 图生视频\-首尾帧：2 张
-   * seedance 2.0&2.0 fast 多模态参考生视频：1~9 张
-   * seedance 1.0 lite 参考图生视频：1~4 张
-
-:::
-
----
-
-
-content.**role ** `string` `条件必填`
-图片的位置或用途。
-:::warning
-
-* **图生视频\-首帧**、**图生视频\-首尾帧**、**多模态参考生视频**（包括参考图、视频、音频）为 3 种互斥场景，**不可混用**。
-* **多模态参考生视频**可通过提示词指定参考图片作为首帧/尾帧，间接实现“首尾帧+多模态参考”效果。若需严格保障首尾帧和指定图片一致，**优先使用图生视频\-首尾帧**（配置 role 为 first_frame/last_frame）。
-
-
-:::
-图生视频\-首帧
-
-* **支持模型：** 所有图生视频模型
-* **字段role取值：** 需要传入1个 image_url 对象，字段 role 为 first_frame 或不填。
-
-
-图生视频\-首尾帧
-
-* **支持模型：** seedance 2.0 & 2.0 fast，seedance 1.5 pro、seedance 1.0 pro、seedance 1.0 lite i2v 
-* **字段role取值：** 需要传入2个image_url对象，且字段 role 必填。
-   * 首帧图片对应的字段 role 为：first_frame
-   * 尾帧图片对应的字段 role 为：last_frame
-
-:::tip
-传入的首尾帧图片可相同。首尾帧图片的宽高比不一致时，以首帧图片为主，尾帧图片会自动裁剪适配。
-
-:::
-
-图生视频\-参考图 
-
-* **支持模型：** seedance 2.0 & 2.0 fast（1~9 张图片），seedance 1.0 lite i2v（1~4 张图片）
-* **字段role取值：** 必填，每张参考图对应的字段 role 均为：reference_image
-
-:::tip
-参考图生视频功能的文本提示词，可以用自然语言指定多张图片的组合。但若想有更好的指令遵循效果，**推荐使用“[图1]xxx，[图2]xxx”的方式来指定图片**。
-示例1：戴着眼镜穿着蓝色T恤的男生和柯基小狗，坐在草坪上，3D卡通风格
-示例2：[图1]戴着眼镜穿着蓝色T恤的男生和[图2]的柯基小狗，坐在[图3]的草坪上，3D卡通风格
-
-:::
-
-
----
-
-
-**视频信息==^new^==** `object`
-输入给模型的视频信息。仅 seedance 2.0 & 2.0 fast 支持输入视频。
-方舟平台信任 seedance 2.0 及 2.0 fast 模型生成的含人脸视频，您可使用**本账号下近30天内由上述模型生成的含人脸原始视频**，作为输入素材进行二次创作，详情参见 [教程](https://www.volcengine.com/docs/82379/2291680?lang=zh#86c3831f)。
-
-属性
-content.**type ** `string` %%require%%
-输入内容的类型，此处应为`video_url`。
-
----
-
-
-content.**video_url** ** ** `object` %%require%%
-输入给模型的视频对象。
-
-属性
-content.video_url.**url ** `string` %%require%%
-视频URL、素材 ID。
-
-* 视频 URL：填入视频的公网 URL。
-* 素材 ID：用于视频生成的预置素材及虚拟人像视频的 ID，遵循格式：asset://<ASSET_ID\>。可从[素材&虚拟人像库](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision?modelId=doubao-seedance-2-0-260128)获取。
-
-:::tip 传入单个视频要求
-
-* 视频格式：mp4、mov，支持编码格式见下表。
-* 分辨率：480p，720p，1080p
-* 时长：单个视频时长 [2, 15] s，最多传入 3 个参考视频，所有视频总时长不超过 15s。
-* 尺寸：
-   * 宽高比（宽/高）：[0.4, 2.5]
-   * 宽高长度（px）：[300, 6000]
-   * 总像素数：[640×640=409600, 2206×946=2086876]，即宽和高的乘积符合 [409600, 2086876] 的区间要求。
-* 大小：单个视频不超过 50 MB。
-* 帧率 (FPS)：[24, 60] 
-
-:::
-
----
-
-
-content.**role ** `string` `条件必填`
-视频的位置或用途。当前仅支持 reference_video：参考视频。
-
-
----
-
-
-**音频信息==^new^==** `object`
-输入给模型的音频信息。仅 seedance 2.0&2.0 fast 支持输入音频。
-注意不可单独输入音频，应至少包含 1 个参考视频或图片。
-
-属性
-content.**type ** `string` %%require%%
-输入内容的类型，此处应为`audio_url`。
-
----
-
-
-content.**audio_url** ** ** `object` %%require%%
-输入给模型的音频对象。
-
-属性
-content.audio_url.**url ** `string` %%require%%
-音频 URL 、音频 Base64 编码、素材 ID。
-
-* 音频 URL：填入音频的公网 URL。
-* Base64 编码：将本地文件转换为 Base64 编码字符串，然后提交给大模型。遵循格式：`data:audio/<音频格式>;base64,<Base64编码>`，注意 `<音频格式>` 需小写，如 `data:audio/wav;base64,{base64_audio}`。
-* 素材 ID：用于视频生成的虚拟人的音频素材 ID，遵循格式：asset://<ASSET_ID\>。可从[素材&虚拟人像库](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision?modelId=doubao-seedance-2-0-260128)获取。
-
-:::tip 传入单个音频要求
-
-* 格式：wav、mp3
-* 时长：单个音频时长 [2, 15] s，最多传入 3 段参考音频，所有音频总时长不超过 15 s。
-* 大小：单个音频不超过 15 MB，请求体大小不超过 64 MB。大文件请勿使用Base64编码。
-
-
-
-:::
-
----
-
-
-content.**role ** `string` `条件必填`
-音频的位置或用途。当前仅支持 reference_audio：参考音频。
-
-
-
----
-
-
-**样片信息 **  `object`
-基于样片任务 ID，生成正式视频。仅 seedance 1.5 pro 支持该功能。[阅读](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8)[文档](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8) 获取 draft 功能的使用教程和注意事项。
-
-属性
-
----
-
-
-content.**type ** `string` %%require%%
-输入内容的类型，此处应为 `draft_task`。
-
----
-
-
-content.**draft_task** ** ** `object` %%require%%
-输入给模型的样片任务。
-
-属性
-
----
-
-
-content.draft_task.**id ** `string` %%require%%
-样片任务 ID。平台将自动复用 Draft 视频使用的用户输入（**model、** content.**text、** content.**image_url、generate_audio、seed、ratio、duration、camera_fixed ** ），生成正式视频。其余参数支持指定，不指定将使用本模型的默认值。
-使用分为两步：Step1: 调用本接口生成 Draft 视频。Step2: 如果确认 Draft 视频符合预期，可基于 Step1 返回的 Draft 视频任务 ID，调用本接口生成最终视频。[阅读文档](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8) 获取详细教程。
-
-
-
-
----
-
-
-**callback_url** `string` 
-填写本次生成任务结果的回调通知地址。当视频生成任务有状态变化时，方舟将向此地址推送 POST 请求。
-回调请求内容结构与[查询任务API](https://www.volcengine.com/docs/82379/1521309)的返回体一致。
-回调返回的 status 包括以下状态：
-
-* queued：排队中。
-* running：任务运行中。
-* succeeded： 任务成功。（如发送失败，即5秒内没有接收到成功发送的信息，回调三次）
-* failed：任务失败。（如发送失败，即5秒内没有接收到成功发送的信息，回调三次）
-* expired：任务超时，即任务处于**运行中或排队中**状态超过过期时间。可通过 **execution_expires_after ** 字段设置过期时间。
-
-
----
-
-
-**return_last_frame** `boolean` `默认值 false`
-
-* true：返回生成视频的尾帧图像。设置为 `true` 后，可通过 [查询视频生成任务接口](https://www.volcengine.com/docs/82379/1521309) 获取视频的尾帧图像。尾帧图像的格式为 png，宽高像素值与生成的视频保持一致，无水印。
-   使用该参数可实现生成多个连续视频：以上一个生成视频的尾帧作为下一个视频任务的首帧，快速生成多个连续视频，调用示例详见 [教程](https://www.volcengine.com/docs/82379/1366799?lang=zh#141cf7fa)。
-* false：不返回生成视频的尾帧图像。
-
-
----
-
-
-**service_tier** `string` `默认值 default`
-> 不支持修改已提交任务的服务等级
-> seedance 2.0 & 2.0 fast 不支持离线推理
-
-指定处理本次请求的服务等级类型，枚举值：
-
-* default：在线推理模式，RPM 和并发数配额较低（详见 [模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh#2705b333)），适合对推理时效性要求较高的场景。
-* flex：离线推理模式，TPD 配额更高（详见 [模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh#2705b333)），价格为在线推理的 50%， 适合对推理时延要求不高的场景。
-
-
----
-
-
-**execution_expires_after ** `integer` `默认值 172800`
-任务超时阈值。指定任务提交后的过期时间（单位：秒），从 **created at** 时间戳开始计算。默认值 172800 秒，即 48 小时。取值范围：[3600，259200]。
-不论使用哪种 **service_tier**，都建议根据业务场景设置合适的超时时间。超过该时间后任务会被自动终止，并标记为`expired`状态。
-
----
-
-
-**generate_audio ** `boolean` `默认值 true`
-> 仅 seedance 2.0 & 2.0 fast、seedance 1.5 pro 支持
-
-控制生成的视频是否包含与画面同步的声音。
-
-* true：模型输出的视频包含同步音频。模型会基于文本提示词与视觉内容，自动生成与之匹配的人声、音效及背景音乐。建议将对话部分置于双引号内，以优化音频生成效果。例如：男人叫住女人说：“你记住，以后不可以用手指指月亮。”
-* false：模型输出的视频为无声视频。
-
-:::warning
-生成的有声视频均为单声道，和传入的音频声道数无关。
-
-:::
----
-
-
-**draft ** `boolean` `默认值 false`
-> 仅 seedance 1.5 pro 支持
-
-控制是否开启样片模式。[阅读文档](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8) 获取使用教程和注意事项。
-
-* true：开启样片模式，生成一段预览视频，快速验证场景结构、镜头调度、主体动作与 prompt 意图是否符合预期。消耗 token 数较正常视频更少，使用成本更低。
-* false：关闭样片模式，正常生成一段视频。
-
-:::tip
-开启样片模式后，将使用 480p 分辨率生成 Draft 视频（使用其他分辨率会报错），不支持返回尾帧功能，不支持离线推理功能。
-
-:::
----
-
-
-**tools==^new^==** ** ** `object[]` 
-> 仅 seedance 2.0 & 2.0 fast 支持
-
-配置模型要调用的工具。
-
-属性
-tools.**type ** `string`
-指定使用的工具类型。
-
-* web_search：联网搜索工具。[阅读教程](https://www.volcengine.com/docs/82379/1366799?lang=zh#c40ed3ef) 获取详细代码示例。
-
-:::tip
-
-* 开启联网搜索后，模型会根据用户的提示词自主判断是否搜索互联网内容（如商品、天气等）。可提升生成视频的时效性，但也会增加一定的时延。
-* 实际搜索次数可通过 [查询视频生成任务 API](https://www.volcengine.com/docs/82379/1521309?lang=zh) 返回的 usage.tool_usage.**web_search** 字段获取，如果为 0 表示未搜索。
-
-:::
-
----
-
-
-**safety_identifier==^new^==** `string`
-终端用户的唯一标识符，用于协助平台检测您的应用中可能违反火山方舟使用政策的用户。该标识符为英文字符串，需保证对单个用户固定且唯一，长度不超过 64 个字符。推荐传入对用户名、用户 ID 或邮箱进行哈希处理后生成的字符串，避免泄露用户隐私信息。
-
----
-
-
-&nbsp;
-:::warning 部分参数升级说明
-
-* **对于 resolution、ratio、duration、frames、seed、camera_fixed、watermark 参数，平台升级了参数传入方式，示例如下。所有模型依然兼容支持旧方式。** 
-* 不同模型，可能对应支持不同的参数与取值，详见 [输出视频格式](https://www.volcengine.com/docs/82379/1366799?lang=zh#9fe4cce0)。当输入的参数或取值不符合所选的模型时，该参数将被忽略或触发报错：
-   * 新方式：在 request body 中直接传入参数。此方式为**强校验，** 若参数填写错误，模型会返回错误提示。 
-   * 旧方式：在文本提示词后追加 \-\-[parameters]。此方式为**弱校验，** 若参数填写错误，该参数将被忽略或触发报错。
-
-
-:::
-**新方式（推荐）：在 request body 中直接传入参数**
-```JSON
-... 
-   // Specify the aspect ratio of the generated video as 16:9, duration as 5 seconds, resolution as 720p, seed as 11, and include a watermark. The camera is not fixed. 
-    "model": "doubao-seedance-1-5-pro-251215", 
-    "content": [ 
-        { 
-            "type": "text", 
-            "text": "小猫对着镜头打哈欠" 
-        } 
-    ], 
-    // All parameters must be written in full; abbreviations are not supported 
-    "resolution": "720p", 
-    "ratio":"16:9", 
-    "duration": 5, 
-    // "frames": 29, Either duration or frames is required 
-    "seed": 11, 
-    "camera_fixed": false, 
-    "watermark": true 
-... 
-```
-
-
-
-
-**旧方式：在文本提示词后追加 \-\-[parameters]** 
-```JSON
-... 
-   // Specify the aspect ratio of the generated video as 16:9, duration as 5 seconds, resolution as 720p, seed as 11, and include a watermark. The camera is not fixed. 
-    "model": "doubao-seedance-1-5-pro-251215", 
-    "content": [ 
-        { 
-            "type": "text", 
-            "text": "小猫对着镜头打哈欠 --rs 720p --rt 16:9 --dur 5 --seed 11 --cf false --wm true"
-            // "text": "小猫对着镜头打哈欠 --resolution 720p --ratio 16:9 --duration 5 --seed 11 --camerafixed false --watermark true"
-        } 
+**Weak\-validation method: Append **  **`--[parameters]`**  ** after the text prompt**
+
+```json
+{
+    "model": "seedance-1-5-pro-251215",
+    "content": [
+        {
+            "type": "text",
+            "text": "The kitten is yawning at the camera. --rs 720p --rt 16:9 --dur 5 --seed 11 --cf false --wm true"
+        }
     ]
-... 
+}
 ```
 
 
 
-
----
-
-
-**resolution **  `string` 
-> seedance 2.0 & 2.0 fast、seedance 1.5 pro、seedance 1.0 lite 默认值：`720p`
-> seedance 1.0 pro & pro\-fast 默认值：`1080p`
-
-视频分辨率，枚举值：
-
-* 480p
-* 720p
-* 1080p：seedance 1.0 lite 参考图场景、seedance 2.0 fast 不支持
-
-
----
-
-
-**ratio ** `string` 
-> seedance 2.0 & 2.0 fast、seedance 1.5 pro 默认值为 `adaptive`
-> seedance 1.0 lite 参考图场景默认值为 `16:9`
-> 其他模型：文生视频默认值 `16:9`，图生视频默认值 `adaptive`
-
-生成视频的宽高比例。不同宽高比对应的宽高像素值见下方表格。
-
-* 16:9 
-* 4:3
-* 1:1
-* 3:4
-* 9:16
-* 21:9
-* adaptive：根据输入自动选择最合适的宽高比（详见下文说明）
-
-:::warning **adaptive ** 适配规则
-当配置 **ratio** 为 `adaptive` 时，模型会根据生成场景自动适配宽高比；实际生成的视频宽高比可通过 [查询视频生成任务 API](https://www.volcengine.com/docs/82379/1521309?lang=zh) 返回的 **ratio** 字段获取。
-**支持模型：** 
-
-* seedance 2.0 & 2.0 fast、seedance 1.5 Pro 支持
-* 其他模型仅图生视频场景支持，注意 seedance 1.0 lite 参考图场景不支持。
-
-**取值规则：** 
-
-* 文生视频：根据输入的提示词，智能选择最合适的宽高比。
-* 首帧 / 首尾帧生视频：根据上传的首帧图片比例，自动选择最接近的宽高比。
-* 多模态参考生视频：根据用户提示词意图判断，如果是首帧生视频/编辑视频/延长视频，以该图片/视频为准选择最接近的宽高比；否则，以传入的第一个媒体文件为准（优先级：视频＞图片）选择最接近的宽高比。
-
-:::
 &nbsp;
 
-不同宽高比对应的宽高像素值
-Note：图生视频，选择的宽高比与您上传的图片宽高比不一致时，方舟会对您的图片进行裁剪，裁剪时会居中裁剪，详细规则见 [图片裁剪规则](https://www.volcengine.com/docs/82379/1366799?lang=zh#f76aafc8)。
 
-|分辨率 |宽高比|宽高像素值|宽高像素值|\
-| | |seedance 1.0 系列 |seedance 1.5 pro|\
-| | | |seedance 2.0 & 2.0 fast |
+<Tabs>
+<Tab zoneid="hRspgFkFD0" title="Try">
+<TabTitle>Try</TabTitle>
+
+[去调试](https://api.byteplus.com/api-explorer/?action=CreateContentsGenerationsTasks&groupName=Video%20Generation%20API&serviceCode=ark&version=2024-01-01)
+
+
+
+</Tab>
+<Tab zoneid="sw73KhJ3nq" title="Quick start">
+<TabTitle>Quick start</TabTitle>
+
+[Playground](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/vision) | [Model list](https://docs.byteplus.com/en/docs/ModelArk/1330310) | [Model billing](https://docs.byteplus.com/en/docs/ModelArk/1544106#8f25f772) | [API key](https://ai.byteplus.com/ark/region:ap-southeast-1/apiKey?apikey=%7B%7D)
+
+[API tutorial](https://docs.byteplus.com/en/docs/ModelArk/1366799) | [API reference](https://docs.byteplus.com/en/docs/ModelArk/Video_Generation_API) | [FAQs](https://docs.byteplus.com/en/docs/ModelArk/1359411) | [Model activation](https://ai.byteplus.com/ark/region:ap-southeast-1/openManagement?LLM=%7B%7D&tab=ComputerVision)
+
+
+</Tab>
+<Tab zoneid="SNWAQnioN8" title="Authentication">
+<TabTitle>Authentication</TabTitle>
+
+This API supports only API Key authentication. Obtain a long\-term API Key on the [API keys](https://ai.byteplus.com/ark/region:ap-southeast-1/apiKey?apikey=%7B%7D) page.
+
+
+</Tab>
+</Tabs>
+
+
+<span id="request-parameters"></span>
+## Request parameters
+
+<span id="request-body"></span>
+### Request body
+
+
+**model** `string` `Required`  |  Model ID
+
+ID of the model you need to call. You can [activate a model service](https://ai.byteplus.com/ark/region:ap-southeast-1/openManagement?LLM=%7B%7D&tab=ComputerVision) and [query the model ID](https://docs.byteplus.com/en/docs/ModelArk/1330310).
+
+You can also use an endpoint ID to call a model, querying its rate limits, billing method (prepaid or postpaid), and status, and using its advanced capabilities such as monitoring and security. For more information, refer to [Obtaining an endpoint ID](https://docs.byteplus.com/en/docs/ModelArk/1099522).
+
+
+
+**content** `object[]` `Required`  |  Input content list
+
+The references provided to the model for video generation, supporting text, image, audio, video, and sample task ID.
+
+The following combinations are supported:
+
+
+* Text
+
+* Text (optional) + image
+
+* Text (optional) + video
+
+* Text (optional) + audio (Dreamina Seedance 2.5 supports audio\-only input)
+
+* Text (optional) + image + audio
+
+* Text (optional) + image + video
+
+* Text (optional) + video + audio
+
+* Text (optional) + image + video + audio
+
+* Sample task ID: A sample video successfully generated using a Seedance model. The model can generate a high\-quality final video based on the sample.
+
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Note</div>
+
+
+<div data-tips="true" data-tips-type="warning">Dreamina Seedance 2.5 and Dreamina Seedance 2.0 series models do not support directly uploading reference images or videos that contain real human faces. ModelArk provides the following solutions to help you create videos with portrait assets. For details, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2608626">Create portrait videos with Dreamina Seedance models</a>.</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning">Supports using original outputs containing human faces from certain models as input assets</div>
+
+
+* <div data-tips="true" data-tips-type="warning">Supports using preset digital characters as input assets</div>
+
+
+* <div data-tips="true" data-tips-type="warning">Supports using authorized real\-person assets as input assets</div>
+
+
+
+
+**Text** `object`
+
+The input text information for the model to generate a video.
+
+
+**type** `string` `Required`  |  Content type
+
+`content.type`
+
+The type of the input content. In this case, set the value to `text`.
+
+
+
+**text** `string` `Required`  |  Text prompt
+
+`content.text`
+
+Text prompt input to the model, describing the expected generated video.
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Tip</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip"><strong>Supported prompt languages</strong> : All models support English prompts.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Dreamina Seedance 2.5</strong> additionally supports Spanish, Indonesian, Portuguese, Japanese, Malay, Thai, Arabic, Vietnamese, and Korean.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Dreamina Seedance 2.0 series</strong> additionally supports Spanish, Indonesian, Portuguese, and Japanese.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Recommended prompt length: no more than 500 Chinese characters or 1,000 English words. Lengthy text will lead to scattered information, and the model may ignore details and only focus on key points, resulting in missing elements in the generated video.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">See <a href="https://docs.byteplus.com/en/docs/ModelArk/2222480">Dreamina Seedance 2.0 series prompt guide</a> for more tips on using prompts.</div>
+
+
+
+
+
+**Image** `object`
+
+The input image information for the model to generate a video.
+
+
+**type** `string` `Required`  |  Content type
+
+`content.type`
+
+The type of the input content. In this case, set the value to `image_url`. Supports image URL or image Base64 encoding.
+
+
+
+**image_url** `object` `Required`  |  Image object
+
+`content.image_url`
+
+The input image object for the model.
+
+
+**url** `string` `Required`  |  Image source
+
+`content.image_url.url`
+
+Accepts image URL, Base64\-encoded image, or asset ID.
+
+
+* URL: Enter the publicly accessible URL of the image.
+
+* Base64 encoding: Convert the local file to a Base64\-encoded string, then submit to the model. Follow the format: `data:image/<image format>;base64,<Base64 encoding>`. Note that `<image format>` must be lowercase, for example `data:image/png;base64,{base64_image}`.
+
+* Asset ID: The URI of the digital character used for video generation. It follows the format `asset://<ASSET_ID>` and can be obtained from the [Digital characters library](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-0-260128).
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Requirements for uploading a single image</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip">Format: <code>jpeg</code>, <code>png</code>, <code>webp</code>, <code>bmp</code>, <code>tiff</code>, or <code>gif</code>. Dreamina Seedance 1.5 pro and later models also support <code>heic</code> and <code>heif</code>.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Aspect ratio (width/height): <code>[0.4, 2.5]</code></div>
+
+
+* <div data-tips="true" data-tips-type="tip">Width and height (px): <code>[300, 6000]</code></div>
+
+
+* <div data-tips="true" data-tips-type="tip">Size:</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Single image must be less than 30 MB</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Request body size does not exceed 64 MB.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Do not use Base64 encoding for large files.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Number of images:</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Image\-to\-video (first frame): 1</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Image\-to\-video (first and last frames): 2</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Dreamina Seedance 2.5 multimodal reference\-to\-video: 1–30 images</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Seedance 2.0 series multimodal\-reference to video: 1–9 images</div>
+
+
+
+
+
+**role** `string` `Required under certain conditions`  |  Role/purpose
+
+`content.role`
+
+The location or purpose of the image.
+
+
+Image\-to\-video (first frame)
+
+
+* **Supported models:**  All models
+
+* **Values** : You need to pass in one **image_url** object, with the role field set to `first_frame` or leave **role** blank.
+
+
+
+Image\-to\-video (first and last frames)
+
+
+* **Supported models:**  Dreamina Seedance 2.5, Dreamina Seedance 2.0 series, Dreamina Seedance 1.5 pro, and Dreamina Seedance 1.0 pro.
+
+* **Values** : Two **image_url** objects must be provided, and the role field is required.
+
+   * Role of the first frame: `first_frame`
+
+   * Role of the last frame: `last_frame`
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Tip</div>
+
+
+<div data-tips="true" data-tips-type="tip">The first\-frame and last\-frame images can be identical.</div>
+
+
+<div data-tips="true" data-tips-type="tip">If the aspect ratios of the first and last frame images are inconsistent, the first frame image takes precedence, and the last frame image will be automatically cropped to fit.</div>
+
+
+
+
+Image\-to\-video (reference images)
+
+
+* **Supported models:**  Dreamina Seedance 2.5 (1–30 images) and Dreamina Seedance 2.0 series (1–9 images)
+
+* **Values** : Required. The **role** field for each reference image must be set to `reference_image`
+
+
+&nbsp;
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Note</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning"><strong>Image\-to\-video (first frame)</strong> , <strong>image\-to\-video (first and last frames)</strong> , and <strong>multimodal reference\-to\-video</strong> (including reference images, videos, and audio) are mutually exclusive scenarios and <strong>cannot be mixed</strong> .</div>
+
+
+* <div data-tips="true" data-tips-type="warning">For multimodal reference\-based video generation, you can specify reference images as the first and/or last frame in the prompt to indirectly achieve a "first/last frame + multimodal references" effect. If you need to strictly ensure the first and last frames exactly match the specified images, use <strong>image to video \- first and last frames</strong> instead (set <code>role</code> to <code>first_frame</code> or <code>last_frame</code>).</div>
+
+
+
+
+
+**Video** `object`
+
+Reference video provided to the model. Dreamina Seedance 2.5 and Dreamina Seedance 2.0 series models support video input.
+
+ModelArk trusts face\-containing videos generated by these models. You can use the **original face\-containing videos generated by these models under your account within the past 30 days** as input assets. For details, see [Trust model outputs as input assets](https://docs.byteplus.com/en/docs/ModelArk/2608626#trust-model-output).
+
+
+**type** `string` `Required`  |  Content type
+
+`content.type`
+
+Type of the input; in this case, set to `video_url`.
+
+
+
+**video_url** `object` `Required`  |  Video object
+
+`content.video_url`
+
+The video object provided to the model.
+
+
+**url** `string` `Required`  |  Video source
+
+`content.video_url.url`
+
+Video URL or asset ID.
+
+
+* Video URL: Enter the public URL of the video.
+
+* Asset ID: The URI of the digital character used for video generation. It follows the format `asset://<ASSET_ID>` and can be obtained from the [digital characters library](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-0-260128).
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Video input requirements</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip">Video format: <code>mp4</code>, <code>mov</code>. Supported encoding formats are listed in the table below.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Resolution: <code>480p</code>, <code>720p</code>, <code>1080p</code>, <code>4k</code></div>
+
+
+* <div data-tips="true" data-tips-type="tip">Duration:</div>
+
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Dreamina Seedance 2.5:</strong> Each video must be 2–30 seconds long. You can submit up to 10 reference videos with a total duration of no more than 30 seconds.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Dreamina Seedance 2.0 series:</strong> Each video must be 2–15 seconds long. You can submit up to 3 reference videos with a total duration of no more than 15 seconds.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Dimensions:</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Aspect ratio (width/height): <code>[0.4, 2.5]</code></div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Width and height (px): <code>[300, 6000]</code></div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Total pixels: <code>[640×640=409600, 3326×2494=8295044]</code>, that is, the product of width and height must fall in the range <code>[409600, 8295044]</code>.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Size: Each video must not exceed 200 MB.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Frame rate (FPS): <code>[24, 60]</code></div>
+
+
+
+
+|Container Format |Common Extension Name |**MIME** |Supported Encodings |
 |---|---|---|---|
-|480p |16:9 |864×480 |864×496 |
-|^^|4:3 |736×544 |752×560 |
-|^^|1:1 |640×640 |640×640 |
-|^^|3:4 |544×736 |560×752 |
-|^^|9:16 |480×864 |496×864 |
-|^^|21:9 |960×416 |992×432 |
-|720p |16:9 |1248×704 |1280×720 |
-|^^|4:3 |1120×832 |1112×834 |
-|^^|1:1 |960×960 |960×960 |
-|^^|3:4 |832×1120 |834×1112 |
-|^^|9:16 |704×1248 |720×1280 |
-|^^|21:9 |1504×640 |1470×630 |
-|1080p |16:9 |1920×1088 |1920×1080 |\
-|> 1.0 lite 参考图场景不支持，seedance 2.0 fast 不支持 | | | |
-|^^|4:3 |1664×1248 |1664×1248 |
-|^^|1:1 |1440×1440 |1440×1440 |
-|^^|3:4 |1248×1664 |1248×1664 |
-|^^|9:16 |1088×1920 |1080×1920 |
-|^^|21:9 |2176×928 |2206×946 |
+|MP4 |.mp4 |video/mp4 |Video: H.264/AVC, H.265/HEVC<br><br>Audio: AAC, MP3 |
+|QuickTime |.mov |video/quicktime |Video: H.264/AVC, H.265/HEVC<br><br>Audio: AAC, MP3 |
 
 
 
 
----
+
+**role** `string` `conditionally required`  |  Role/purpose
+
+`content.role`
+
+Position or purpose of the video. Fixed to `reference_video`.
+
+**Supported models:**  Dreamina Seedance 2.5 and Dreamina Seedance 2.0 series.
 
 
-**duration** `integer` `默认值 5` 
-> duration 和 frames 二选一即可，frames 的优先级高于 duration。如果您希望生成整数秒的视频，建议指定 duration。
-
-生成视频时长，仅支持整数，单位：秒。
-
-* seedance 1.0 pro、seedance 1.0 pro fast、seedance 1.0 lite: [2, 12] s。
-* seedance 1.5 pro: [4,12] 或设置为`-1`
-* seedance 2.0 & 2.0 fast:  [4,15] 或设置为`-1`
-
-:::warning
-seedance 2.0 & 2.0 fast、seedance 1.5 pro 支持两种配置方法
-
-   * 指定具体时长：支持有效范围内的任一整数。
-   * 智能指定：设置为 `-1`，表示由模型在有效范围内自主选择合适的视频长度（整数秒）。实际生成视频的时长可通过 [查询视频生成任务 API](https://www.volcengine.com/docs/82379/1521309?lang=zh) 返回的 **duration** 字段获取。注意视频时长与计费相关，请谨慎设置。
 
 
-:::
----
+**Audio** `object`
+
+Audio provided to the model. Dreamina Seedance 2.5 and Dreamina Seedance 2.0 series models support audio input.
 
 
-**frames** `integer` 
-> seedance 2.0 & 2.0 fast、seedance 1.5 pro 暂不支持
-> duration 和 frames 二选一即可，frames 的优先级高于 duration。如果您希望生成小数秒的视频，建议指定 frames。
+**type** `string` `Required`  |  Content type
 
-生成视频的帧数。通过指定帧数，可以灵活控制生成视频的长度，生成小数秒的视频。
-由于 frames 的取值限制，仅能支持有限小数秒，您需要根据公式推算最接近的帧数。
+`content.type`
 
-* 计算公式：帧数 = 时长 × 帧率（24）。
-* 取值范围：支持 [29, 289] 区间内所有满足 `25 + 4n` 格式的整数值，其中 n 为正整数。
-
-例如：假设需要生成 2.4 秒的视频，帧数=2.4×24=57.6。由于 frames 不支持 57.6，此时您只能选择一个最接近的值。根据 25+4n 计算出最接近的帧数为 57，实际生成的视频为 57/24=2.375 秒。
-
----
+Type of the input; in this case, set to `audio_url`. Supports audio URL or Base64\-encoded audio string.
 
 
-**seed** `integer` `默认值 -1` 
-种子整数，用于控制生成内容的随机性。
-取值范围：[\-1, 2^32\-1]之间的整数。
-:::warning
 
-* 相同的请求下，模型收到不同的seed值，如：不指定seed值或令seed取值为\-1（会使用随机数替代）、或手动变更seed值，将生成不同的结果。
-* 相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。
+**audio_url** `object` `Required`  |  Audio object
 
+`content.audio_url`
 
-:::
----
+Audio object provided to the model.
 
 
-**camera_fixed** `boolean` `默认值 false` 
-> 参考图场景不支持，seedance 2.0 & 2.0 fast 暂不支持
+**url** `string` `Required`  |  Audio source
 
-是否固定摄像头。枚举值：
+`content.audio_url.url`
 
-* true：固定摄像头。平台会在用户提示词中追加固定摄像头，实际效果不保证。
-* false：不固定摄像头。
+URL, Base64\-encoded string or asset ID of the audio.
 
 
----
+* Audio URL: The publicly accessible URL of the audio.
+
+* Base64 encoding: Convert the local file to a Base64\-encoded string, then submit it to the model. Follow the format: `data:audio/<audio format>;base64,<Base64 encoding>`.
+
+   `<audio format>` must be lowercase, for example, `data:audio/wav;base64,{base64_audio}`.
+
+* Asset ID: The URI of the digital character used for video generation. It follows the format `asset://<ASSET_ID>` and can be obtained from the [digital character library](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-0-260128).
 
 
-**watermark** `boolean` `默认值 false` 
-生成视频是否包含水印。枚举值：
-
-* false：不含水印。
-* true：含有水印。
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Audio input requirements</div>
 
 
----
+
+* <div data-tips="true" data-tips-type="tip">Format: <code>wav</code>, <code>mp3</code></div>
 
 
-<span id="oCS1tULg"></span>
-## 响应参数
-> 跳转 [请求参数](#RxN8G2nH)
+* <div data-tips="true" data-tips-type="tip">Duration:</div>
 
-**id ** `string`
-视频生成任务 ID 。仅保存 7 天（从 **created at** 时间戳开始计算），超时后将自动清除。
 
-* 设置`"draft": true`，为 Draft 视频任务 ID。
-* 设置 `"draft": false`，为正常视频任务 ID。
+   * <div data-tips="true" data-tips-type="tip"><strong>Dreamina Seedance 2.5:</strong> Each audio clip must be 2–30 seconds long. You can submit up to 10 reference audio clips with a total duration of no more than 30 seconds.</div>
 
-创建视频生成任务为异步接口，获取 ID 后，需要通过 [查询视频生成任务 API](https://www.volcengine.com/docs/82379/1521309) 来查询视频生成任务的状态。任务成功后，会输出生成视频的`video_url`。
+
+   * <div data-tips="true" data-tips-type="tip"><strong>Dreamina Seedance 2.0 series:</strong> Each audio clip must be 2–15 seconds long. You can submit up to 3 reference audio clips with a total duration of no more than 15 seconds.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Size:</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Each audio file must not exceed 15 MB.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">The request body size must not exceed 64 MB.</div>
+
+
+   * <div data-tips="true" data-tips-type="tip">Do not use Base64 encoding for large files.</div>
+
+
+
+
+
+**role** `string` `conditionally required`  |  Role/purpose
+
+`content.role`
+
+Position or purpose of the audio. Fixed to `reference_audio`.
+
+**Supported models:** 
+
+
+* **Dreamina Seedance 2.5:**  Supports audio\-only input and combining audio with images or videos.
+
+* **Dreamina Seedance 2.0 series:**  Audio\-only input is not supported; include at least one reference image or video.
+
+
+
+
+**Sample** `object`
+
+Generate a final video based on the sample task ID. This feature is supported only by **Dreamina Seedance 1.5 pro** . To learn more about how to use the draft feature and review important notes, see [Draft mode](https://docs.byteplus.com/en/docs/ModelArk/2298881#5acd28c8).
+
+
+**type** `string` `Required`  |  Content type
+
+`content.type`
+
+Type of input content. In this case, set it to `draft_task`.
+
+
+
+**draft_task** `object` `Required`  |  Draft task object
+
+`content.draft_task`
+
+Draft task input to the model.
+
+
+**id** `string` `Required`  |  Draft task ID
+
+`content.draft_task.id`
+
+Draft task ID. ModelArk will automatically reuse the user inputs used for the draft video ( **model** , content. **text** , content. **image_url** , **generate_audio** , **seed** , **ratio** , **duration** , and **camera_fixed** ) to generate the final video. Other parameters can be specified manually. If not specified, the default values of this model will be used.
+
+Two steps are required:
+
+
+1. Call this API to generate a draft video.
+
+2. If you confirm that the draft video meets expectations, you can call this API to generate the final video based on the draft video task ID returned in Step 1.
+
+
+See [Draft mode](https://docs.byteplus.com/en/docs/ModelArk/2298881#5acd28c8) for detailed instructions.
+
+
+
+&nbsp;
+
+**Supported models:** 
+
+
+* `Dreamina Seedance 1.5 pro`
+
+
+
+
+**callback_url** `string`  |  Callback URL
+
+Fill in the callback notification address for the result of this generation task. When the status of the video generation task changes, ModelArk will send a POST request to this address.
+
+The callback request content structure is consistent with the response body of the [Retrieve a video generation task API](https://docs.byteplus.com/en/docs/ModelArk/1521309).
+
+The status returned by the callback can be one of the following values:
+
+
+* `queued`: In queue.
+
+* `running`: Task is running.
+
+* `succeeded`: Task succeeded. If sending fails, that is, no successful delivery confirmation is received within 5 seconds, the callback is retried three times.
+
+* `failed`: Task failed. If sending fails, that is, no successful delivery confirmation is received within 5 seconds, the callback is retried three times.
+
+* `expired`: Task timed out, that is, the task has been in the `running` or `queued` state for longer than the expiration time. You can set the expiration time via `execution_expires_after`.
+
+
+
+**return_last_frame** `boolean` `Default value: false`  |  Return last frame
+
+
+* `true`: Return the last frame image of the generated video in PNG format. After setting it to `true`, you can get the last frame image via the [Retrieve a video generation task API](https://docs.byteplus.com/en/docs/ModelArk/1521309). Its pixel dimensions are consistent with the generated video, and it has no watermark.
+
+* `false`: Do not return the last frame image of the generated video.
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Tip</div>
+
+
+<div data-tips="true" data-tips-type="tip">You can use this parameter to generate multiple consecutive videos. Use the last frame of the previously generated video as the first frame of the next video task to quickly generate a sequence of videos. For an example, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2298881#141cf7fa">Generate multiple consecutive videos</a>.</div>
+
+
+
+
+**service_tier** `string` `Default value: default`  |  Service tier
+
+> Modifying the service tier of a submitted task is not supported.
+
+
+Specify the service tier type for processing this request. Valid values:
+
+
+* `default`: Online inference mode, with lower RPM and concurrency quotas (see [Model list](https://docs.byteplus.com/en/docs/ModelArk/1330310)), suitable for scenarios with high requirements for inference efficiency.
+
+* `flex`: Offline inference mode, with higher TPD quota (see [Model list](https://docs.byteplus.com/en/docs/ModelArk/1330310)), priced at 50% of online inference, suitable for scenarios with high tolerance for inference latency. Dreamina Seedance 2.5 and Dreamina Seedance 2.0 series models are not currently supported.
+
+
+
+**execution_expires_after** `integer` `Default value: 172800`  |  Task expiration threshold
+
+Task timeout threshold. Specifies the expiration time of the task after submission (unit: second), calculated from the **created at** timestamp. The default value is 172800 seconds, which is 48 hours. Value range: `[3600, 259200]`.
+
+No matter which **service_tier** you use, it is recommended to set an appropriate timeout according to your business scenario. After this time, the task will be automatically terminated and marked as `expired` status.
+
+
+
+**generate_audio** `boolean` `Default: true`  |  Generate audio
+
+Controls whether the generated video includes sound synchronized with the footage.
+
+
+* `true`: The video output by the model includes synchronized audio. The model will automatically generate matching human voice, sound effects and background music based on the text prompt and visual content. It is recommended to put dialogue content in double quotes to optimize the audio generation effect. For example: The man stopped the woman and said: "Remember, you can't point at the moon with your finger in the future."
+
+* `false`: The video output by the model is a silent video.
+
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Note</div>
+
+
+<div data-tips="true" data-tips-type="warning">All generated videos with audio are mono, regardless of the number of channels of the input audio.</div>
+
+
+**Supported models:** 
+
+
+* `Dreamina Seedance 2.5`
+
+* `Dreamina Seedance 2.0 series`
+
+* `Dreamina Seedance 1.5 pro`
+
+
+
+**draft** `boolean` `Default: false`  |  Draft mode
+
+> Only supported by Dreamina Seedance 1.5 pro.
+
+
+Controls whether to enable draft mode. See [Draft mode](https://docs.byteplus.com/en/docs/ModelArk/2298881#5acd28c8) for detailed instructions and notes.
+
+
+* `true`: Enable draft mode, generate a preview video to quickly verify whether the scene structure, shot scheduling, subject motion match the prompt intent as expected. It consumes fewer tokens than normal videos, so the usage cost is lower.
+
+* `false`: Disable draft mode and generate a video normally.
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Tip</div>
+
+
+<div data-tips="true" data-tips-type="tip">After enabling draft mode, the draft video will be generated in 480p resolution (using other resolutions will cause an error). The last frame return function and offline inference function are not supported.</div>
+
+
+
+
+**safety_identifier** `string`  |  End\-user identifier
+
+Unique identifier of end users, used to help the platform detect users in your application who may violate the ModelArk usage policy. This identifier is an English string, which must be fixed and unique for a single user, and the length cannot exceed 64 characters.
+
+It is recommended to pass in a string generated by hashing the username, user ID or email address to avoid leaking user privacy information.
+
+
+
+**priority** `integer` `Default 0`  |  Execution priority
+
+> Supported by Dreamina Seedance 2.5 and Dreamina Seedance 2.0 series.
+
+
+Sets the execution priority of the current request and determines its position in the queue.
+
+Value range: `[0, 9]`.
+
+A larger value indicates a higher priority.
+
+By default, requests are executed in **FIFO** (First In, First Out) order. After you set a higher priority, the request is inserted before all lower\-priority requests under the same **Endpoint** .
+
+**Example** :
+
+Assume an Endpoint currently has three queued tasks (`status=queued`), all with the default priority of 0.
+
+```text
+Queue: [Task A: priority=0] → [Task B: priority=0] → [Task C: priority=0]
+```
+
+
+If you submit a new request with `priority=5`, the request is moved directly to the front of the queue:
+
+```text
+Queue: [New request: priority=5] → [Task A: priority=0] → [Task B: priority=0] → [Task C: priority=0]
+```
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Note</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip">Requests with the same priority are still ordered by FIFO.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Priority affects only the queue order. It does not interrupt tasks that are already running (status = <code>running</code>).</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Priority takes effect only within the same Endpoint and does not affect other Endpoints.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Offline inference mode (<code>service_tier=flex</code>) does not support priority configuration.</div>
+
+
+
+
+**resolution** `string`  |  Video resolution
+
+Video resolution.
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Tip</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip">Compared with standard 8\-bit video, Seedance 2.0 4K output uses 10\-bit encoding, preserving richer color gradations and smoother tonal transitions. This makes it suitable for professional video production and HDR content.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">4K videos are encoded in H.265 (HEVC). Some players and browsers may not support direct playback. For details, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2291680#4k_player">4K player compatibility</a>.</div>
+
+
+
+**Supported models and values:** 
+
+
+* **Dreamina Seedance 2.5:**  Default `720p`; supports `480p` and `720p`.
+
+* **Dreamina Seedance 2.0:**  Default `720p`; supports `480p`, `720p`, `1080p`, and `4k`.
+
+* **Dreamina Seedance 2.0 fast:**  Default `720p`; supports `480p` and `720p`.
+
+* **Dreamina Seedance 2.0 mini:**  Default `720p`; supports `480p` and `720p`.
+
+* **Dreamina Seedance 1.5 pro:**  Default `720p`; supports `480p`, `720p`, and `1080p`.
+
+* **Dreamina Seedance 1.0 pro:**  Default `1080p`; supports `480p`, `720p`, and `1080p`.
+
+* **Dreamina Seedance 1.0 pro fast:**  Default `1080p`; supports `480p`, `720p`, and `1080p`.
+
+
+
+**ratio** `string`  |  Video aspect ratio
+
+Aspect ratio of the generated video.
+
+
+* Supported values: `16:9`, `4:3`, `1:1`, `3:4`, `9:16`, `21:9`, and `adaptive`. The `adaptive` value automatically selects an aspect ratio based on the task type and input.
+
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Note</div>
+
+
+<div data-tips="true" data-tips-type="warning">For Dreamina Seedance 2.5 video editing, video extension, first\-frame image\-to\-video, and first\-and\-last\-frame image\-to\-video tasks, <code>ratio</code> only supports <code>adaptive</code>. You cannot specify another aspect ratio. For task definitions, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2607688#2.5_task_type_intro">Task\-specific constraints</a>.</div>
+
+
+
+Value restrictions and `adaptive` behavior by model
+
+
+<span aceTableMode="list" aceTableWidth="1,1.5,3,3,2.5,2.5"></span>
+|Task type | |Dreamina Seedance 2.5 |Dreamina Seedance 2.0 series |Dreamina Seedance 1.5 pro |Dreamina Seedance 1.0 series |
+|---|---|---|---|---|---|
+|Text\-to\-video | |Supports specifying an available aspect ratio or allowing the model to select one based on the prompt<br><br>> Supports `adaptive` or a specified aspect ratio |Supports specifying an available aspect ratio or allowing the model to select one based on the prompt<br><br>> Supports `adaptive` or a specified aspect ratio |Supports specifying an available aspect ratio or allowing the model to select one based on the prompt<br><br>> Supports `adaptive` or a specified aspect ratio |Only supports specifying an available aspect ratio<br><br>> Does not support `adaptive` |
+|First\-frame or first\-and\-last\-frame image\-to\-video | |**Automatically preserves the aspect ratio of the first\-frame image**<br><br>> Defaults to and only supports `adaptive` |Supports specifying an available aspect ratio or allowing the model to select one based on the first\-frame image<br><br>> Supports `adaptive` or a specified aspect ratio |Supports specifying an available aspect ratio or allowing the model to select one based on the first\-frame image<br><br>> Supports `adaptive` or a specified aspect ratio |Supports specifying an available aspect ratio or allowing the model to select one based on the first\-frame image<br><br>> Supports `adaptive` or a specified aspect ratio |
+|Multimodal video generation |Video editing<br><br>Video extension |**Automatically preserves the aspect ratio of the input video; you cannot specify another ratio**<br><br>> Defaults to and only supports `adaptive` |Supports specifying an available aspect ratio or allowing the model to select one based on the input video<br><br>> Supports `adaptive` or a specified aspect ratio |— |— |
+||Reference\-to\-video |Supports specifying an available aspect ratio or allowing the model to select one based on the prompt<br><br>> Supports `adaptive` or a specified aspect ratio |Supports specifying an available aspect ratio or allowing the model to select one based on the prompt<br><br>> Supports `adaptive` or a specified aspect ratio |— |— |
+
+
+
+
+Width and height pixel values corresponding to different aspect ratios
+
+For image to video tasks, when the selected video aspect ratio is inconsistent with the aspect ratio of your uploaded image, ModelArk will crop your image, and the cropping will be centered. See [Image cropping rules](https://docs.byteplus.com/en/docs/ModelArk/2298881#f76aafc8) for detailed rules.
+
+
+<span aceTableMode="list" aceTableWidth="1,1,1,1,1,1"></span>
+|Resolution |Aspect ratio |Dreamina Seedance 2.5 |Dreamina Seedance 2.0 series |Dreamina Seedance 1.5 pro |Dreamina Seedance 1.0 series |
+|---|---|---|---|---|---|
+|480p |`16:9` |854×480 |864×496 |864×496 |864×480 |
+||`4:3` |752×560 |752×560 |752×560 |736×544 |
+||`1:1` |640×640 |640×640 |640×640 |640×640 |
+||`3:4` |560×752 |560×752 |560×752 |544×736 |
+||`9:16` |480×854 |496×864 |496×864 |480×864 |
+||`21:9` |992×432 |992×432 |992×432 |960×416 |
+|720p |`16:9` |1280×720 |1280×720 |1280×720 |1248×704 |
+||`4:3` |1112×834 |1112×834 |1112×834 |1120×832 |
+||`1:1` |960×960 |960×960 |960×960 |960×960 |
+||`3:4` |834×1112 |834×1112 |834×1112 |832×1120 |
+||`9:16` |720×1280 |720×1280 |720×1280 |704×1248 |
+||`21:9` |1470×630 |1470×630 |1470×630 |1504×640 |
+|1080p<br><br>(Seedance 2.5, Seedance 2.0 fast, and Seedance 2.0 mini are not supported) |`16:9` |— |1920×1080 |1920×1080 |1920×1088 |
+||`4:3` |— |1664×1248 |1664×1248 |1664×1248 |
+||`1:1` |— |1440×1440 |1440×1440 |1440×1440 |
+||`3:4` |— |1248×1664 |1248×1664 |1248×1664 |
+||`9:16` |— |1080×1920 |1080×1920 |1088×1920 |
+||`21:9` |— |2206×946 |2206×946 |2176×928 |
+|4k<br><br>(Only Seedance 2.0 is supported) |`16:9` |— |3840×2160 |— |— |
+||`4:3` |— |3326×2494 |— |— |
+||`1:1` |— |2880×2880 |— |— |
+||`3:4` |— |2494×3326 |— |— |
+||`9:16` |— |2160×3840 |— |— |
+||`21:9` |— |4398×1886 |— |— |
+
+
+
+&nbsp;
+
+**Supported models and defaults:** 
+
+
+* **Dreamina Seedance 2.5:**  Default `adaptive`.
+
+* **Dreamina Seedance 2.0 series:**  Default `adaptive`.
+
+* **Dreamina Seedance 1.5 pro:**  Default `adaptive`.
+
+* **Dreamina Seedance 1.0 pro:**  Defaults to `16:9` for text\-to\-video and `adaptive` for image\-to\-video.
+
+* **Dreamina Seedance 1.0 pro fast:**  Defaults to `16:9` for text\-to\-video and `adaptive` for image\-to\-video.
+
+
+
+**duration** `integer`  |  Video duration
+
+Generated video duration in seconds. Specify either `duration` or `frames`; `frames` takes precedence. To generate a whole\-second video, specify `duration`.
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Note</div>
+
+
+<div data-tips="true" data-tips-type="warning">For Dreamina Seedance 2.5 video editing tasks, <code>duration</code> only supports <code>-1</code>; you cannot specify an output duration.</div>
+
+
+<div data-tips="true" data-tips-type="warning">The input video must be 4–30 seconds long.</div>
+
+
+<div data-tips="true" data-tips-type="warning">For task definitions, see <a href="https://docs.byteplus.com/en/docs/ModelArk/2607688#2.5_task_type_intro">Task\-specific constraints</a>.</div>
+
+
+
+Behavior when `duration` is `-1`
+
+
+<span aceTableMode="list" aceTableWidth="1,2.5"></span>
+|Model |Behavior when `duration` is `-1` |
+|---|---|
+|Dreamina Seedance 2.0 series and Dreamina Seedance 1.5 pro |The model selects an appropriate whole\-second video length within the valid `duration` range. |
+|Dreamina Seedance 2.5 (video editing) |Automatically keeps the output duration approximately the same as the input duration. The output may be about 0.4 seconds shorter than the input; you cannot specify another duration. |
+|Dreamina Seedance 2.5 (other task types) |The model selects an appropriate whole\-second video length within the valid `duration` range. |
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">Returned duration</div>
+
+
+<div data-tips="true" data-tips-type="tip">The <code>duration</code> returned by the Retrieve a video generation task API is an integer approximation and may differ from the actual duration.</div>
+
+
+
+* <div data-tips="true" data-tips-type="tip">Calculation: returned <code>duration</code> = actual total frames / 24, rounded down.</div>
+
+
+* <div data-tips="true" data-tips-type="tip">Example: For a 133\-frame video, the actual duration is 133 / 24 = 5.54 seconds, while the returned <code>duration</code> is 5.</div>
+
+
+
+&nbsp;
+
+**Supported models and values:** 
+
+
+* **Dreamina Seedance 2.5:**  Default `-1`; supports `[4, 30]` or `-1`.
+
+* **Dreamina Seedance 2.0 series:**  Default `5`; supports `[4, 15]` or `-1`.
+
+* **Dreamina Seedance 1.5 pro:**  Default `5`; supports `[4, 12]` or `-1`.
+
+* **Dreamina Seedance 1.0 pro:**  Default `5`; supports `[2, 12]`.
+
+* **Dreamina Seedance 1.0 pro fast:**  Default `5`; supports `[2, 12]`.
+
+
+
+**frames** `integer`  |  Video frame count
+
+> You only need to specify either duration or frames, and frames takes precedence over duration. If you want to generate a video with fractional seconds, it is recommended to specify frames.
+
+
+Frame count of the generated video. By specifying the number of frames, you can flexibly control the length of the generated video and generate videos with fractional seconds.
+
+Due to the value limit of frames, only certain fractional seconds are supported. You need to calculate the closest number of frames according to the formula.
+
+
+* Calculation formula: Number of frames = duration × frame rate (24).
+
+* Value range: All integer values in the range `[29, 289]` that fit the format `25 + 4n` are supported, where n is a positive integer.
+
+
+Example: If you need to generate a 2.4\-second video, the number of frames = 2.4 × 24 = 57.6. However, since frames value cannot be 57.6, you can only select the closest value. The closest number of frames calculated according to 25 + 4n is 57, and the actually generated video is 57 / 24 = 2.375 seconds.
+
+**Supported models** :
+
+
+* `Dreamina Seedance 1.0 pro`
+
+* `Dreamina Seedance 1.0 pro fast`
+
+
+
+**output_format<mark><sup>new</sup></mark>** `string` `Default value: mp4`  |  Output format
+
+Output video format.
+
+
+* `mp4`: A general\-purpose format with broad compatibility and standard color precision. It can be played directly in browsers, on mobile devices, in media players, and on distribution platforms.
+
+* `mov`: A high\-color\-precision format for professional workflows. It better preserves color and brightness consistency and is suitable for color grading, keying, compositing, and other professional post\-production tasks. For video editing and extension, using MOV for both input and output is recommended.
+
+
+<div data-tips="true" data-tips-type="tip" data-tips-is-title="true">MOV playback compatibility</div>
+
+
+<div data-tips="true" data-tips-type="tip">MOV output uses H.264 video encoding, YUV 4:4:4 chroma sampling, and PCM audio encoding. Some players may not support this combination.</div>
+
+
+<div data-tips="true" data-tips-type="tip">
+|Player |macOS |Windows |
+|---|---|---|
+|IINA |✓ |✕ |
+|VLC |✓ |✓ |
+|mpv |✓ |✓ |
+|ffplay |✓ |✓ |
+</div>
+
+
+**Supported models**
+
+
+* `Dreamina Seedance 2.5`
+
+
+
+**seed** `integer` `Default value: -1`  |  Random seed
+
+Seed integer, used to control the randomness of generated content.
+
+Value range: `[-1, 2147483647]`.
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">Note</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning">For the same request, if the model receives different seed values, such as not specifying a seed value, setting the seed to \-1 (which will be replaced by a random number), or manually changing the seed value, different results will be generated.</div>
+
+
+* <div data-tips="true" data-tips-type="warning">For the same request, if the model receives the same seed value, similar results will be generated, but complete consistency is not guaranteed.</div>
+
+
+
+**Supported models:** 
+
+
+* `Dreamina Seedance 1.5 pro`
+
+* `Dreamina Seedance 1.0 pro`
+
+* `Dreamina Seedance 1.0 pro fast`
+
+
+
+**camera_fixed** `boolean` `Default value: false`  |  Fix camera
+
+> Reference\-image scenarios are not supported.
+
+
+Whether to fix the camera. Valid values:
+
+
+* `true`: Fix the camera. ModelArk will append the fixed camera instruction to the user's prompt, but the actual result is not guaranteed.
+
+* `false`: Do not fix the camera.
+
+
+**Supported models:** 
+
+
+* `Dreamina Seedance 1.5 pro`
+
+* `Dreamina Seedance 1.0 pro`
+
+* `Dreamina Seedance 1.0 pro fast`
+
+
+
+**watermark** `boolean` `Default value: false`  |  Video watermark
+
+Whether the generated video contains a watermark. Valid values:
+
+
+* `true`: An `AI Generated` watermark will be displayed in the lower right corner of the generated video.
+
+* `false`: The generated video does not contain a watermark.
+
+
+&nbsp;
+
+<span id="response-parameters"></span>
+## Response parameters
+
+
+**id** `string`  |  Task ID
+
+Video generation task ID. Stored for only 7 days (calculated from the **created at** timestamp), and will be automatically cleared after expiration.
+
+
+* When `"draft": true` is set, it is the draft video task ID.
+
+* When `"draft": false` is set, it is the normal video task ID.
+
+   The video generation task creation is an asynchronous API. After obtaining the ID, you need to query the status of the video generation task through the [Retrieve a video generation task API](https://docs.byteplus.com/en/docs/ModelArk/1521309). After the task is successful, the `video_url` of the generated video will be output.
+
+
 
 

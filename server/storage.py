@@ -28,6 +28,7 @@ UPLOAD_VIDEO_DIR = os.path.join(PROJECT_ROOT, 'upload_video')
 WORKSPACE_ASSET_DIR = os.path.join(PROJECT_ROOT, 'workspace_assets')
 DATA_URL_PATTERN = re.compile(r'^data:([^;,]+)?;base64,(.+)$', re.DOTALL)
 PNG_SIGNATURE = b'\x89PNG\r\n\x1a\n'
+REFERENCE_ASSET_PATTERN = re.compile(r'^ref_(\d+)(?:\D|$)', re.IGNORECASE)
 
 try:
     _MALLOC_TRIM = ctypes.CDLL(None).malloc_trim
@@ -349,6 +350,15 @@ def register_file(task_id, kind, path, mime_type=None, expires_at=None):
     task_db.register_asset(task_id, kind, path, mime_type, expires_at)
 
 
+def reference_asset_sort_key(asset):
+    """Sort ref_2 before ref_10 while remaining compatible with legacy names."""
+    path = asset.get('path', '') if isinstance(asset, dict) else str(asset)
+    match = REFERENCE_ASSET_PATTERN.match(os.path.basename(path))
+    if match:
+        return 0, int(match.group(1)), path
+    return 1, 0, path
+
+
 def upload_expiry(hours=24):
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
 
@@ -393,7 +403,7 @@ def clone_image_inputs(source_task_id, target_task_id):
     target_dir = task_output_dir('image', target_task_id)
     copied = 0
     inputs = [asset for asset in task_db.list_assets(source_task_id) if asset['kind'] == 'input_image']
-    inputs.sort(key=lambda asset: asset['path'])
+    inputs.sort(key=reference_asset_sort_key)
     for index, asset in enumerate(inputs):
         if not os.path.isfile(asset['path']):
             continue

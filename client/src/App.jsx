@@ -5,6 +5,8 @@ import ImageToImage from './components/ImageToImage'
 import PromptCollection from './components/PromptCollection'
 import TaskGallery from './components/TaskGallery'
 import PngInfoModal from './components/PngInfoModal'
+import ReferenceMediaModal from './components/ReferenceMediaModal'
+import SortableReferenceItem, { moveArrayItem } from './components/SortableReferenceItem'
 import CodeRainCanvas from './components/CodeRainCanvas'
 import GlassBackdrop from './components/GlassBackdrop'
 import IconButton from './components/ui/IconButton'
@@ -12,14 +14,127 @@ import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, AudioLines, CircleAlert, FileSearch } from 'lucide-react'
+import { Play, Settings, Cpu, HardDrive, Grid3X3, Grid2X2Check, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, Lock, LockOpen, ArrowLeftRight, AudioLines, CircleAlert, FileSearch } from 'lucide-react'
+import { estimateBytePlusVideoCost, formatCnyEstimate, formatWanTokens } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceState } from './lib/useWorkspaceState'
 
 axios.defaults.withCredentials = true
 
+const SEEDREAM_MIN_PIXELS = 1280 * 720
+const SEEDREAM_MAX_PIXELS = 4_624_220
+const SEEDANCE_20 = 'seedance-2.0'
+const SEEDANCE_25 = 'seedance-2.5'
+const VIDEO_MODEL_CAPABILITIES = {
+  [SEEDANCE_20]: {
+    label: 'Dreamina Seedance 2.0',
+    resolutions: ['480p', '720p', '1080p'],
+    minDuration: 4,
+    maxDuration: 15,
+    maxRefImages: 9,
+    maxRefVideos: 3,
+    maxRefAudios: 3,
+  },
+  [SEEDANCE_25]: {
+    label: 'Dreamina Seedance 2.5',
+    resolutions: ['480p', '720p'],
+    minDuration: 4,
+    maxDuration: 30,
+    maxRefImages: 30,
+    maxRefVideos: 10,
+    maxRefAudios: 10,
+  },
+}
+const SEEDREAM_SIZE_PRESETS = {
+  '1K': {
+    '1:1': [1024, 1024], '4:3': [1152, 864], '3:4': [864, 1152],
+    '16:9': [1424, 800], '9:16': [800, 1424], '3:2': [1248, 832],
+    '2:3': [832, 1248], '21:9': [1568, 672],
+  },
+  '2K': {
+    '1:1': [2048, 2048], '4:3': [2368, 1776], '3:4': [1776, 2368],
+    '16:9': [2816, 1584], '9:16': [1584, 2816], '3:2': [2496, 1664],
+    '2:3': [1664, 2496], '21:9': [3136, 1344],
+  },
+}
+
+function alignSeedreamDimension(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return value
+  return Math.max(16, Math.round(numeric / 16) * 16)
+}
+
+function formatDimensionRatio(widthValue, heightValue) {
+  const width = Number(widthValue)
+  const height = Number(heightValue)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return '--'
+  const ratio = width / height
+  return ratio >= 1 ? `${ratio.toFixed(2).replace(/\.00$/, '')}:1` : `1:${(1 / ratio).toFixed(2).replace(/\.00$/, '')}`
+}
+
+function validateSeedreamCustomSize(widthValue, heightValue) {
+  const width = Number(widthValue)
+  const height = Number(heightValue)
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return '宽度和高度必须是正整数'
+  }
+  if (width % 16 !== 0 || height % 16 !== 0) return '宽度和高度必须是 16 的倍数'
+  const pixels = width * height
+  if (pixels < SEEDREAM_MIN_PIXELS || pixels > SEEDREAM_MAX_PIXELS) {
+    return '总像素必须在 921600 到 4624220 之间'
+  }
+  const ratio = width / height
+  if (ratio < 1 / 16 || ratio > 16) return '宽高比必须在 1:16 到 16:1 之间'
+  return ''
+}
+
+function fitSeedreamSizeToReference(widthValue, heightValue) {
+  const sourceWidth = Number(widthValue)
+  const sourceHeight = Number(heightValue)
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+    return { error: '无法读取参考素材尺寸' }
+  }
+  const sourceRatio = sourceWidth / sourceHeight
+  if (sourceRatio < 1 / 16 || sourceRatio > 16) {
+    return { error: '参考素材宽高比超出 1:16 到 16:1 的范围' }
+  }
+
+  const sourceArea = sourceWidth * sourceHeight
+  const targetArea = Math.min(SEEDREAM_MAX_PIXELS, Math.max(SEEDREAM_MIN_PIXELS, sourceArea))
+  const targetScale = Math.sqrt(targetArea / sourceArea)
+  const targetWidth = sourceWidth * targetScale
+  const maxDimension = Math.ceil(Math.sqrt(SEEDREAM_MAX_PIXELS * 16) / 16) * 16
+  let best = null
+
+  for (let width = 16; width <= maxDimension; width += 16) {
+    const idealHeight = width / sourceRatio
+    const heightCandidates = new Set([
+      Math.floor(idealHeight / 16) * 16,
+      Math.round(idealHeight / 16) * 16,
+      Math.ceil(idealHeight / 16) * 16,
+    ])
+    for (const height of heightCandidates) {
+      if (height < 16 || validateSeedreamCustomSize(width, height)) continue
+      const area = width * height
+      const ratioError = Math.abs(Math.log((width / height) / sourceRatio))
+      const areaError = Math.abs(Math.log(area / targetArea))
+      const scaleError = Math.abs(Math.log(width / targetWidth))
+      const score = ratioError * 8 + areaError + scaleError * 0.02
+      if (!best || score < best.score) best = { width, height, score }
+    }
+  }
+
+  if (!best) return { error: '无法将参考素材适配到有效的输出尺寸' }
+  return {
+    width: best.width,
+    height: best.height,
+    adjusted: best.width !== sourceWidth || best.height !== sourceHeight,
+  }
+}
+
 function makeImgTab(id) {
   return {
     id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
+    customWidth: 1024, customHeight: 1024, customAspectLocked: false, customAspectRatio: 1,
     chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', watermark: false,
     loading: false, taskId: null, dbTaskId: null, taskStatus: null, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null,
   }
@@ -27,7 +142,7 @@ function makeImgTab(id) {
 
 function makeVideoTab(id) {
   return {
-    id, prompt: '', ratio: 'adaptive', duration: 5, resolution: '720p',
+    id, prompt: '', model: SEEDANCE_20, ratio: 'adaptive', duration: 5, resolution: '720p', outputFormat: 'mp4',
     fast: false, audio: true, returnLastFrame: false, mode: 'keyframe', search: false,
     firstFrame: null, lastFrame: null, refImages: [], refVideos: [], refAudios: [],
     loading: false, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0, error: null,
@@ -187,6 +302,8 @@ function App({ onLogout }) {
 
   const [showPromptCollection, setShowPromptCollection] = useState(false)
   const [showPngInfo, setShowPngInfo] = useState(false)
+  const [referenceMedia, setReferenceMedia] = useState(null)
+  const [referenceSizeIndex, setReferenceSizeIndex] = useState('')
   const [showFullEditor, setShowFullEditor] = useState(false)
   const [showEditorVault, setShowEditorVault] = useState(false)
   const [optimizingVideoPrompt, setOptimizingVideoPrompt] = useState(false)
@@ -230,6 +347,7 @@ function App({ onLogout }) {
   }, [])
 
   const [apiProvider, setApiProvider] = useState('vertex')
+  const [providerInfoReady, setProviderInfoReady] = useState(false)
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
   const [availableModels, setAvailableModels] = useState([])
 
@@ -252,6 +370,7 @@ function App({ onLogout }) {
 
   // 视频 Provider
   const [videoProvider, setVideoProvider] = useWorkspaceState('vid_provider', 'ark')
+  const [videoProviderCapabilities, setVideoProviderCapabilities] = useState({})
 
   // 视频生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
   const [videoTabs, setVideoTabs, videoWorkspace] = useWorkspaceState('vid_tabs', [makeVideoTab(1)], VIDEO_WORKSPACE_OPTIONS)
@@ -260,7 +379,56 @@ function App({ onLogout }) {
   const activeTab = videoTabs.find(t => t.id === activeVideoTabId) || videoTabs[0] || makeVideoTab(1)
 
   const updateTab = useCallback((id, updates) => {
-    setVideoTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t))
+    setVideoTabs(prev => prev.map(t => {
+      if (t.id !== id) return t
+      const resolvedUpdates = typeof updates === 'function' ? updates(t) : updates
+      return { ...t, ...resolvedUpdates }
+    }))
+  }, [setVideoTabs])
+
+  const effectiveVideoModel = videoProvider === 'ark' && activeTab.model === SEEDANCE_25
+    ? SEEDANCE_25
+    : SEEDANCE_20
+  const isSeedance25 = effectiveVideoModel === SEEDANCE_25
+  const videoCapabilities = VIDEO_MODEL_CAPABILITIES[effectiveVideoModel]
+  const videoFastAvailable = videoProviderCapabilities[videoProvider]?.fast_available !== false
+  const videoDurationOptions = Array.from(
+    { length: videoCapabilities.maxDuration - videoCapabilities.minDuration + 1 },
+    (_, index) => videoCapabilities.minDuration + index,
+  )
+  const videoRatioLocked = isSeedance25
+    && activeTab.mode === 'keyframe'
+    && Boolean(activeTab.firstFrame || activeTab.lastFrame)
+
+  const handleVideoModelChange = useCallback((model) => {
+    const nextModel = model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+    updateTab(activeTab.id, tab => {
+      const capabilities = VIDEO_MODEL_CAPABILITIES[nextModel]
+      const duration = tab.duration !== -1 && tab.duration > capabilities.maxDuration
+        ? capabilities.maxDuration
+        : tab.duration
+      const resolution = capabilities.resolutions.includes(tab.resolution) ? tab.resolution : '720p'
+      const ratio = nextModel === SEEDANCE_25
+        && tab.mode === 'keyframe'
+        && (tab.firstFrame || tab.lastFrame)
+        ? 'adaptive'
+        : tab.ratio
+      return {
+        model: nextModel,
+        duration,
+        resolution,
+        ratio,
+        fast: nextModel === SEEDANCE_25 ? false : tab.fast,
+        outputFormat: nextModel === SEEDANCE_25 && tab.outputFormat === 'mov' ? 'mov' : 'mp4',
+      }
+    })
+  }, [activeTab.id, updateTab])
+
+  const moveVideoReference = useCallback((tabId, field, fromIndex, toIndex) => {
+    setVideoTabs(prev => prev.map(tab => tab.id === tabId ? {
+      ...tab,
+      [field]: moveArrayItem(tab[field], fromIndex, toIndex),
+    } : tab))
   }, [setVideoTabs])
   const [taskGalleryRevision, setTaskGalleryRevision] = useState(0)
 
@@ -280,9 +448,150 @@ function App({ onLogout }) {
 
   const isArk = apiProvider === 'ark'
   const standardAspectRatios = ['1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
-  const arkAspectRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9']
+  const arkAspectRatios = ['auto', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', 'custom']
   const aspectRatios = isArk ? arkAspectRatios : standardAspectRatios
   const resolutions = isArk ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
+  const isCustomSeedreamSize = isArk && activeImgTab.aspectRatio === 'custom'
+  const customWidthNumber = Number(activeImgTab.customWidth)
+  const customHeightNumber = Number(activeImgTab.customHeight)
+  const customSizeValidation = validateSeedreamCustomSize(activeImgTab.customWidth, activeImgTab.customHeight)
+  const customSizeError = isCustomSeedreamSize ? customSizeValidation : ''
+  const canTransformCustomSize = isArk
+    && Number.isFinite(customWidthNumber) && customWidthNumber > 0
+    && Number.isFinite(customHeightNumber) && customHeightNumber > 0
+  const referenceSizeOptions = (activeImgTab.uploadedImages || []).map((image, index) => ({
+    index,
+    name: image.name || image.file?.name || `参考素材 ${index + 1}`,
+    width: Number(image.width),
+    height: Number(image.height),
+  })).filter(option => Number.isFinite(option.width) && option.width > 0 && Number.isFinite(option.height) && option.height > 0)
+  const referenceSizeOptionsKey = referenceSizeOptions
+    .map(option => `${option.index}:${option.width}x${option.height}`)
+    .join('|')
+  const selectedReferenceSize = referenceSizeOptions.find(option => String(option.index) === referenceSizeIndex) || null
+  const presetDimensions = isArk
+    ? SEEDREAM_SIZE_PRESETS[activeImgTab.resolution]?.[activeImgTab.aspectRatio]
+    : null
+  const presetWidth = presetDimensions?.[0]
+  const presetHeight = presetDimensions?.[1]
+  const imageSizeSummary = isCustomSeedreamSize
+    ? `${activeImgTab.customWidth}×${activeImgTab.customHeight}`
+    : `${activeImgTab.aspectRatio === 'auto' ? 'Auto' : activeImgTab.aspectRatio} · ${activeImgTab.resolution}`
+  const customSizeStatus = !isArk
+    ? '仅 Seedream 支持自定义尺寸'
+    : customSizeError
+      ? customSizeError
+      : isCustomSeedreamSize
+        ? `自定义 · ${(customWidthNumber * customHeightNumber).toLocaleString('zh-CN')} px · ${formatDimensionRatio(customWidthNumber, customHeightNumber)}`
+        : activeImgTab.aspectRatio === 'auto'
+          ? `Auto · ${activeImgTab.customWidth}×${activeImgTab.customHeight} 未启用`
+          : `预设 · ${activeImgTab.customWidth}×${activeImgTab.customHeight}`
+
+  useEffect(() => {
+    if (!providerInfoReady || !isArk || !presetWidth || !presetHeight) return
+    const ratio = presetWidth / presetHeight
+    const dimensionsMatch = customWidthNumber === presetWidth && customHeightNumber === presetHeight
+    const lockMatches = !activeImgTab.customAspectLocked
+      || Math.abs(Number(activeImgTab.customAspectRatio) - ratio) < 0.000001
+    if (dimensionsMatch && lockMatches) return
+    updateImgTab(activeImgTab.id, {
+      customWidth: presetWidth,
+      customHeight: presetHeight,
+      ...(activeImgTab.customAspectLocked ? { customAspectRatio: ratio } : {}),
+    })
+  }, [
+    activeImgTab.customAspectLocked,
+    activeImgTab.customAspectRatio,
+    activeImgTab.id,
+    customHeightNumber,
+    customWidthNumber,
+    isArk,
+    presetHeight,
+    presetWidth,
+    providerInfoReady,
+    updateImgTab,
+  ])
+
+  useEffect(() => {
+    if (!referenceSizeIndex || referenceSizeOptions.some(option => String(option.index) === referenceSizeIndex)) return
+    setReferenceSizeIndex('')
+  }, [referenceSizeIndex, referenceSizeOptionsKey])
+
+  const handleCustomDimensionChange = useCallback((dimension, rawValue) => {
+    const value = rawValue === '' ? '' : Number(rawValue)
+    const field = dimension === 'width' ? 'customWidth' : 'customHeight'
+    const pairedField = dimension === 'width' ? 'customHeight' : 'customWidth'
+    updateImgTab(activeImgTab.id, tab => {
+      const updates = { aspectRatio: 'custom', [field]: value }
+      if (!tab.customAspectLocked || !Number.isFinite(value) || value <= 0) return updates
+      const storedRatio = Number(tab.customAspectRatio)
+      const currentRatio = Number(tab.customWidth) / Number(tab.customHeight)
+      const ratio = Number.isFinite(storedRatio) && storedRatio > 0 ? storedRatio : currentRatio
+      if (!Number.isFinite(ratio) || ratio <= 0) return updates
+      updates[pairedField] = alignSeedreamDimension(dimension === 'width' ? value / ratio : value * ratio)
+      return updates
+    })
+  }, [activeImgTab.id, updateImgTab])
+
+  const handleToggleCustomAspectLock = useCallback(() => {
+    updateImgTab(activeImgTab.id, tab => {
+      if (tab.customAspectLocked) return { customAspectLocked: false }
+      const width = Number(tab.customWidth)
+      const height = Number(tab.customHeight)
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return {}
+      return { customAspectLocked: true, customAspectRatio: width / height }
+    })
+  }, [activeImgTab.id, updateImgTab])
+
+  const handleSwapCustomDimensions = useCallback(() => {
+    updateImgTab(activeImgTab.id, tab => {
+      const width = Number(tab.customWidth)
+      const height = Number(tab.customHeight)
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return {}
+      const storedRatio = Number(tab.customAspectRatio)
+      return {
+        aspectRatio: 'custom',
+        customWidth: height,
+        customHeight: width,
+        ...(tab.customAspectLocked && storedRatio > 0 ? { customAspectRatio: 1 / storedRatio } : {}),
+      }
+    })
+  }, [activeImgTab.id, updateImgTab])
+
+  const handleAlignCustomDimensions = useCallback(() => {
+    updateImgTab(activeImgTab.id, tab => {
+      const width = Number(tab.customWidth)
+      const height = Number(tab.customHeight)
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return {}
+      const alignedWidth = alignSeedreamDimension(width)
+      const storedRatio = Number(tab.customAspectRatio)
+      const alignedHeight = tab.customAspectLocked && storedRatio > 0
+        ? alignSeedreamDimension(alignedWidth / storedRatio)
+        : alignSeedreamDimension(height)
+      return { aspectRatio: 'custom', customWidth: alignedWidth, customHeight: alignedHeight }
+    })
+  }, [activeImgTab.id, updateImgTab])
+
+  const handleUseReferenceSize = useCallback((sourceIndex = referenceSizeIndex) => {
+    const source = referenceSizeOptions.find(option => String(option.index) === String(sourceIndex))
+    if (!isArk || !source) return
+    const fitted = fitSeedreamSizeToReference(source.width, source.height)
+    if (fitted.error) {
+      notify(fitted.error, 'error')
+      return
+    }
+    updateImgTab(activeImgTab.id, tab => ({
+      aspectRatio: 'custom',
+      customWidth: fitted.width,
+      customHeight: fitted.height,
+      ...(tab.customAspectLocked ? { customAspectRatio: fitted.width / fitted.height } : {}),
+    }))
+    if (fitted.adjusted) {
+      notify(`参考素材 ${source.width}×${source.height} 已适配为 ${fitted.width}×${fitted.height}`)
+    } else {
+      notify('已使用参考素材尺寸')
+    }
+  }, [activeImgTab.id, isArk, notify, referenceSizeIndex, referenceSizeOptions, updateImgTab])
 
   const handleApplyPngInfo = metadata => {
     const params = metadata?.params || {}
@@ -300,6 +609,18 @@ function App({ onLogout }) {
       const resolution = String(params.resolution).toUpperCase()
       if (resolutions.includes(resolution)) updates.resolution = resolution
       else skipped.push('分辨率')
+    }
+    const sizeMatch = String(params.size || '').match(/^(\d+)x(\d+)$/i)
+    const customWidth = params.custom_width ?? sizeMatch?.[1]
+    const customHeight = params.custom_height ?? sizeMatch?.[2]
+    if (customWidth !== undefined && customHeight !== undefined) {
+      const width = Number(customWidth)
+      const height = Number(customHeight)
+      if (Number.isInteger(width) && Number.isInteger(height)) {
+        updates.customWidth = width
+        updates.customHeight = height
+        updates.customAspectRatio = width / height
+      }
     }
     if (isArk) {
       if (params.output_format !== undefined) {
@@ -319,18 +640,25 @@ function App({ onLogout }) {
 
   // 切换 provider 或标签页时修正不兼容的参数。
   useEffect(() => {
+    if (!providerInfoReady) return
     const validResolutions = apiProvider === 'ark' ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
     const validRatios = apiProvider === 'ark' ? arkAspectRatios : standardAspectRatios
     const updates = {}
     if (!validResolutions.includes(activeImgTab.resolution)) updates.resolution = '1K'
     if (!validRatios.includes(activeImgTab.aspectRatio)) updates.aspectRatio = '1:1'
     if (Object.keys(updates).length > 0) updateImgTab(activeImgTab.id, updates)
-  }, [apiProvider, activeImgTabId])
+  }, [apiProvider, activeImgTabId, providerInfoReady])
 
   useEffect(() => {
     fetchProviderInfo()
     fetchModelInfo()
+    fetchVideoProviderInfo()
   }, [])
+
+  useEffect(() => {
+    if (videoFastAvailable || !activeTab.fast) return
+    updateTab(activeTab.id, { fast: false })
+  }, [activeTab.fast, activeTab.id, updateTab, videoFastAvailable])
 
   useEffect(() => {
     const handleEsc = (e) => { if (e.key === 'Escape') { setShowFullEditor(false); setShowEditorVault(false) } }
@@ -345,7 +673,11 @@ function App({ onLogout }) {
         setApiProvider(response.data.current_provider)
         if (response.data.current_provider !== 'ark' && response.data.current_model) setCurrentModel(response.data.current_model)
       }
-    } catch (error) { console.error('Failed to fetch provider info:', error) }
+    } catch (error) {
+      console.error('Failed to fetch provider info:', error)
+    } finally {
+      setProviderInfoReady(true)
+    }
   }
 
   const fetchModelInfo = async () => {
@@ -356,6 +688,15 @@ function App({ onLogout }) {
         setAvailableModels(response.data.available_models)
       }
     } catch (error) { console.error('Failed to fetch model info:', error) }
+  }
+
+  const fetchVideoProviderInfo = async () => {
+    try {
+      const response = await axios.get('/api/video/provider')
+      if (response.data.success) setVideoProviderCapabilities(response.data.capabilities || {})
+    } catch (error) {
+      console.error('Failed to fetch video provider info:', error)
+    }
   }
 
   const switchModel = async () => {
@@ -389,8 +730,23 @@ function App({ onLogout }) {
     const newProvider = videoProvider === 'jiekou' ? 'ark' : 'jiekou'
     try {
       const response = await axios.post('/api/video/provider', { provider: newProvider })
-      if (response.data.success) setVideoProvider(newProvider)
+      if (response.data.success) {
+        setVideoProvider(newProvider)
+        if (newProvider !== 'ark') {
+          setVideoTabs(prev => prev.map(tab => ({
+            ...tab,
+            model: SEEDANCE_20,
+            outputFormat: 'mp4',
+            duration: tab.duration !== -1 && tab.duration > 15 ? 15 : tab.duration,
+          })))
+        }
+      }
     } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
+  }
+
+  const switchVideoModel = () => {
+    if (videoProvider !== 'ark') return
+    handleVideoModelChange(effectiveVideoModel === SEEDANCE_25 ? SEEDANCE_20 : SEEDANCE_25)
   }
 
   const handleSavePrompt = async () => {
@@ -409,7 +765,22 @@ function App({ onLogout }) {
       notify('请先填写图片描述', 'error')
       return
     }
+    if (apiProvider === 'ark' && tab.aspectRatio === 'custom') {
+      const sizeError = validateSeedreamCustomSize(tab.customWidth, tab.customHeight)
+      if (sizeError) {
+        notify(sizeError, 'error')
+        return
+      }
+    }
     const requestModel = apiProvider === 'ark' ? undefined : currentModel
+    const arkRequestOptions = apiProvider === 'ark' ? {
+      output_format: tab.outputFormat || 'png',
+      watermark: Boolean(tab.watermark),
+      ...(tab.aspectRatio === 'custom' ? {
+        custom_width: Number(tab.customWidth),
+        custom_height: Number(tab.customHeight),
+      } : {}),
+    } : {}
     const revealTimer = window.setTimeout(
       () => setTaskGalleryRevision(revision => revision + 1),
       500,
@@ -419,13 +790,11 @@ function App({ onLogout }) {
       let response
       if (tab.uploadedImages.length === 0) {
         response = await axios.post('/api/generate', {
-          prompt: tab.prompt, aspect_ratio: tab.aspectRatio, resolution: tab.resolution,
+          prompt: tab.prompt, aspect_ratio: tab.aspectRatio,
+          resolution: apiProvider === 'ark' && tab.aspectRatio === 'custom' ? undefined : tab.resolution,
           use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId,
           think_level: tab.thinkLevel, provider: apiProvider, model: requestModel,
-          ...(apiProvider === 'ark' ? {
-            output_format: tab.outputFormat || 'png',
-            watermark: Boolean(tab.watermark)
-          } : {})
+          ...arkRequestOptions,
         })
       } else {
         const imageUrls = await Promise.all(tab.uploadedImages.map(async image => {
@@ -437,14 +806,12 @@ function App({ onLogout }) {
           return asset.url
         }))
         response = await axios.post('/api/generate', {
-          prompt: tab.prompt, aspect_ratio: tab.aspectRatio, resolution: tab.resolution,
+          prompt: tab.prompt, aspect_ratio: tab.aspectRatio,
+          resolution: apiProvider === 'ark' && tab.aspectRatio === 'custom' ? undefined : tab.resolution,
           use_search: tab.useSearch, enable_chat: tab.chatMode, session_id: tab.sessionId,
           think_level: tab.thinkLevel, provider: apiProvider, model: requestModel,
           image_urls: imageUrls,
-          ...(apiProvider === 'ark' ? {
-            output_format: tab.outputFormat || 'png',
-            watermark: Boolean(tab.watermark)
-          } : {})
+          ...arkRequestOptions,
         })
       }
 
@@ -478,10 +845,12 @@ function App({ onLogout }) {
     const videoUrls = tab.refVideos.filter(v => v.url && !v.uploading)
     return {
       prompt: tab.prompt,
+      model: effectiveVideoModel,
       mode: tab.mode,
       ratio: tab.ratio,
       duration: tab.duration,
       resolution: tab.resolution,
+      output_format: tab.outputFormat || 'mp4',
       fast: tab.fast,
       generate_audio: tab.audio,
       return_last_frame: tab.returnLastFrame,
@@ -507,12 +876,15 @@ function App({ onLogout }) {
         const f = files[0]
         const reader = new FileReader()
         reader.onload = ev => {
-          if (!tab.firstFrame) updateTab(tab.id, { firstFrame: { file: f, preview: ev.target.result } })
-          else if (!tab.lastFrame) updateTab(tab.id, { lastFrame: { file: f, preview: ev.target.result } })
+          const model = videoProvider === 'ark' && tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+          const modelUpdates = model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}
+          if (!tab.firstFrame) updateTab(tab.id, { firstFrame: { file: f, preview: ev.target.result }, ...modelUpdates })
+          else if (!tab.lastFrame) updateTab(tab.id, { lastFrame: { file: f, preview: ev.target.result }, ...modelUpdates })
         }
         reader.readAsDataURL(f)
       } else {
-        const remaining = 9 - tab.refImages.length
+        const model = videoProvider === 'ark' && tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+        const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefImages - tab.refImages.length
         const toProcess = files.slice(0, remaining)
         Promise.all(toProcess.map(f => new Promise(r => {
           const rd = new FileReader()
@@ -531,6 +903,23 @@ function App({ onLogout }) {
       notify('请填写视频提示词或添加参考素材', 'error')
       return
     }
+    const readyRefVideos = tab.refVideos.filter(video => video.url && !video.uploading)
+    if (tab.mode === 'keyframe' && tab.lastFrame && !tab.firstFrame) {
+      notify('设置尾帧时必须同时提供首帧', 'error')
+      return
+    }
+    if (tab.mode === 'reference') {
+      if (tab.refImages.length > videoCapabilities.maxRefImages
+        || readyRefVideos.length > videoCapabilities.maxRefVideos
+        || tab.refAudios.length > videoCapabilities.maxRefAudios) {
+        notify('参考素材数量超过当前模型上限', 'error')
+        return
+      }
+      if (!isSeedance25 && tab.refAudios.length > 0 && tab.refImages.length === 0 && readyRefVideos.length === 0) {
+        notify('Seedance 2.0 使用音频时还需要参考图片或视频', 'error')
+        return
+      }
+    }
     const revealTimer = window.setTimeout(
       () => setTaskGalleryRevision(revision => revision + 1),
       500,
@@ -541,7 +930,7 @@ function App({ onLogout }) {
       const hasFiles = Boolean(tab.firstFrame || tab.lastFrame || tab.refImages.length > 0 || tab.refAudios.length > 0)
 
       // 收集已上传的视频 URL
-      const videoUrls = tab.refVideos.filter(v => v.url && !v.uploading).map(v => v.url)
+      const videoUrls = readyRefVideos.map(v => v.url)
 
       if (hasFiles) {
         const formData = new FormData()
@@ -549,6 +938,8 @@ function App({ onLogout }) {
         formData.append('ratio', tab.ratio)
         formData.append('duration', tab.duration)
         formData.append('resolution', tab.resolution)
+        formData.append('model', effectiveVideoModel)
+        formData.append('output_format', tab.outputFormat || 'mp4')
         formData.append('fast', tab.fast)
         formData.append('generate_audio', tab.audio)
         formData.append('return_last_frame', tab.returnLastFrame)
@@ -570,21 +961,20 @@ function App({ onLogout }) {
             )
           }
         } else {
-          const refImgFetches = tab.refImages.map(img => {
-            if (img.file) { formData.append('ref_images', img.file); return null }
-            if (img.preview) return ensureFetchOk(img.preview).then(blob => formData.append('ref_images', blob, img.name || 'ref.png'))
-            return null
-          }).filter(Boolean)
-          pendingFetches.push(...refImgFetches)
-          tab.refAudios.forEach((aud, index) => {
-            if (aud.file) {
-              formData.append('ref_audios', aud.file)
-            } else if (aud.preview) {
-              pendingFetches.push(
-                ensureFetchOk(aud.preview).then(blob => formData.append('ref_audios', blob, aud.name || `audio_${index}.wav`))
-              )
-            }
-          })
+          const [resolvedRefImages, resolvedRefAudios] = await Promise.all([
+            Promise.all(tab.refImages.map(async (img, index) => {
+              if (img.file) return { blob: img.file, name: img.name || img.file.name || `ref_${index}.png` }
+              if (!img.preview) return null
+              return { blob: await ensureFetchOk(img.preview), name: img.name || `ref_${index}.png` }
+            })),
+            Promise.all(tab.refAudios.map(async (aud, index) => {
+              if (aud.file) return { blob: aud.file, name: aud.name || aud.file.name || `audio_${index}.wav` }
+              if (!aud.preview) return null
+              return { blob: await ensureFetchOk(aud.preview), name: aud.name || `audio_${index}.wav` }
+            })),
+          ])
+          resolvedRefImages.filter(Boolean).forEach(({ blob, name }) => formData.append('ref_images', blob, name))
+          resolvedRefAudios.filter(Boolean).forEach(({ blob, name }) => formData.append('ref_audios', blob, name))
         }
         if (videoUrls.length) formData.append('ref_video_urls', JSON.stringify(videoUrls))
         if (pendingFetches.length) await Promise.all(pendingFetches)
@@ -592,7 +982,8 @@ function App({ onLogout }) {
       } else {
         resp = await axios.post('/api/video/generate', {
           prompt: tab.prompt, ratio: tab.ratio, duration: tab.duration,
-          resolution: tab.resolution, fast: tab.fast, generate_audio: tab.audio,
+          resolution: tab.resolution, model: effectiveVideoModel,
+          output_format: tab.outputFormat || 'mp4', fast: tab.fast, generate_audio: tab.audio,
           return_last_frame: tab.returnLastFrame, web_search: tab.search,
           video_mode: tab.mode,
           provider: videoProvider,
@@ -714,6 +1105,9 @@ function App({ onLogout }) {
         prompt: task.prompt || '',
         aspectRatio: params.aspect_ratio || '1:1',
         resolution: params.resolution || '1K',
+        customWidth: Number(params.custom_width) || 1024,
+        customHeight: Number(params.custom_height) || 1024,
+        customAspectRatio: (Number(params.custom_width) || 1024) / (Number(params.custom_height) || 1024),
         outputFormat: params.output_format || 'png',
         watermark: Boolean(params.watermark),
         useSearch: params.use_search || false,
@@ -734,9 +1128,11 @@ function App({ onLogout }) {
       const tab = {
         ...makeVideoTab(id),
         prompt: task.prompt || '',
+        model: params.model || SEEDANCE_20,
         ratio: params.ratio || 'adaptive',
         duration: params.duration || 5,
         resolution: params.resolution || '720p',
+        outputFormat: params.output_format || 'mp4',
         fast: params.fast || false,
         audio: params.generate_audio !== false,
         returnLastFrame: params.return_last_frame || false,
@@ -746,6 +1142,7 @@ function App({ onLogout }) {
       }
       setVideoTabs([tab])
       setActiveVideoTabId(id)
+      if (task.provider === 'ark' || task.provider === 'jiekou') setVideoProvider(task.provider)
       setAppMode('video')
     }
   }
@@ -783,14 +1180,16 @@ function App({ onLogout }) {
     setShowPromptCollection(false)
   }
   const currentModelLabel = appMode === 'video'
-    ? 'Seedance 2.0'
+    ? VIDEO_MODEL_CAPABILITIES[effectiveVideoModel].label.replace('Dreamina ', '')
     : apiProvider === 'ark'
       ? 'Seedream 5.0 Pro'
       : currentModel.includes('flash') ? 'Gemini Flash 3.1' : 'Gemini Pro 3.0'
   const currentProviderLabel = appMode === 'video'
     ? (videoProvider === 'ark' ? 'Ark' : 'Jiekou')
     : apiProvider === 'vertex' ? 'Vertex AI' : apiProvider === 'ark' ? 'Ark' : 'AI Studio'
-  const canSwitchModel = appMode === 'image' && apiProvider !== 'ark' && availableModels.length > 1
+  const canSwitchModel = appMode === 'video'
+    ? videoProvider === 'ark'
+    : apiProvider !== 'ark' && availableModels.length > 1
 
   return (
     <div ref={appShellRef} className="app-shell bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative">
@@ -819,7 +1218,7 @@ function App({ onLogout }) {
           />
         </div>
         <div className="header-actions flex min-w-0 items-center gap-1.5">
-          <button onClick={canSwitchModel ? switchModel : undefined} aria-disabled={!canSwitchModel} className={`header-chip btn-base btn-outline max-w-[220px] ${canSwitchModel ? '' : 'cursor-default'}`} title={canSwitchModel ? '切换模型' : '当前模型'}>
+          <button onClick={canSwitchModel ? (appMode === 'video' ? switchVideoModel : switchModel) : undefined} aria-disabled={!canSwitchModel} className={`header-chip btn-base btn-outline max-w-[220px] ${canSwitchModel ? '' : 'cursor-default'}`} title={canSwitchModel ? '切换模型' : '当前模型'}>
             <Cpu size={14} className="text-nexus-green" />
             <span className="header-model-label truncate">{currentModelLabel}</span>
           </button>
@@ -892,7 +1291,7 @@ function App({ onLogout }) {
         <aside className="inspector-pane custom-scrollbar">
           <div className="inspector-header">
             <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />图片参数</div>
-            <span className="font-mono text-[11px] text-nexus-muted">{activeImgTab.aspectRatio} · {activeImgTab.resolution}</span>
+            <span className="font-mono text-[11px] text-nexus-muted">{imageSizeSummary}</span>
           </div>
             
             {/* GEOMETRY (宽高比) */}
@@ -903,13 +1302,110 @@ function App({ onLogout }) {
               <div className="flex-grow">
                  <select 
                    value={activeImgTab.aspectRatio} onChange={e => updateImgTab(activeImgTab.id, { aspectRatio: e.target.value })}
+                   aria-label="画幅"
                    className="field-select w-full font-mono"
                  >
                    {aspectRatios.map((ratio) => (
-                     <option key={ratio} value={ratio} className="bg-nexus-bg">{ratio}</option>
+                     <option key={ratio} value={ratio} className="bg-nexus-bg">
+                       {ratio === 'auto' ? 'Auto' : ratio === 'custom' ? '自定义尺寸' : ratio}
+                     </option>
                    ))}
                  </select>
-                 <div className="mt-2 text-xs text-nexus-muted">输出画面的宽高比例</div>
+                 <div className="custom-size-editor" data-active={isCustomSeedreamSize ? 'true' : 'false'}>
+                   <div className="custom-size-toolbar">
+                     <div className="min-w-0">
+                       <div className="text-[10px] font-semibold text-nexus-text">自定义尺寸</div>
+                       <div className="mt-0.5 truncate font-mono text-[9px] text-nexus-muted">
+                         {activeImgTab.customAspectLocked ? `LOCK · ${formatDimensionRatio(activeImgTab.customWidth, activeImgTab.customHeight)}` : 'FREE RATIO'}
+                       </div>
+                     </div>
+                     <div className="custom-size-actions">
+                       <IconButton label="交换宽高" tooltipClassName="icon-tooltip-above" onClick={handleSwapCustomDimensions} disabled={!canTransformCustomSize}>
+                         <ArrowLeftRight size={14} />
+                       </IconButton>
+                       <IconButton
+                         label={activeImgTab.customAspectLocked ? '解除宽高比锁定' : '锁定宽高比'}
+                         onClick={handleToggleCustomAspectLock}
+                         disabled={!canTransformCustomSize}
+                         aria-pressed={Boolean(activeImgTab.customAspectLocked)}
+                         className={activeImgTab.customAspectLocked ? 'btn-active' : ''}
+                         tooltipClassName="icon-tooltip-above"
+                       >
+                         {activeImgTab.customAspectLocked ? <Lock size={13} /> : <LockOpen size={13} />}
+                       </IconButton>
+                       <IconButton label="对齐到 16 px" tooltipClassName="icon-tooltip-above" onClick={handleAlignCustomDimensions} disabled={!canTransformCustomSize}>
+                         <Grid2X2Check size={14} />
+                       </IconButton>
+                     </div>
+                   </div>
+                   <div className="custom-size-reference-row">
+                     <select
+                       aria-label="参考素材尺寸"
+                       value={referenceSizeIndex}
+                       onChange={event => {
+                         const sourceIndex = event.target.value
+                         setReferenceSizeIndex(sourceIndex)
+                         if (sourceIndex) handleUseReferenceSize(sourceIndex)
+                       }}
+                       disabled={!isArk || referenceSizeOptions.length === 0}
+                       className="field-select min-w-0 font-mono"
+                     >
+                       <option value="" className="bg-nexus-bg">
+                         {activeImgTab.uploadedImages?.length > 0 ? '正在读取参考素材尺寸' : '暂无参考素材'}
+                       </option>
+                       {referenceSizeOptions.map(option => (
+                         <option key={option.index} value={String(option.index)} className="bg-nexus-bg">
+                           {option.index + 1}. {option.name} · {option.width}×{option.height}
+                         </option>
+                       ))}
+                     </select>
+                     <IconButton
+                       label="使用参考素材尺寸"
+                       tooltipClassName="icon-tooltip-above"
+                       onClick={() => handleUseReferenceSize(referenceSizeIndex)}
+                       disabled={!isArk || !selectedReferenceSize}
+                     >
+                       <ImageDown size={14} />
+                     </IconButton>
+                   </div>
+                   <div className="mt-2 grid grid-cols-2 gap-2">
+                     <label className="min-w-0">
+                       <span className="mb-1 block text-[10px] text-nexus-muted">宽度</span>
+                       <input
+                         type="number"
+                         min="16"
+                         step="16"
+                         value={activeImgTab.customWidth}
+                         onChange={event => handleCustomDimensionChange('width', event.target.value)}
+                         aria-label="自定义图片宽度"
+                         aria-describedby="custom-size-status"
+                         disabled={!isArk}
+                         className="glass-input h-9 w-full px-2 font-mono text-xs text-nexus-text-light outline-none"
+                       />
+                     </label>
+                     <label className="min-w-0">
+                       <span className="mb-1 block text-[10px] text-nexus-muted">高度</span>
+                       <input
+                         type="number"
+                         min="16"
+                         step="16"
+                         value={activeImgTab.customHeight}
+                         onChange={event => handleCustomDimensionChange('height', event.target.value)}
+                         aria-label="自定义图片高度"
+                         aria-describedby="custom-size-status"
+                         disabled={!isArk}
+                         className="glass-input h-9 w-full px-2 font-mono text-xs text-nexus-text-light outline-none"
+                       />
+                     </label>
+                   </div>
+                   <div
+                     id="custom-size-status"
+                     className={`custom-size-status ${customSizeError ? 'text-nexus-red' : isCustomSeedreamSize ? 'text-nexus-green' : 'text-nexus-muted'}`}
+                     role={customSizeError ? 'alert' : 'status'}
+                   >
+                     {customSizeStatus}
+                   </div>
+                 </div>
               </div>
             </div>
 
@@ -919,17 +1415,18 @@ function App({ onLogout }) {
                 <Settings size={14} className="text-nexus-green" /> 输出设置
               </div>
               <div className="flex flex-col justify-between flex-grow gap-2">
-                 <div className="flex items-center justify-between">
+                 {!isCustomSeedreamSize && <div className="flex items-center justify-between">
                    <span className="field-label">分辨率</span>
                    <select 
                      value={activeImgTab.resolution} onChange={e => updateImgTab(activeImgTab.id, { resolution: e.target.value })}
+                     aria-label="图片分辨率"
                      className="field-select font-mono"
                    >
                      {resolutions.map((res) => (
                        <option key={res} value={res} className="bg-nexus-bg">{res}</option>
                      ))}
                    </select>
-                 </div>
+                 </div>}
                  {isArk ? (<>
                  <div className="flex items-center justify-between">
                    <span className="field-label">格式</span>
@@ -981,6 +1478,7 @@ function App({ onLogout }) {
               <div className="flex-grow min-h-0">
                  <ImageToImage
                    uploadedImages={activeImgTab.uploadedImages}
+                   onPreview={setReferenceMedia}
                    setUploadedImages={value => updateImgTab(activeImgTab.id, tab => ({
                      uploadedImages: typeof value === 'function'
                        ? value(Array.isArray(tab.uploadedImages) ? tab.uploadedImages : [])
@@ -1083,10 +1581,29 @@ function App({ onLogout }) {
                   <Grid3X3 size={14} className="text-nexus-blue" /> 生成设置
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="field-label">模型</span>
+                    <select
+                      aria-label="视频模型"
+                      value={effectiveVideoModel}
+                      disabled={videoProvider !== 'ark'}
+                      onChange={e => handleVideoModelChange(e.target.value)}
+                      className="field-select min-w-0"
+                    >
+                      <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>
+                      {videoProvider === 'ark' && <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>}
+                    </select>
+                  </div>
                   <div className="flex items-center justify-between">
                     <span className="field-label">画幅</span>
-                    <select value={activeTab.ratio} onChange={e => updateTab(activeTab.id, { ratio: e.target.value })}
-                      className="field-select font-mono">
+                    <select
+                      aria-label="视频画幅"
+                      value={videoRatioLocked ? 'adaptive' : activeTab.ratio}
+                      disabled={videoRatioLocked}
+                      title={videoRatioLocked ? 'Seedance 2.5 首尾帧模式自动保持首帧比例' : '视频画幅'}
+                      onChange={e => updateTab(activeTab.id, { ratio: e.target.value })}
+                      className="field-select font-mono"
+                    >
                       {['adaptive','16:9','4:3','1:1','3:4','9:16','21:9'].map(r => (
                         <option key={r} value={r} className="bg-nexus-bg">{r}</option>
                       ))}
@@ -1094,8 +1611,20 @@ function App({ onLogout }) {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="field-label">模式</span>
-                    <select value={activeTab.mode} onChange={e => updateTab(activeTab.id, { mode: e.target.value })}
-                      className="field-select">
+                    <select
+                      aria-label="视频生成模式"
+                      value={activeTab.mode}
+                      onChange={e => {
+                        const mode = e.target.value
+                        updateTab(activeTab.id, tab => ({
+                          mode,
+                          ...(isSeedance25 && mode === 'keyframe' && (tab.firstFrame || tab.lastFrame)
+                            ? { ratio: 'adaptive' }
+                            : {}),
+                        }))
+                      }}
+                      className="field-select"
+                    >
                       <option value="keyframe" className="bg-nexus-bg">首尾帧</option>
                       <option value="reference" className="bg-nexus-bg">全能参考</option>
                     </select>
@@ -1115,27 +1644,45 @@ function App({ onLogout }) {
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   <div className="flex items-center justify-between">
                     <span className="field-label">分辨率</span>
-                    <select value={activeTab.resolution} onChange={e => updateTab(activeTab.id, { resolution: e.target.value })}
+                    <select aria-label="视频分辨率" value={activeTab.resolution} onChange={e => updateTab(activeTab.id, { resolution: e.target.value })}
                       className="field-select font-mono">
-                      <option value="480p" className="bg-nexus-bg">480p</option>
-                      <option value="720p" className="bg-nexus-bg">720p</option>
-                      <option value="1080p" className="bg-nexus-bg">1080p</option>
+                      {videoCapabilities.resolutions.map(resolution => (
+                        <option key={resolution} value={resolution} className="bg-nexus-bg">{resolution}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="field-label">时长</span>
-                    <select value={activeTab.duration} onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
+                    <select aria-label="视频时长" value={activeTab.duration} onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
                       className="field-select font-mono">
-                      {[4,5,6,7,8,9,10,11,12,13,14,15].map(d => (
+                      {videoDurationOptions.map(d => (
                         <option key={d} value={d} className="bg-nexus-bg">{d}s</option>
                       ))}
                       <option value={-1} className="bg-nexus-bg">Auto</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="field-label">快速模式</span>
-                    <ToggleSwitch label="快速模式" checked={activeTab.fast} onChange={fast => updateTab(activeTab.id, { fast })} />
-                  </div>
+                  {!isSeedance25 && (
+                    <div className="flex items-center justify-between">
+                      <span className="field-label" title={videoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}>
+                        快速模式{!videoFastAvailable && <span className="ml-1 text-[9px] text-nexus-muted">未配置</span>}
+                      </span>
+                      <ToggleSwitch label="快速模式" checked={activeTab.fast} disabled={!videoFastAvailable} onChange={fast => updateTab(activeTab.id, { fast })} />
+                    </div>
+                  )}
+                  {isSeedance25 && (
+                    <div className="flex items-center justify-between">
+                      <span className="field-label">格式</span>
+                      <select
+                        aria-label="视频输出格式"
+                        value={activeTab.outputFormat || 'mp4'}
+                        onChange={e => updateTab(activeTab.id, { outputFormat: e.target.value })}
+                        className="field-select font-mono"
+                      >
+                        <option value="mp4" className="bg-nexus-bg">MP4</option>
+                        <option value="mov" className="bg-nexus-bg">MOV</option>
+                      </select>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between">
                     <span className="field-label">生成音频</span>
                     <ToggleSwitch label="生成音频" checked={activeTab.audio} onChange={audio => updateTab(activeTab.id, { audio })} />
@@ -1159,9 +1706,18 @@ function App({ onLogout }) {
                     <span className="mb-1.5 text-xs text-nexus-text">首帧</span>
                     {activeTab.firstFrame ? (
                       <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
-                        <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
-                        <button aria-label="删除首帧" title="删除首帧" onClick={() => updateTab(activeTab.id, { firstFrame: null })}
-                          className="absolute right-1 top-1 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
+                        <button
+                          type="button"
+                          aria-label="打开首帧全图"
+                          title="查看全图"
+                          onClick={() => setReferenceMedia({ type: 'image', src: activeTab.firstFrame.preview, name: activeTab.firstFrame.file?.name || '首帧' })}
+                          className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                        >
+                          <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
+                          <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                        </button>
+                        <button type="button" aria-label="删除首帧" title="删除首帧" onClick={() => updateTab(activeTab.id, { firstFrame: null })}
+                          className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
                           <X size={10} />
                         </button>
                       </div>
@@ -1171,7 +1727,10 @@ function App({ onLogout }) {
                         <input aria-label="上传首帧" type="file" accept="image/*" className="hidden" onChange={e => {
                           const f = e.target.files[0]; if (!f) return
                           const reader = new FileReader()
-                          reader.onload = ev => updateTab(activeTab.id, { firstFrame: { file: f, preview: ev.target.result } })
+                          reader.onload = ev => updateTab(activeTab.id, {
+                            firstFrame: { file: f, preview: ev.target.result },
+                            ...(isSeedance25 ? { ratio: 'adaptive' } : {}),
+                          })
                           reader.readAsDataURL(f)
                         }} />
                       </label>
@@ -1181,9 +1740,18 @@ function App({ onLogout }) {
                     <span className="mb-1.5 text-xs text-nexus-text">尾帧</span>
                     {activeTab.lastFrame ? (
                       <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
-                        <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
-                        <button aria-label="删除尾帧" title="删除尾帧" onClick={() => updateTab(activeTab.id, { lastFrame: null })}
-                          className="absolute right-1 top-1 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
+                        <button
+                          type="button"
+                          aria-label="打开尾帧全图"
+                          title="查看全图"
+                          onClick={() => setReferenceMedia({ type: 'image', src: activeTab.lastFrame.preview, name: activeTab.lastFrame.file?.name || '尾帧' })}
+                          className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                        >
+                          <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
+                          <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                        </button>
+                        <button type="button" aria-label="删除尾帧" title="删除尾帧" onClick={() => updateTab(activeTab.id, { lastFrame: null })}
+                          className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
                           <X size={10} />
                         </button>
                       </div>
@@ -1193,7 +1761,10 @@ function App({ onLogout }) {
                         <input aria-label="上传尾帧" type="file" accept="image/*" className="hidden" onChange={e => {
                           const f = e.target.files[0]; if (!f) return
                           const reader = new FileReader()
-                          reader.onload = ev => updateTab(activeTab.id, { lastFrame: { file: f, preview: ev.target.result } })
+                          reader.onload = ev => updateTab(activeTab.id, {
+                            lastFrame: { file: f, preview: ev.target.result },
+                            ...(isSeedance25 ? { ratio: 'adaptive' } : {}),
+                          })
                           reader.readAsDataURL(f)
                         }} />
                       </label>
@@ -1201,25 +1772,43 @@ function App({ onLogout }) {
                   </div>
                 </div>
                 ) : (
-                <div className="flex-grow flex gap-4 overflow-x-auto">
-                  {/* REF IMAGES (max 9) */}
-                  <div className="flex flex-col min-w-[120px]">
-                    <span className="mb-1.5 text-xs text-nexus-text">图片（最多 9 个）</span>
+                <div className="grid flex-grow grid-cols-3 gap-2">
+                  {/* Reference images */}
+                  <div className="flex min-w-0 flex-col">
+                    <span className="mb-1.5 truncate text-xs text-nexus-text" title={`图片（最多 ${videoCapabilities.maxRefImages} 个）`}>图片 · {videoCapabilities.maxRefImages}</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refImages.map((img, i) => (
-                        <div key={i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0">
-                          <img src={img.preview} className="w-full h-full object-cover" alt="" />
-                          <button aria-label={`删除参考图片 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
-                            className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
+                        <SortableReferenceItem
+                          key={i}
+                          listId="video-reference-images"
+                          index={i}
+                          itemCount={activeTab.refImages.length}
+                          label="视频参考图片"
+                          onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refImages', fromIndex, toIndex)}
+                          testId={`video-reference-image-item-${i}`}
+                          className="group h-14 w-14 shrink-0 overflow-hidden rounded border border-nexus-border"
+                        >
+                          <button
+                            type="button"
+                            aria-label={`打开视频参考图片 ${i + 1}`}
+                            title="查看全图"
+                            onClick={() => setReferenceMedia({ type: 'image', src: img.preview, name: img.name || `参考图片 ${i + 1}` })}
+                            className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                          >
+                            <img src={img.preview} className="w-full h-full object-cover" alt={`视频参考图片 ${i + 1}`} />
+                            <Maximize2 size={10} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                          </button>
+                          <button type="button" aria-label={`删除参考图片 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
+                            className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
                           </button>
-                        </div>
+                        </SortableReferenceItem>
                       ))}
-                      {activeTab.refImages.length < 9 && (
+                      {activeTab.refImages.length < videoCapabilities.maxRefImages && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
                           <Plus size={14} />
                           <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={e => {
-                            const files = Array.from(e.target.files).slice(0, 9 - activeTab.refImages.length)
+                            const files = Array.from(e.target.files).slice(0, videoCapabilities.maxRefImages - activeTab.refImages.length)
                             Promise.all(files.map(f => new Promise(r => { const rd = new FileReader(); rd.onload = ev => r({ file: f, preview: ev.target.result }); rd.readAsDataURL(f) })))
                               .then(items => updateTab(activeTab.id, { refImages: [...activeTab.refImages, ...items] }))
                           }} />
@@ -1227,40 +1816,58 @@ function App({ onLogout }) {
                       )}
                     </div>
                   </div>
-                  {/* REF VIDEOS (max 3) */}
-                  <div className="flex flex-col min-w-[100px]">
-                    <span className="mb-1.5 text-xs text-nexus-text">视频（最多 3 个）</span>
+                  {/* Reference videos */}
+                  <div className="flex min-w-0 flex-col">
+                    <span className="mb-1.5 truncate text-xs text-nexus-text" title={`视频（最多 ${videoCapabilities.maxRefVideos} 个）`}>视频 · {videoCapabilities.maxRefVideos}</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refVideos.map((vid, i) => (
-                        <div key={vid.uid || i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0 bg-[#111] flex items-center justify-center">
-                          {vid.uploading ? (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="w-10 h-1 bg-[#333] rounded overflow-hidden">
-                                <div className="h-full bg-nexus-green transition-all" style={{ width: `${vid.progress || 0}%` }}></div>
+                        <SortableReferenceItem
+                          key={vid.uid || i}
+                          listId="video-reference-videos"
+                          index={i}
+                          itemCount={activeTab.refVideos.length}
+                          label="参考视频"
+                          onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refVideos', fromIndex, toIndex)}
+                          testId={`video-reference-video-item-${i}`}
+                          className="group flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-nexus-border bg-[#111]"
+                        >
+                          <button
+                            type="button"
+                            disabled={vid.uploading || !vid.url}
+                            aria-label={`播放参考视频 ${i + 1}`}
+                            title={vid.uploading ? '视频上传中' : '播放视频'}
+                            onClick={() => setReferenceMedia({ type: 'video', src: vid.url, name: vid.name || `参考视频 ${i + 1}` })}
+                            className="absolute inset-0 flex items-center justify-center outline-none enabled:cursor-pointer focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green disabled:cursor-default"
+                          >
+                            {vid.uploading ? (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <div className="w-10 h-1 bg-[#333] rounded overflow-hidden">
+                                  <div className="h-full bg-nexus-green transition-all" style={{ width: `${vid.progress || 0}%` }}></div>
+                                </div>
                               </div>
-                            </div>
-                          ) : vid.thumbnail ? (
-                            <img src={vid.thumbnail} className="w-full h-full object-cover" alt="" />
-                          ) : (
-                            <Film size={14} className="text-nexus-green" />
-                          )}
-                          <span className="absolute bottom-0.5 text-[8px] font-mono text-nexus-text truncate w-full text-center">{vid.name?.slice(0,6)}</span>
-                          <button aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
+                            ) : vid.thumbnail ? (
+                              <img src={vid.thumbnail} className="w-full h-full object-cover" alt={`参考视频 ${i + 1}`} />
+                            ) : (
+                              <Film size={14} className="text-nexus-green" />
+                            )}
+                            <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{vid.name?.slice(0,6)}</span>
+                          </button>
+                          <button type="button" aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
                               if (vid.url) {
                                 axios.delete('/api/upload_video', { data: { url: vid.url } }).catch(() => {})
                               }
                               updateTab(activeTab.id, { refVideos: activeTab.refVideos.filter((_, j) => j !== i) })
                             }}
-                            className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
+                            className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
                           </button>
-                        </div>
+                        </SortableReferenceItem>
                       ))}
-                      {activeTab.refVideos.length < 3 && (
+                      {activeTab.refVideos.length < videoCapabilities.maxRefVideos && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
                           <Plus size={14} />
                           <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={e => {
-                            const files = Array.from(e.target.files).slice(0, 3 - activeTab.refVideos.length)
+                            const files = Array.from(e.target.files).slice(0, videoCapabilities.maxRefVideos - activeTab.refVideos.length)
                             const items = files.map(f => ({ uid: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: f.name, url: null, thumbnail: null, progress: 0, uploading: true }))
                             const tabId = activeTab.id
                             updateTab(tabId, { refVideos: [...activeTab.refVideos, ...items] })
@@ -1273,7 +1880,16 @@ function App({ onLogout }) {
                               vidEl.preload = 'metadata'
                               vidEl.muted = true
                               vidEl.src = objectUrl
-                              vidEl.onloadeddata = () => { vidEl.currentTime = 0.1 }
+                              vidEl.onloadedmetadata = () => {
+                                const duration = Number.isFinite(vidEl.duration)
+                                  ? Math.round(vidEl.duration * 100) / 100
+                                  : null
+                                setVideoTabs(prev => prev.map(t => t.id === tabId ? {
+                                  ...t,
+                                  refVideos: t.refVideos.map(v => v.uid === uid ? { ...v, duration } : v),
+                                } : t))
+                                vidEl.currentTime = Math.min(0.1, Math.max(0, (duration || 0) / 2))
+                              }
                               vidEl.onseeked = () => {
                                 const canvas = document.createElement('canvas')
                                 canvas.width = vidEl.videoWidth
@@ -1307,25 +1923,47 @@ function App({ onLogout }) {
                       )}
                     </div>
                   </div>
-                  {/* REF AUDIOS (max 3) */}
-                  <div className="flex flex-col min-w-[100px]">
-                    <span className="mb-1.5 text-xs text-nexus-text">音频（最多 3 个）</span>
+                  {/* Reference audio */}
+                  <div className="flex min-w-0 flex-col">
+                    <span className="mb-1.5 truncate text-xs text-nexus-text" title={`音频（最多 ${videoCapabilities.maxRefAudios} 个）`}>音频 · {videoCapabilities.maxRefAudios}</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refAudios.map((aud, i) => (
-                        <div key={i} className="w-14 h-14 relative group rounded overflow-hidden border border-nexus-border shrink-0 bg-[#111] flex items-center justify-center">
-                          <AudioLines size={15} className="text-nexus-cyan" />
-                          <span className="absolute bottom-0.5 text-[8px] font-mono text-nexus-text truncate w-full text-center">{(aud.file?.name || aud.name || 'audio').slice(0,6)}</span>
-                          <button aria-label={`删除参考音频 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
-                            className="absolute right-0.5 top-0.5 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
+                        <SortableReferenceItem
+                          key={i}
+                          listId="video-reference-audios"
+                          index={i}
+                          itemCount={activeTab.refAudios.length}
+                          label="参考音频"
+                          onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refAudios', fromIndex, toIndex)}
+                          testId={`video-reference-audio-item-${i}`}
+                          className="group flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-nexus-border bg-[#111]"
+                        >
+                          <button
+                            type="button"
+                            aria-label={`播放参考音频 ${i + 1}`}
+                            title="播放音频"
+                            onClick={() => setReferenceMedia({
+                              type: 'audio',
+                              src: aud.preview || aud.url,
+                              file: aud.file,
+                              name: aud.file?.name || aud.name || `参考音频 ${i + 1}`,
+                            })}
+                            className="absolute inset-0 flex cursor-pointer items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-cyan"
+                          >
+                            <AudioLines size={15} className="text-nexus-cyan" />
+                            <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{(aud.file?.name || aud.name || 'audio').slice(0,6)}</span>
+                          </button>
+                          <button type="button" aria-label={`删除参考音频 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
+                            className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
                             <X size={8} />
                           </button>
-                        </div>
+                        </SortableReferenceItem>
                       ))}
-                      {activeTab.refAudios.length < 3 && (
+                      {activeTab.refAudios.length < videoCapabilities.maxRefAudios && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
                           <Plus size={14} />
                           <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={e => {
-                            const files = Array.from(e.target.files).slice(0, 3 - activeTab.refAudios.length)
+                            const files = Array.from(e.target.files).slice(0, videoCapabilities.maxRefAudios - activeTab.refAudios.length)
                             updateTab(activeTab.id, { refAudios: [...activeTab.refAudios, ...files.map(f => ({ file: f, name: f.name }))] })
                           }} />
                         </label>
@@ -1343,32 +1981,31 @@ function App({ onLogout }) {
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   {(() => {
-                    const hasVid = activeTab.refVideos.filter(v => v.url).length > 0
-                    const fast = activeTab.fast
-                    const res = activeTab.resolution
-                    const dur = activeTab.duration === -1 ? 8 : activeTab.duration
-                    // 像素值 (16:9 为基准，adaptive 按 16:9 估算)
-                    const pxMap = { '480p': [864, 496], '720p': [1280, 720], '1080p': [1920, 1080] }
-                    const [w, h] = pxMap[res] || pxMap['720p']
-                    const fps = 24
-                    const inputVidDur = hasVid ? 5 : 0 // 估算输入视频 5 秒
-                    const tokens = (inputVidDur + dur) * w * h * fps / 1024
-                    // 单价 (元/百万token)
-                    let unitPrice
-                    if (fast) {
-                      unitPrice = hasVid ? 22 : 37
-                    } else {
-                      if (res === '1080p') unitPrice = hasVid ? 31 : 51
-                      else unitPrice = hasVid ? 28 : 46
-                    }
-                    const price = (tokens / 1000000 * unitPrice).toFixed(2)
+                    if (videoProvider !== 'ark') return (<>
+                      <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-muted">--</div>
+                      <div className="text-xs font-mono leading-5 text-nexus-text opacity-80">仅 BytePlus Ark 支持此估算</div>
+                    </>)
+                    const estimate = estimateBytePlusVideoCost({
+                      model: effectiveVideoModel,
+                      resolution: activeTab.resolution,
+                      ratio: activeTab.ratio,
+                      duration: activeTab.duration,
+                      fast: activeTab.fast,
+                      referenceVideos: activeTab.refVideos,
+                    })
+                    const outputDuration = estimate.minimumOutputSeconds === estimate.maximumOutputSeconds
+                      ? `${estimate.minimumOutputSeconds}s`
+                      : `${estimate.minimumOutputSeconds}~${estimate.maximumOutputSeconds}s`
+                    const inputVideo = estimate.hasVideo
+                      ? `参考视频 ${estimate.inputVideoSeconds.toFixed(1).replace(/\.0$/, '')}s${estimate.inputDurationAssumed ? '（含 5s 默认值）' : ''}`
+                      : '无参考视频'
                     return (<>
-                      <div className="text-2xl font-mono text-nexus-green">¥{price}</div>
+                      <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatCnyEstimate(estimate)}</div>
                       <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
-                        <div>{fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
-                        <div>{w}×{h} · {dur}s · {fps}fps</div>
-                        <div>{hasVid ? '含参考视频' : '无参考视频'}</div>
-                        <div className="mt-1 opacity-50">≈{(tokens/10000).toFixed(1)}万 tokens</div>
+                        <div>{isSeedance25 ? 'Seedance 2.5 · 2.0 × 1.5' : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
+                        <div>{estimate.width}×{estimate.height} · {outputDuration} · {estimate.fps}fps</div>
+                        <div>{inputVideo}</div>
+                        <div className="mt-1 opacity-50">≈{formatWanTokens(estimate.minimumTokens, estimate.maximumTokens)}{estimate.ratioAssumed ? ' · Adaptive 按 16:9' : ''}</div>
                       </div>
                     </>)
                   })()}
@@ -1511,6 +2148,7 @@ function App({ onLogout }) {
         onClose={() => setShowPngInfo(false)}
         onApply={handleApplyPngInfo}
       />
+      <ReferenceMediaModal media={referenceMedia} onClose={() => setReferenceMedia(null)} />
 
       {/* 全屏 Prompt 编辑器弹窗 */}
       {ReactDOM.createPortal(

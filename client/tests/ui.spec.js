@@ -104,6 +104,10 @@ test('workspace persistence ignores server JSON key ordering', async ({ page }, 
         useSearch: false,
         resolution: '1K',
         aspectRatio: '1:1',
+        customWidth: 1024,
+        customHeight: 1024,
+        customAspectLocked: false,
+        customAspectRatio: 1,
         prompt: '',
         id: 1,
       }],
@@ -118,9 +122,11 @@ test('workspace persistence ignores server JSON key ordering', async ({ page }, 
         returnLastFrame: false,
         audio: true,
         fast: false,
+        outputFormat: 'mp4',
         resolution: '720p',
         duration: 5,
         ratio: 'adaptive',
+        model: 'seedance-2.0',
         prompt: '',
         id: 1,
       }],
@@ -131,6 +137,50 @@ test('workspace persistence ignores server JSON key ordering', async ({ page }, 
   await page.waitForTimeout(1_600)
   expect(workspacePuts.filter(key => key === 'img_tabs')).toHaveLength(0)
   expect(workspacePuts.filter(key => key === 'vid_tabs')).toHaveLength(0)
+})
+
+test('Seedance 2.5 exposes model capabilities and submits its stable alias', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Video model controls only need one browser run')
+  let submitted = null
+  await page.route('**/api/video/generate', async route => {
+    submitted = route.request().postDataJSON()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, task_id: 'remote-25', db_task_id: 2500, provider: 'ark' }),
+    })
+  })
+  await login(page)
+
+  await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '视频', exact: true }).click()
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥4.97')
+  await page.getByLabel('视频模型').selectOption('seedance-2.5')
+  await expect(page.getByText('Seedance 2.5', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥7.45')
+  await expect(page.getByLabel('视频分辨率').locator('option')).toHaveText(['480p', '720p'])
+  await expect(page.getByLabel('视频时长').locator('option[value="30"]')).toHaveText('30s')
+  await expect(page.getByLabel('视频输出格式')).toBeVisible()
+  await expect(page.getByRole('switch', { name: '快速模式' })).toHaveCount(0)
+
+  await page.getByLabel('视频画幅').selectOption('21:9')
+  await page.getByLabel('视频时长').selectOption('30')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥44.93')
+  await page.getByLabel('视频输出格式').selectOption('mov')
+  await page.getByLabel('视频提示词').fill('A continuous cinematic shot through a neon city')
+  await page.getByRole('button', { name: '生成视频' }).click()
+
+  await expect.poll(() => submitted).not.toBeNull()
+  expect(submitted.model).toBe('seedance-2.5')
+  expect(submitted.duration).toBe(30)
+  expect(submitted.resolution).toBe('720p')
+  expect(submitted.ratio).toBe('21:9')
+  expect(submitted.output_format).toBe('mov')
+
+  await page.getByLabel('视频生成模式').selectOption('reference')
+  await expect(page.getByText('图片 · 30')).toBeVisible()
+  await expect(page.getByText('视频 · 10')).toBeVisible()
+  await expect(page.getByText('音频 · 10')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('desktop-seedance-2.5.png') })
 })
 
 test('workspace adapts without horizontal overflow', async ({ page }, testInfo) => {
@@ -257,6 +307,8 @@ test('PNG Info applies reusable parameters without changing provider or model', 
   }))
   await login(page)
 
+  await expect(page.locator('.header-provider-label')).toHaveText('Ark')
+  await expect(page.locator('.header-model-label')).toHaveText('Seedream 5.0 Pro')
   const modelBefore = await page.locator('.header-model-label').textContent()
   const providerBefore = await page.locator('.header-provider-label').textContent()
   await page.getByRole('button', { name: 'PNG Info' }).click()
@@ -280,8 +332,173 @@ test('PNG Info applies reusable parameters without changing provider or model', 
   await expect(page.locator('.header-provider-label')).toHaveText(providerBefore)
 })
 
+test('Seedream supports validated custom dimensions and automatic sizing', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Seedream sizing only needs one desktop run')
+  test.setTimeout(90_000)
+  const submittedBodies = []
+  const referenceUrl = '/api/workspace/assets/img_tabs/size-reference.png'
+  await page.route(`**${referenceUrl}`, route => route.fulfill({
+    status: 200,
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600"><rect width="800" height="600" fill="#111"/></svg>',
+  }))
+  await page.route('**/api/provider', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, current_provider: 'ark' }),
+  }))
+  await page.route('**/api/model', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, current_model: 'ignored-model', available_models: [] }),
+  }))
+  await page.route('**/api/generate', route => {
+    submittedBodies.push(route.request().postDataJSON())
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, queued: true, task_id: 1200 + submittedBodies.length, status: 'pending' }),
+    })
+  })
+  await login(page, {
+    initialWorkspaceState: {
+      img_tabs: [{
+        id: 1,
+        prompt: '',
+        aspectRatio: 'custom',
+        resolution: '1K',
+        customWidth: 2048,
+        customHeight: 1024,
+        uploadedImages: [{ name: 'size-reference.png', preview: referenceUrl }],
+      }],
+    },
+  })
+
+  await page.getByLabel('图片提示词').fill('Seedream custom size validation')
+  const aspectRatio = page.getByLabel('画幅')
+  await expect(aspectRatio).toHaveValue('custom')
+  await aspectRatio.selectOption('custom')
+  await expect(page.getByLabel('图片分辨率')).toBeHidden()
+  const customWidth = page.getByLabel('自定义图片宽度')
+  const customHeight = page.getByLabel('自定义图片高度')
+  await expect(customWidth).toBeVisible()
+  await expect(customHeight).toBeVisible()
+  const referenceSizes = page.getByLabel('参考素材尺寸', { exact: true })
+  await expect(referenceSizes.locator('option')).toContainText(['正在读取参考素材尺寸', '1. size-reference.png · 800×600'])
+  await expect(referenceSizes).toHaveValue('')
+  await referenceSizes.selectOption('0')
+  await expect(customWidth).toHaveValue('1152')
+  await expect(customHeight).toHaveValue('864')
+  await customWidth.fill('512')
+  await customHeight.fill('512')
+  await expect(page.locator('.inspector-pane').getByRole('alert')).toContainText('总像素')
+  const generateButton = page.getByRole('button', { name: '生成图片' })
+  await expect(generateButton).toBeEnabled()
+  await generateButton.click()
+  expect(submittedBodies).toHaveLength(0)
+
+  await customWidth.fill('2048')
+  await customHeight.fill('1024')
+  await page.getByRole('button', { name: '交换宽高' }).click()
+  await expect(customWidth).toHaveValue('1024')
+  await expect(customHeight).toHaveValue('2048')
+  await page.getByRole('button', { name: '交换宽高' }).click()
+  await expect(customWidth).toHaveValue('2048')
+  await expect(customHeight).toHaveValue('1024')
+
+  const aspectLockButton = page.getByRole('button', { name: /宽高比/ })
+  await aspectLockButton.click()
+  await expect(aspectLockButton).toHaveAttribute('aria-pressed', 'true')
+  await customWidth.fill('1537')
+  await expect(customHeight).toHaveValue('768')
+  await expect(page.locator('.inspector-pane').getByRole('alert')).toContainText('16 的倍数')
+  await page.getByRole('button', { name: '对齐到 16 px' }).click()
+  await expect(customWidth).toHaveValue('1536')
+  await expect(customHeight).toHaveValue('768')
+  await customHeight.fill('1024')
+  await expect(customWidth).toHaveValue('2048')
+  await expect(page.locator('.inspector-header')).toContainText('2048×1024')
+  await page.locator('.inspector-pane').screenshot({ path: testInfo.outputPath('desktop-seedream-custom-size.png') })
+  await generateButton.click()
+  await expect.poll(() => submittedBodies.length).toBe(1)
+  expect(submittedBodies[0]).toMatchObject({
+    aspect_ratio: 'custom',
+    custom_width: 2048,
+    custom_height: 1024,
+  })
+  expect(submittedBodies[0]).not.toHaveProperty('resolution')
+
+  await aspectRatio.selectOption('auto')
+  await expect(customWidth).toBeVisible()
+  await expect(customHeight).toBeVisible()
+  await page.getByLabel('图片分辨率').selectOption('2K')
+  await expect(page.locator('.inspector-header')).toContainText('Auto · 2K')
+  await generateButton.click()
+  await expect.poll(() => submittedBodies.length).toBe(2)
+  expect(submittedBodies[1]).toMatchObject({ aspect_ratio: 'auto', resolution: '2K' })
+  expect(submittedBodies[1]).not.toHaveProperty('custom_width')
+  expect(submittedBodies[1]).not.toHaveProperty('custom_height')
+
+  await aspectRatio.selectOption('16:9')
+  await expect(customWidth).toHaveValue('2816')
+  await expect(customHeight).toHaveValue('1584')
+  await customWidth.fill('2800')
+  await expect(aspectRatio).toHaveValue('custom')
+  await expect(customHeight).toHaveValue('1568')
+  await expect(page.getByLabel('图片分辨率')).toBeHidden()
+})
+
+test('task navigation retries a transient network failure without UI noise', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Navigation retry only needs one desktop run')
+  const preview = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const task = {
+    id: 77,
+    type: 'image',
+    status: 'succeeded',
+    prompt: 'Navigation retry task',
+    params: { aspect_ratio: '1:1', resolution: '1K', output_format: 'png' },
+    provider: 'ark',
+    favorite: false,
+    favorite_groups: [],
+    progress: 100,
+    created_at: '2026-07-17T08:00:00+00:00',
+    result: { local_images: [preview], local_refs: [] },
+  }
+  let navigationAttempts = 0
+  await page.route('**/api/tasks?*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, tasks: [task], total: 2 }),
+  }))
+  await page.route('**/api/tasks/77', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, task }),
+  }))
+  await page.route(/\/api\/tasks\/77\/navigation(?:\?|$)/, route => {
+    navigationAttempts += 1
+    if (navigationAttempts === 1) return route.abort('connectionfailed')
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        navigation: { position: 1, total: 2, previous_id: null, next_id: 78, first_id: 77, last_id: 78 },
+      }),
+    })
+  })
+  await login(page, { mockTasks: false })
+
+  await page.getByTestId('task-gallery-card').click()
+  const modal = page.getByRole('dialog', { name: '任务详情' })
+  await expect(modal.getByText('1 / 2')).toBeVisible()
+  expect(navigationAttempts).toBe(2)
+  await expect(page.getByText('任务导航加载失败')).toHaveCount(0)
+})
+
 test('task gallery favorites persist and details open in a large modal', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Gallery interaction only needs one desktop run')
+  test.setTimeout(90_000)
   const preview = `data:image/svg+xml,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
       <rect width="800" height="1200" fill="#07110d"/>
@@ -398,7 +615,7 @@ test('task gallery favorites persist and details open in a large modal', async (
       body: JSON.stringify({ success: true, task }),
     })
   })
-  await page.route('**/api/tasks/42/file/image_0.png', route => route.fulfill({
+  await page.route('**/api/tasks/42/file/image_0.png*', route => route.fulfill({
     status: 200,
     contentType: 'image/svg+xml',
     body: decodeURIComponent(preview.split(',', 2)[1]),
@@ -415,7 +632,12 @@ test('task gallery favorites persist and details open in a large modal', async (
   await historyCard.click()
   const modal = page.getByRole('dialog', { name: '任务详情' })
   await expect(modal).toBeVisible()
+  await expect(modal.getByText('1 / 3')).toBeVisible()
   await expect(modal.getByText(task.prompt)).toBeVisible()
+  await expect(modal.getByAltText('任务输出')).toHaveAttribute(
+    'src',
+    '/api/tasks/42/file/image_0.png?png_info=1',
+  )
   await expect.poll(async () => (await modal.boundingBox()).width).toBeGreaterThan(1340)
   const modalBeforeDrag = await modal.boundingBox()
   const dragHandle = modal.getByTestId('task-detail-drag-handle')
@@ -499,6 +721,7 @@ test('code rain loading canvas renders active pixels', async ({ page }, testInfo
   test.skip(testInfo.project.name !== 'desktop', 'Canvas pixel check only needs one desktop run')
   await login(page)
 
+  const referencePreview = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
   const submittedBodies = []
   const submittedTasks = []
   await page.route('**/api/generate', async route => {
@@ -517,7 +740,7 @@ test('code rain loading canvas renders active pixels', async ({ page }, testInfo
       progress: 0,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      result: {},
+      result: { local_refs: [referencePreview] },
     })
     await new Promise(resolve => setTimeout(resolve, 250))
     await route.fulfill({
@@ -535,6 +758,15 @@ test('code rain loading canvas renders active pixels', async ({ page }, testInfo
         total: submittedTasks.length,
       }),
   }))
+  await page.route(/\/api\/tasks\/(\d+)$/, route => {
+    const taskId = Number(new URL(route.request().url()).pathname.split('/').pop())
+    const task = submittedTasks.find(item => item.id === taskId)
+    return route.fulfill({
+      status: task ? 200 : 404,
+      contentType: 'application/json',
+      body: JSON.stringify(task ? { success: true, task } : { success: false, error: '任务不存在' }),
+    })
+  })
 
   const generateButton = page.getByRole('button', { name: '生成图片' })
   await expect(generateButton).toBeEnabled()
@@ -585,6 +817,10 @@ test('code rain loading canvas renders active pixels', async ({ page }, testInfo
   if (hasWatermarkControl) expect(submittedBodies.every(body => body.watermark === true)).toBe(true)
 
   await loadingCard.screenshot({ path: testInfo.outputPath('code-rain-loading-card.png') })
+  await loadingCard.click()
+  const activeTaskModal = page.getByRole('dialog', { name: '任务详情' })
+  await expect(activeTaskModal.getByRole('button', { name: '打开参考素材 1' })).toBeVisible()
+  await activeTaskModal.getByRole('button', { name: '关闭任务详情' }).click()
 })
 
 test('video generation creates a new task on every click', async ({ page }, testInfo) => {
@@ -633,6 +869,161 @@ test('video generation creates a new task on every click', async ({ page }, test
   await expect(generateButton).toBeEnabled()
   await expect(page.getByTestId('task-gallery-card')).toHaveCount(2)
   expect(submittedBodies).toHaveLength(2)
+})
+
+test('video parameter references open image, video, and audio previews', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Reference media preview only needs one desktop run')
+  const preview = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const videoUrl = '/api/upload_video/reference.mp4'
+  const audioUrl = '/api/workspace/assets/vid_tabs/reference.wav'
+  await page.route(`**${videoUrl}`, route => route.fulfill({ status: 200, contentType: 'video/mp4', body: '' }))
+  await page.route(`**${audioUrl}`, route => route.fulfill({ status: 200, contentType: 'audio/wav', body: '' }))
+  await login(page, {
+    initialWorkspaceState: {
+      appMode: 'video',
+      vid_activeTab: 1,
+      vid_tabs: [{
+        id: 1,
+        prompt: '',
+        ratio: 'adaptive',
+        duration: 5,
+        resolution: '720p',
+        fast: false,
+        audio: true,
+        returnLastFrame: false,
+        mode: 'reference',
+        search: false,
+        firstFrame: null,
+        lastFrame: null,
+        refImages: [{ name: 'reference.png', preview }],
+        refVideos: [{ uid: 'video-1', name: 'reference.mp4', url: videoUrl, thumbnail: preview, uploading: false, progress: 100 }],
+        refAudios: [{ name: 'reference.wav', preview: audioUrl, mimeType: 'audio/wav' }],
+      }],
+    },
+  })
+
+  await page.getByRole('button', { name: '打开视频参考图片 1' }).click()
+  const imageDialog = page.getByRole('dialog', { name: '参考图片预览' })
+  await expect(imageDialog.locator('img')).toHaveAttribute('src', preview)
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('button', { name: '播放参考视频 1' }).click()
+  const videoDialog = page.getByRole('dialog', { name: '参考视频播放' })
+  await expect(videoDialog.getByTestId('reference-video-player')).toHaveAttribute('src', videoUrl)
+  await videoDialog.screenshot({ path: testInfo.outputPath('desktop-reference-video-player.png') })
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('button', { name: '播放参考音频 1' }).click()
+  const audioDialog = page.getByRole('dialog', { name: '参考音频播放' })
+  await expect(audioDialog.getByTestId('reference-audio-player')).toHaveAttribute('src', audioUrl)
+  await audioDialog.screenshot({ path: testInfo.outputPath('desktop-reference-audio-player.png') })
+  await page.keyboard.press('Escape')
+})
+
+test('reference materials can be reordered and generation preserves that order', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Reference sorting targets the desktop workspace')
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  )
+  const assets = {
+    imageFirst: '/api/workspace/assets/img_tabs/image-first.png',
+    imageSecond: '/api/workspace/assets/img_tabs/image-second.png',
+    videoImageFirst: '/test-assets/video-image-first.png',
+    videoImageSecond: '/test-assets/video-image-second.png',
+    audioFirst: '/test-assets/audio-first.wav',
+    audioSecond: '/test-assets/audio-second.wav',
+    videoFirst: '/api/upload_video/video-first.mp4',
+    videoSecond: '/api/upload_video/video-second.mp4',
+  }
+  for (const url of [assets.imageFirst, assets.imageSecond, assets.videoImageFirst, assets.videoImageSecond]) {
+    await page.route(`**${url}`, route => route.fulfill({ status: 200, contentType: 'image/png', body: png }))
+  }
+  for (const url of [assets.audioFirst, assets.audioSecond]) {
+    await page.route(`**${url}`, route => route.fulfill({ status: 200, contentType: 'audio/wav', body: 'audio' }))
+  }
+
+  let imageSubmission = null
+  let videoSubmission = ''
+  await page.route('**/api/generate', route => {
+    imageSubmission = route.request().postDataJSON()
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, queued: true, task_id: 1401, status: 'pending' }),
+    })
+  })
+  await page.route('**/api/video/generate', route => {
+    videoSubmission = route.request().postDataBuffer().toString('latin1')
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, task_id: 'video-order-1', db_task_id: 1402 }),
+    })
+  })
+  await login(page, {
+    initialWorkspaceState: {
+      appMode: 'image',
+      img_activeTab: 1,
+      img_tabs: [{
+        id: 1,
+        prompt: '',
+        uploadedImages: [
+          { name: 'image-first.png', preview: assets.imageFirst },
+          { name: 'image-second.png', preview: assets.imageSecond },
+        ],
+      }],
+      vid_activeTab: 1,
+      vid_provider: 'ark',
+      vid_tabs: [{
+        id: 1,
+        prompt: '',
+        mode: 'reference',
+        refImages: [
+          { name: 'video-image-first.png', preview: assets.videoImageFirst },
+          { name: 'video-image-second.png', preview: assets.videoImageSecond },
+        ],
+        refVideos: [
+          { uid: 'video-first', name: 'video-first.mp4', url: assets.videoFirst, uploading: false },
+          { uid: 'video-second', name: 'video-second.mp4', url: assets.videoSecond, uploading: false },
+        ],
+        refAudios: [
+          { name: 'audio-first.wav', preview: assets.audioFirst },
+          { name: 'audio-second.wav', preview: assets.audioSecond },
+        ],
+      }],
+    },
+  })
+
+  await page.getByRole('button', { name: /调整参考图片 1 顺序/ }).dragTo(page.getByTestId('image-reference-item-1'))
+  await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', assets.imageSecond)
+  await page.getByLabel('图片提示词').fill('Reference order test')
+  await page.getByRole('button', { name: '生成图片' }).click()
+  await expect.poll(() => imageSubmission?.image_urls).toEqual([assets.imageSecond, assets.imageFirst])
+
+  await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '视频', exact: true }).click()
+  await page.getByRole('button', { name: /调整视频参考图片 1 顺序/ }).dragTo(page.getByTestId('video-reference-image-item-1'))
+  await page.getByRole('button', { name: /调整参考视频 1 顺序/ }).dragTo(page.getByTestId('video-reference-video-item-1'))
+  const audioTarget = page.getByTestId('video-reference-audio-item-1')
+  await audioTarget.scrollIntoViewIfNeeded()
+  await page.getByRole('button', { name: /调整参考音频 1 顺序/ }).dragTo(audioTarget)
+
+  await page.getByRole('button', { name: '打开视频参考图片 1' }).click()
+  await expect(page.getByRole('dialog', { name: '参考图片预览' })).toContainText('video-image-second.png')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '播放参考视频 1' }).click()
+  await expect(page.getByRole('dialog', { name: '参考视频播放' })).toContainText('video-second.mp4')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '播放参考音频 1' }).click()
+  await expect(page.getByRole('dialog', { name: '参考音频播放' })).toContainText('audio-second.wav')
+  await page.keyboard.press('Escape')
+
+  await page.getByLabel('视频提示词').fill('Video reference order test')
+  await page.getByRole('button', { name: '生成视频' }).click()
+  await expect.poll(() => videoSubmission).not.toBe('')
+  expect(videoSubmission.indexOf('video-image-second.png')).toBeLessThan(videoSubmission.indexOf('video-image-first.png'))
+  expect(videoSubmission.indexOf('audio-second.wav')).toBeLessThan(videoSubmission.indexOf('audio-first.wav'))
+  expect(videoSubmission.indexOf(assets.videoSecond)).toBeLessThan(videoSubmission.indexOf(assets.videoFirst))
 })
 
 test('large reference assets persist through backend workspace state', async ({ page }, testInfo) => {
@@ -725,6 +1116,17 @@ test('large reference assets persist through backend workspace state', async ({ 
   await expect(dropZone).toHaveAttribute('data-dragging', 'false')
   await transfer.dispose()
   await expect(page.getByAltText('参考图片 1')).toBeVisible()
+  const addReferenceButton = page.getByRole('button', { name: '添加参考图片' })
+  const plusAlignment = await addReferenceButton.evaluate(button => {
+    const buttonRect = button.getBoundingClientRect()
+    const iconRect = button.querySelector('svg').getBoundingClientRect()
+    return {
+      x: Math.abs((buttonRect.left + buttonRect.width / 2) - (iconRect.left + iconRect.width / 2)),
+      y: Math.abs((buttonRect.top + buttonRect.height / 2) - (iconRect.top + iconRect.height / 2)),
+    }
+  })
+  expect(plusAlignment.x).toBeLessThanOrEqual(1)
+  expect(plusAlignment.y).toBeLessThanOrEqual(1)
 
   await expect.poll(() => submittedImageTabs?.[0]?.uploadedImages?.[0]?.preview || '')
     .toBe(workspaceAssetUrl)
@@ -733,6 +1135,14 @@ test('large reference assets persist through backend workspace state', async ({ 
   expect(workspaceUploadBytes).toBeGreaterThan(300 * 1024)
   expect(submittedStateBytes).toBeLessThan(100_000)
   await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', workspaceAssetUrl)
+
+  await page.getByRole('button', { name: '打开参考图片 1' }).click()
+  const imagePreview = page.getByRole('dialog', { name: '参考图片预览' })
+  await expect(imagePreview).toBeVisible()
+  await expect(imagePreview.locator('img')).toHaveAttribute('src', workspaceAssetUrl)
+  await imagePreview.screenshot({ path: testInfo.outputPath('desktop-parameter-image-preview.png') })
+  await page.keyboard.press('Escape')
+  await expect(imagePreview).toBeHidden()
 
   await page.getByLabel('图片提示词').fill('Reuse the uploaded workspace asset')
   await page.getByRole('button', { name: '生成图片' }).click()

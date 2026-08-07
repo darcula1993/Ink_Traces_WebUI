@@ -1,4 +1,4 @@
-from flask import Flask, Response, request, jsonify, send_file, send_from_directory, session, g, after_this_request, stream_with_context
+from flask import Flask, Response, request, jsonify, send_file, send_from_directory, session, g, after_this_request
 from flask_cors import CORS
 from werkzeug.exceptions import ClientDisconnected, RequestEntityTooLarge
 import os
@@ -112,6 +112,7 @@ BUILTIN_DEFAULT_CONFIG = {
             'api_key': '',
             'endpoint': 'https://ark.ap-southeast.bytepluses.com',
             'model': '',
+            'seedance_2_5_model': 'ep-20260807145632-xprc6',
         },
     },
     'openai': {
@@ -1407,6 +1408,10 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
 
 
 ARK_SEEDREAM_PRO_MAX_REFERENCES = 10
+ARK_SEEDREAM_PRO_MIN_PIXELS = 1280 * 720
+ARK_SEEDREAM_PRO_MAX_PIXELS = 4_624_220
+ARK_SEEDREAM_PRO_MIN_RATIO = 1 / 16
+ARK_SEEDREAM_PRO_MAX_RATIO = 16
 ARK_SEEDREAM_PRO_SIZE_MAP = {
     '1K': {
         '1:1': '1024x1024', '4:3': '1152x864', '3:4': '864x1152',
@@ -1422,7 +1427,38 @@ ARK_SEEDREAM_PRO_SIZE_MAP = {
 ARK_SEEDREAM_OUTPUT_MIMES = {'png': 'image/png', 'jpeg': 'image/jpeg'}
 
 
-def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='png', watermark=False, provider_config=None, model_id=None):
+def resolve_seedream_pro_size(aspect_ratio, resolution, custom_width=None, custom_height=None):
+    aspect_ratio = str(aspect_ratio or '1:1').strip().lower()
+    if aspect_ratio != 'custom':
+        resolution = str(resolution or '1K').strip().upper()
+        if resolution not in ARK_SEEDREAM_PRO_SIZE_MAP:
+            raise ValueError('Seedream 5.0 Pro 仅支持 1K 或 2K')
+        if aspect_ratio == 'auto':
+            return resolution
+        size = ARK_SEEDREAM_PRO_SIZE_MAP[resolution].get(aspect_ratio)
+        if not size:
+            raise ValueError(f'Seedream 5.0 Pro 不支持当前比例: {aspect_ratio}')
+        return size
+
+    try:
+        width = int(custom_width)
+        height = int(custom_height)
+    except (TypeError, ValueError):
+        raise ValueError('自定义宽度和高度必须是正整数') from None
+    if width <= 0 or height <= 0:
+        raise ValueError('自定义宽度和高度必须是正整数')
+    if width % 16 or height % 16:
+        raise ValueError('自定义宽度和高度必须是 16 的倍数')
+    pixels = width * height
+    if not ARK_SEEDREAM_PRO_MIN_PIXELS <= pixels <= ARK_SEEDREAM_PRO_MAX_PIXELS:
+        raise ValueError('自定义尺寸总像素必须在 921600 到 4624220 之间')
+    ratio = width / height
+    if not ARK_SEEDREAM_PRO_MIN_RATIO <= ratio <= ARK_SEEDREAM_PRO_MAX_RATIO:
+        raise ValueError('自定义尺寸宽高比必须在 1:16 到 16:1 之间')
+    return f'{width}x{height}'
+
+
+def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='png', watermark=False, provider_config=None, model_id=None, custom_width=None, custom_height=None):
     """调用 BytePlus Ark Seedream 5.0 Pro API 生成单张图片。"""
     ark_cfg = provider_config or API_PROVIDERS.get('ark', {})
     api_key = ark_cfg.get('api_key', '')
@@ -1433,20 +1469,20 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     resolution = str(resolution or '1K').upper()
     output_format = str(output_format or 'png').lower()
 
-    if resolution not in ARK_SEEDREAM_PRO_SIZE_MAP:
-        return jsonify({'success': False, 'error': 'Seedream 5.0 Pro 仅支持 1K 或 2K', 'error_type': 'invalid_resolution'}), 400
-    if aspect_ratio not in ARK_SEEDREAM_PRO_SIZE_MAP[resolution]:
-        return jsonify({'success': False, 'error': f'Seedream 5.0 Pro 不支持当前比例: {aspect_ratio}', 'error_type': 'invalid_aspect_ratio'}), 400
+    try:
+        size = resolve_seedream_pro_size(aspect_ratio, resolution, custom_width, custom_height)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error), 'error_type': 'invalid_size'}), 400
     if output_format not in ARK_SEEDREAM_OUTPUT_MIMES:
         return jsonify({'success': False, 'error': '输出格式仅支持 png 或 jpeg', 'error_type': 'invalid_output_format'}), 400
-
-    size = ARK_SEEDREAM_PRO_SIZE_MAP[resolution][aspect_ratio]
 
     body = {
         'model': model,
         'prompt': prompt,
         'size': size,
-        'response_format': 'b64_json',
+        # Keep the long-running generation response small; the worker downloads
+        # the short-lived Ark URL immediately after generation completes.
+        'response_format': 'url',
         'watermark': bool(watermark),
         'output_format': output_format,
     }
@@ -1468,6 +1504,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     req_info = {
         'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
         'size': size, 'output_format': output_format, 'watermark': bool(watermark),
+        'response_format': body['response_format'],
         'reference_count': len(ref_images),
         'reference_base64_bytes': sum(len(image) for image in ref_images),
     }
@@ -1549,7 +1586,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         elif item.get('url'):
             # 下载 url 转 base64
             try:
-                img_resp = HTTP.get(item['url'], timeout=(10, 60))
+                img_resp = HTTP.get(item['url'], timeout=(10, DOWNLOAD_TIMEOUT))
                 if img_resp.status_code == 200:
                     b64 = base64.b64encode(img_resp.content).decode('utf-8')
                     response_mime = img_resp.headers.get('Content-Type', '').split(';', 1)[0]
@@ -1591,7 +1628,7 @@ def execute_image_task(task_id):
         asset for asset in task_db.list_assets(task_id)
         if asset['kind'] == 'input_image' and os.path.isfile(asset['path'])
     ]
-    input_assets.sort(key=lambda asset: asset['path'])
+    input_assets.sort(key=storage.reference_asset_sort_key)
 
     parts = []
     local_refs = []
@@ -1613,6 +1650,8 @@ def execute_image_task(task_id):
                 bool(params.get('watermark', False)),
                 provider_config,
                 model_id,
+                params.get('custom_width'),
+                params.get('custom_height'),
             )
         else:
             response = _parse_and_respond(
@@ -1714,6 +1753,8 @@ def generate():
             prompt = request.form.get('prompt')
             aspect_ratio = request.form.get('aspect_ratio', '3:4')
             resolution = request.form.get('resolution', '1K')
+            custom_width = request.form.get('custom_width')
+            custom_height = request.form.get('custom_height')
             output_format = request.form.get('output_format', 'png').lower()
             watermark = request.form.get('watermark', 'false').lower() == 'true'
             use_search = request.form.get('use_search', 'false').lower() == 'true'
@@ -1732,6 +1773,8 @@ def generate():
             prompt = data.get('prompt')
             aspect_ratio = data.get('aspect_ratio', '9:16')
             resolution = data.get('resolution', '1K')
+            custom_width = data.get('custom_width')
+            custom_height = data.get('custom_height')
             output_format = str(data.get('output_format', 'png')).lower()
             watermark = as_bool(data.get('watermark', False))
             use_search = as_bool(data.get('use_search', False))
@@ -1749,16 +1792,27 @@ def generate():
             return jsonify({'success': False, 'error': '请提供图片描述'}), 400
         if provider not in API_PROVIDERS:
             return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
-        valid_ratios = set(ARK_SEEDREAM_PRO_SIZE_MAP['1K']) if provider == 'ark' else {
+        aspect_ratio = str(aspect_ratio or '').strip().lower()
+        valid_ratios = (set(ARK_SEEDREAM_PRO_SIZE_MAP['1K']) | {'auto', 'custom'}) if provider == 'ark' else {
             '1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4',
             '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
         }
         valid_resolutions = {'1K', '2K'} if provider == 'ark' else {'0.5K', '1K', '2K', '4K'}
         if aspect_ratio not in valid_ratios:
             return jsonify({'success': False, 'error': f'不支持的图片比例: {aspect_ratio}'}), 400
-        if str(resolution).upper() not in valid_resolutions:
+        if not (provider == 'ark' and aspect_ratio == 'custom') and str(resolution).upper() not in valid_resolutions:
             return jsonify({'success': False, 'error': f'不支持的图片分辨率: {resolution}'}), 400
         resolution = str(resolution).upper()
+        resolved_size = None
+        if provider == 'ark':
+            try:
+                resolved_size = resolve_seedream_pro_size(
+                    aspect_ratio, resolution, custom_width, custom_height,
+                )
+            except ValueError as error:
+                return jsonify({'success': False, 'error': str(error)}), 400
+            if aspect_ratio == 'custom':
+                custom_width, custom_height = (int(value) for value in resolved_size.split('x', 1))
         if think_level not in ('minimal', 'high'):
             return jsonify({'success': False, 'error': f'不支持的思考级别: {think_level}'}), 400
         provider, provider_config = get_image_provider_config(provider)
@@ -1782,15 +1836,21 @@ def generate():
                 return jsonify({'success': False, 'error': f'当前 Provider 最多只能上传{max_reference_images}张图片'}), 400
 
         params = {
-            'aspect_ratio': aspect_ratio, 'resolution': resolution,
+            'aspect_ratio': aspect_ratio,
             'use_search': use_search, 'think_level': think_level, 'enable_chat': enable_chat,
             'session_id': session_id,
             'provider': provider,
             'model': model_id,
         }
+        if not (provider == 'ark' and aspect_ratio == 'custom'):
+            params['resolution'] = resolution
         if provider == 'ark':
             params['output_format'] = output_format
             params['watermark'] = watermark
+            params['size'] = resolved_size
+            if aspect_ratio == 'custom':
+                params['custom_width'] = custom_width
+                params['custom_height'] = custom_height
         db_task_id = task_db.create_task('image', prompt, params, provider=provider, status='preparing')
         output_dir = storage.task_output_dir('image', db_task_id)
         task_db.update_task(db_task_id, output_dir=output_dir)
@@ -1837,7 +1897,7 @@ def generate():
 
 
 # ============================================================
-# Video Generation (Seedance 2.0 — dual provider: jiekou / ark)
+# Video Generation (Seedance 2.0 / 2.5 — dual provider: jiekou / ark)
 # ============================================================
 
 VIDEO_CONFIG = config.get('video', {})
@@ -1846,6 +1906,109 @@ VIDEO_PROVIDERS = {
     'jiekou': VIDEO_CONFIG.get('jiekou', {}),
     'ark': VIDEO_CONFIG.get('ark', {})
 }
+SEEDANCE_20 = 'seedance-2.0'
+SEEDANCE_25 = 'seedance-2.5'
+SEEDANCE_25_DEFAULT_MODEL = 'ep-20260807145632-xprc6'
+VIDEO_MODEL_SPECS = {
+    SEEDANCE_20: {
+        'resolutions': {'480p', '720p', '1080p'},
+        'duration_min': 4,
+        'duration_max': 15,
+        'output_formats': {'mp4'},
+        'max_ref_images': 9,
+        'max_ref_videos': 3,
+        'max_ref_audios': 3,
+        'audio_only': False,
+        'fast': True,
+    },
+    SEEDANCE_25: {
+        'resolutions': {'480p', '720p'},
+        'duration_min': 4,
+        'duration_max': 30,
+        'output_formats': {'mp4', 'mov'},
+        'max_ref_images': 30,
+        'max_ref_videos': 10,
+        'max_ref_audios': 10,
+        'audio_only': True,
+        'fast': False,
+    },
+}
+ARK_VIDEO_MAX_REQUEST_BYTES = 64 * 1024 * 1024
+ARK_VIDEO_MAX_IMAGE_BYTES = 30 * 1024 * 1024
+ARK_VIDEO_MAX_AUDIO_BYTES = 15 * 1024 * 1024
+
+
+def _resolve_video_model(provider, requested_model, provider_config, fast=False):
+    """Resolve a stable UI model alias to the provider's concrete model ID."""
+    requested = str(requested_model or SEEDANCE_20).strip().lower()
+    model_20 = str(provider_config.get('model') or 'dreamina-seedance-2-0-260128').strip()
+    model_25 = str(provider_config.get('seedance_2_5_model') or SEEDANCE_25_DEFAULT_MODEL).strip()
+
+    aliases_25 = {SEEDANCE_25, 'dreamina-seedance-2.5', model_25.lower()}
+    aliases_20 = {SEEDANCE_20, 'dreamina-seedance-2.0', model_20.lower()}
+    if requested in aliases_25:
+        model_key = SEEDANCE_25
+    elif requested in aliases_20:
+        model_key = SEEDANCE_20
+    else:
+        raise ValueError(f'不支持的视频模型: {requested_model}')
+
+    if provider != 'ark' and model_key != SEEDANCE_20:
+        raise ValueError('Dreamina Seedance 2.5 仅支持 BytePlus Ark')
+    spec = VIDEO_MODEL_SPECS[model_key]
+    if fast and not spec['fast']:
+        raise ValueError('Dreamina Seedance 2.5 不支持快速模式')
+
+    model_id = model_25 if model_key == SEEDANCE_25 else model_20
+    if model_key == SEEDANCE_20 and fast and provider == 'ark':
+        configured_fast = provider_config.get('fast_model')
+        if configured_fast:
+            model_id = str(configured_fast)
+        elif model_id == 'dreamina-seedance-2-0-260128':
+            model_id = 'dreamina-seedance-2-0-fast-260128'
+        else:
+            raise ValueError('Ark 快速模式需要配置 video.ark.fast_model endpoint ID')
+    return model_key, model_id, spec
+
+
+def _video_fast_available(provider, provider_config):
+    if provider != 'ark':
+        return True
+    model = str(provider_config.get('model') or 'dreamina-seedance-2-0-260128').strip()
+    return bool(provider_config.get('fast_model')) or model == 'dreamina-seedance-2-0-260128'
+
+
+def _validate_video_settings(model_key, spec, ratio, duration, resolution, output_format, video_mode, fast, files_data):
+    if duration != -1 and not spec['duration_min'] <= duration <= spec['duration_max']:
+        return f'{model_key} 不支持的视频时长: {duration}'
+    if resolution not in spec['resolutions']:
+        return f'{model_key} 不支持的视频分辨率: {resolution}'
+    if output_format not in spec['output_formats']:
+        return f'{model_key} 不支持的输出格式: {output_format}'
+    if fast and not spec['fast']:
+        return f'{model_key} 不支持快速模式'
+
+    if video_mode == 'keyframe':
+        has_first = bool(files_data.get('first_frame'))
+        has_last = bool(files_data.get('last_frame'))
+        if has_last and not has_first:
+            return '设置尾帧时必须同时提供首帧'
+        if model_key == SEEDANCE_25 and (has_first or has_last) and ratio != 'adaptive':
+            return 'Seedance 2.5 首尾帧模式仅支持 adaptive 画幅'
+        return None
+
+    ref_images = files_data.get('ref_images', [])
+    ref_videos = files_data.get('ref_videos', [])
+    ref_audios = files_data.get('ref_audios', [])
+    if len(ref_images) > spec['max_ref_images']:
+        return f'{model_key} 最多支持 {spec["max_ref_images"]} 张参考图片'
+    if len(ref_videos) > spec['max_ref_videos']:
+        return f'{model_key} 最多支持 {spec["max_ref_videos"]} 个参考视频'
+    if len(ref_audios) > spec['max_ref_audios']:
+        return f'{model_key} 最多支持 {spec["max_ref_audios"]} 个参考音频'
+    if ref_audios and not spec['audio_only'] and not (ref_images or ref_videos):
+        return 'Seedance 2.0 使用参考音频时还必须提供参考图片或视频'
+    return None
 
 
 def get_session_video_provider():
@@ -1863,7 +2026,15 @@ def get_video_provider_config(provider=None):
 
 @app.route('/api/video/provider', methods=['GET'])
 def get_video_provider_info():
-    return jsonify({'success': True, 'current': get_session_video_provider(), 'providers': list(VIDEO_PROVIDERS.keys())})
+    return jsonify({
+        'success': True,
+        'current': get_session_video_provider(),
+        'providers': list(VIDEO_PROVIDERS.keys()),
+        'capabilities': {
+            provider: {'fast_available': _video_fast_available(provider, provider_config)}
+            for provider, provider_config in VIDEO_PROVIDERS.items()
+        },
+    })
 
 
 @app.route('/api/video/provider', methods=['POST'])
@@ -1900,12 +2071,14 @@ def _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio
     return body
 
 
-def _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data, provider_config=None):
+def _build_ark_body(
+    prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame,
+    web_search, video_mode, files_data, provider_config=None, model_id=None,
+    model_key=SEEDANCE_20, output_format='mp4',
+):
     """构建 Ark (BytePlus) 请求体"""
     prov = provider_config or get_video_provider()
-    model = prov.get('model', 'dreamina-seedance-2-0-260128')
-    if fast and not model.endswith('-fast'):
-        model = model.replace('260128', '260128-fast') if '260128' in model else model
+    model = model_id or prov.get('model', 'dreamina-seedance-2-0-260128')
 
     content = []
     if prompt:
@@ -1934,47 +2107,67 @@ def _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, r
         'watermark': False,
         'return_last_frame': return_last_frame
     }
+    if model_key == SEEDANCE_25:
+        body['output_format'] = output_format
     return body
 
 
-def _parse_files(has_files, video_mode, provider=None):
+def _reference_image_data_url(file_storage):
+    file_storage.seek(0)
+    raw = file_storage.read()
+    if len(raw) >= ARK_VIDEO_MAX_IMAGE_BYTES:
+        raise ValueError('单张参考图片必须小于 30 MB')
+    image = Image.open(io.BytesIO(raw))
+    width, height = image.size
+    if not 300 <= width <= 6000 or not 300 <= height <= 6000:
+        raise ValueError('参考图片宽高必须在 300 到 6000 像素之间')
+    ratio = width / height
+    if not 0.4 <= ratio <= 2.5:
+        raise ValueError('参考图片宽高比必须在 0.4 到 2.5 之间')
+    image = image.convert('RGB')
+    return f'data:image/png;base64,{image_to_base64(image)}'
+
+
+def _reference_audio_data_url(file_storage):
+    filename = getattr(file_storage, 'filename', '') or ''
+    extension = os.path.splitext(filename)[1].lower()
+    if extension not in {'.wav', '.mp3'}:
+        raise ValueError('参考音频仅支持 WAV 或 MP3')
+    file_storage.seek(0)
+    raw = file_storage.read()
+    if len(raw) >= ARK_VIDEO_MAX_AUDIO_BYTES:
+        raise ValueError('单个参考音频必须小于 15 MB')
+    mime = 'audio/wav' if extension == '.wav' else 'audio/mp3'
+    return f'data:{mime};base64,{base64.b64encode(raw).decode("utf-8")}'
+
+
+def _parse_files(has_files, video_mode, provider=None, model_spec=None):
     """从请求中提取文件数据，统一为 base64 data URI"""
     files_data = {}
     if not has_files:
         return files_data
+    spec = model_spec or VIDEO_MODEL_SPECS[SEEDANCE_20]
 
     if video_mode == 'keyframe':
         img_files = request.files.getlist('image')
         if img_files:
-            f = img_files[0]
-            f.seek(0)
-            raw = f.read()
-            image = Image.open(io.BytesIO(raw))
-            image = image.convert('RGB')
-            files_data['first_frame'] = f'data:image/png;base64,{image_to_base64(image)}'
+            files_data['first_frame'] = _reference_image_data_url(img_files[0])
         last_files = request.files.getlist('last_image')
         if last_files:
-            f = last_files[0]
-            f.seek(0)
-            raw = f.read()
-            image = Image.open(io.BytesIO(raw))
-            image = image.convert('RGB')
-            files_data['last_frame'] = f'data:image/png;base64,{image_to_base64(image)}'
+            files_data['last_frame'] = _reference_image_data_url(last_files[0])
     else:
         ref_imgs = request.files.getlist('ref_images')
         if ref_imgs:
-            files_data['ref_images'] = []
-            for f in ref_imgs[:9]:
-                f.seek(0)
-                raw = f.read()
-                img = Image.open(io.BytesIO(raw))
-                img = img.convert('RGB')
-                files_data['ref_images'].append(f'data:image/png;base64,{image_to_base64(img)}')
+            if len(ref_imgs) > spec['max_ref_images']:
+                raise ValueError(f'最多支持 {spec["max_ref_images"]} 张参考图片')
+            files_data['ref_images'] = [_reference_image_data_url(f) for f in ref_imgs]
         ref_vids = request.files.getlist('ref_videos')
         if ref_vids:
+            if len(ref_vids) > spec['max_ref_videos']:
+                raise ValueError(f'最多支持 {spec["max_ref_videos"]} 个参考视频')
             files_data['ref_videos'] = []
             files_data['ref_video_paths'] = []
-            for f in ref_vids[:3]:
+            for f in ref_vids:
                 if provider == 'ark':
                     filepath, public_url = save_temp_file(f, suffix='.mp4')
                     if not public_url:
@@ -1991,15 +2184,18 @@ def _parse_files(has_files, video_mode, provider=None):
             urls = json.loads(ref_video_urls_raw)
             if not isinstance(urls, list):
                 raise ValueError('ref_video_urls 必须是数组')
+            if any(not isinstance(url, str) or not url.strip() for url in urls):
+                raise ValueError('ref_video_urls 包含无效地址')
+            existing_count = len(files_data.get('ref_videos', []))
+            if existing_count + len(urls) > spec['max_ref_videos']:
+                raise ValueError(f'最多支持 {spec["max_ref_videos"]} 个参考视频')
             if urls:
-                files_data.setdefault('ref_videos', []).extend(urls[:3])
+                files_data.setdefault('ref_videos', []).extend(urls)
         ref_auds = request.files.getlist('ref_audios')
         if ref_auds:
-            files_data['ref_audios'] = []
-            for f in ref_auds[:3]:
-                aud_b64 = base64.b64encode(f.read()).decode('utf-8')
-                mime = f.content_type or 'audio/wav'
-                files_data['ref_audios'].append(f'data:{mime};base64,{aud_b64}')
+            if len(ref_auds) > spec['max_ref_audios']:
+                raise ValueError(f'最多支持 {spec["max_ref_audios"]} 个参考音频')
+            files_data['ref_audios'] = [_reference_audio_data_url(f) for f in ref_auds]
     return files_data
 
 
@@ -2009,6 +2205,7 @@ def video_generate():
     db_task_id = None
     try:
         has_files = bool(request.content_type and 'multipart' in request.content_type)
+        data = {}
 
         if has_files:
             prompt = request.form.get('prompt', '')
@@ -2021,6 +2218,8 @@ def video_generate():
             web_search = request.form.get('web_search', 'false').lower() == 'true'
             video_mode = request.form.get('video_mode', 'keyframe')
             provider = request.form.get('provider', get_session_video_provider())
+            requested_model = request.form.get('model', SEEDANCE_20)
+            output_format = request.form.get('output_format', 'mp4').lower()
         else:
             data = request.get_json(silent=True) or {}
             prompt = data.get('prompt', '')
@@ -2033,37 +2232,52 @@ def video_generate():
             web_search = as_bool(data.get('web_search', False))
             video_mode = data.get('video_mode', 'keyframe')
             provider = data.get('provider', get_session_video_provider())
+            requested_model = data.get('model', SEEDANCE_20)
+            output_format = str(data.get('output_format', 'mp4')).lower()
 
         if provider not in VIDEO_PROVIDERS:
             return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
+        provider, prov = get_video_provider_config(provider)
+        try:
+            model_key, model_id, model_spec = _resolve_video_model(provider, requested_model, prov, fast)
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 400
         try:
             duration = int(duration)
         except (TypeError, ValueError):
             return jsonify({'success': False, 'error': 'duration 必须是整数'}), 400
-        if duration not in {-1, *range(4, 16)}:
-            return jsonify({'success': False, 'error': f'不支持的视频时长: {duration}'}), 400
         if ratio not in {'adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'}:
             return jsonify({'success': False, 'error': f'不支持的视频比例: {ratio}'}), 400
-        if resolution not in {'480p', '720p', '1080p'}:
-            return jsonify({'success': False, 'error': f'不支持的视频分辨率: {resolution}'}), 400
         if video_mode not in {'keyframe', 'reference'}:
             return jsonify({'success': False, 'error': f'不支持的视频模式: {video_mode}'}), 400
-        provider, prov = get_video_provider_config(provider)
-        app.logger.warning(f'Video generate [{provider}]: ratio={ratio}, duration={duration}, resolution={resolution}, fast={fast}, audio={generate_audio}, return_last_frame={return_last_frame}, mode={video_mode}')
+        app.logger.warning(
+            'Video generate [%s/%s]: ratio=%s, duration=%s, resolution=%s, fast=%s, '
+            'audio=%s, return_last_frame=%s, mode=%s, output=%s',
+            provider, model_key, ratio, duration, resolution, fast, generate_audio,
+            return_last_frame, video_mode, output_format,
+        )
 
         try:
-            files_data = _parse_files(has_files, video_mode, provider)
+            files_data = _parse_files(has_files, video_mode, provider, model_spec)
         except ValueError as ve:
             return jsonify({'success': False, 'error': str(ve)}), 400
 
         # JSON body 中的预上传视频 URL
         if not has_files:
-            data = request.get_json(silent=True) or {}
             ref_video_urls = data.get('ref_video_urls', [])
             if not isinstance(ref_video_urls, list):
                 return jsonify({'success': False, 'error': 'ref_video_urls 必须是数组'}), 400
+            if any(not isinstance(url, str) or not url.strip() for url in ref_video_urls):
+                return jsonify({'success': False, 'error': 'ref_video_urls 包含无效地址'}), 400
             if ref_video_urls:
-                files_data['ref_videos'] = ref_video_urls[:3]
+                files_data['ref_videos'] = ref_video_urls
+
+        settings_error = _validate_video_settings(
+            model_key, model_spec, ratio, duration, resolution, output_format,
+            video_mode, fast, files_data,
+        )
+        if settings_error:
+            return jsonify({'success': False, 'error': settings_error}), 400
 
         if not prompt and not files_data:
             return jsonify({'success': False, 'error': '请提供 prompt 或参考素材'}), 400
@@ -2074,13 +2288,29 @@ def video_generate():
             return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
 
         if provider == 'ark':
-            body = _build_ark_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data, prov)
+            body = _build_ark_body(
+                prompt, ratio, duration, resolution, fast, generate_audio,
+                return_last_frame, web_search, video_mode, files_data, prov,
+                model_id=model_id, model_key=model_key, output_format=output_format,
+            )
             url = f'{endpoint}/api/v3/contents/generations/tasks'
+            if len(json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) > ARK_VIDEO_MAX_REQUEST_BYTES:
+                return jsonify({'success': False, 'error': '提交给 Ark 的请求体不能超过 64 MB'}), 400
         else:
             body = _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data)
             url = f'{endpoint}/v3/async/seedance-2.0'
 
-        params = {'ratio': ratio, 'duration': duration, 'resolution': resolution, 'fast': fast, 'generate_audio': generate_audio, 'return_last_frame': return_last_frame, 'video_mode': video_mode}
+        params = {
+            'model': model_key,
+            'ratio': ratio,
+            'duration': duration,
+            'resolution': resolution,
+            'output_format': output_format,
+            'fast': fast,
+            'generate_audio': generate_audio,
+            'return_last_frame': return_last_frame,
+            'video_mode': video_mode,
+        }
         ref_video_paths = list(files_data.get('ref_video_paths', []))
         for ref_url in files_data.get('ref_videos', []):
             if isinstance(ref_url, str) and '/api/upload_video/' in ref_url:
@@ -2168,10 +2398,14 @@ def video_task_status():
         'cancelled': 'TASK_STATUS_CANCELLED',
     }
     stored_result = task.get('result') or {}
+    task_params = task.get('params') or {}
+    output_format = task_params.get('output_format', 'mp4')
+    if output_format not in {'mp4', 'mov'}:
+        output_format = 'mp4'
     videos = stored_result.get('videos') or []
     images = stored_result.get('images') or []
     if stored_result.get('local_video'):
-        videos = [{'video_url': stored_result['local_video'], 'video_type': 'mp4'}]
+        videos = [{'video_url': stored_result['local_video'], 'video_type': output_format}]
     if stored_result.get('local_last_frame'):
         images = [{'image_url': stored_result['local_last_frame']}]
     return jsonify({
@@ -2229,6 +2463,67 @@ def _task_output_asset(task_id, filename):
         if os.path.basename(asset['path']) == filename and os.path.isfile(asset['path']):
             return asset
     return None
+
+
+def _task_asset_response(task, asset, filename, as_attachment):
+    download_name = _task_download_name(task, filename)
+    if filename.lower().endswith('.png'):
+        response = Response(
+            storage.iter_png_with_text(
+                asset['path'], _task_png_text_entries(task),
+            ),
+            mimetype='image/png',
+        )
+        disposition = 'attachment' if as_attachment else 'inline'
+        response.headers['Content-Disposition'] = f'{disposition}; filename="{download_name}"'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        if as_attachment:
+            response.headers['Cache-Control'] = 'no-store'
+        else:
+            response.cache_control.public = True
+            response.cache_control.max_age = 31536000
+            response.cache_control.immutable = True
+        return response
+
+    response = send_file(
+        asset['path'],
+        mimetype=asset.get('mime_type'),
+        as_attachment=as_attachment,
+        download_name=download_name,
+        conditional=not as_attachment,
+        max_age=0 if as_attachment else 31536000,
+    )
+    if not as_attachment:
+        response.cache_control.public = True
+        response.cache_control.immutable = True
+    return response
+
+
+def _attach_task_input_references(tasks):
+    missing_ref_tasks = []
+    for task in tasks:
+        result = task.get('result') if isinstance(task.get('result'), dict) else {}
+        if not result.get('local_refs'):
+            missing_ref_tasks.append(task)
+    if not missing_ref_tasks:
+        return tasks
+
+    refs_by_task = {}
+    task_ids = [task['id'] for task in missing_ref_tasks]
+    for asset in task_db.list_assets_for_tasks(task_ids, ('input_image',)):
+        if not os.path.isfile(asset['path']):
+            continue
+        refs_by_task.setdefault(asset['task_id'], []).append(
+            f'/api/tasks/{asset["task_id"]}/file/{os.path.basename(asset["path"])}'
+        )
+    for task in missing_ref_tasks:
+        local_refs = refs_by_task.get(task['id'])
+        if not local_refs:
+            continue
+        result = dict(task['result']) if isinstance(task.get('result'), dict) else {}
+        result['local_refs'] = local_refs
+        task['result'] = result
+    return tasks
 
 
 def _task_group_filter():
@@ -2290,6 +2585,7 @@ def api_list_tasks():
         search=search, deleted=deleted, favorite_group=favorite_group,
         ungrouped=ungrouped, sort=sort,
     )
+    _attach_task_input_references(tasks)
     # 列表接口剥离大字段，只保留缩略图路径
     for t in tasks:
         if isinstance(t.get('result'), dict):
@@ -2393,6 +2689,7 @@ def api_get_task(task_id):
     t = task_db.get_task(task_id)
     if not t:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
+    _attach_task_input_references([t])
     return jsonify({'success': True, 'task': t})
 
 
@@ -2774,6 +3071,9 @@ def api_task_file(task_id, filename):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
     if not os.path.isfile(filepath):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
+    output_asset = _task_output_asset(task_id, filename)
+    if output_asset:
+        return _task_asset_response(t, output_asset, filename, as_attachment=False)
     response = send_file(filepath, conditional=True, max_age=31536000)
     response.cache_control.public = True
     response.cache_control.immutable = True
@@ -2786,25 +3086,7 @@ def api_download_task_file(task_id, filename):
     asset = _task_output_asset(task_id, filename) if task else None
     if not task or not asset:
         return jsonify({'success': False, 'error': '下载文件不存在'}), 404
-    download_name = _task_download_name(task, filename)
-    if filename.lower().endswith('.png'):
-        response = Response(
-            stream_with_context(storage.iter_png_with_text(
-                asset['path'], _task_png_text_entries(task),
-            )),
-            mimetype='image/png',
-        )
-        response.headers['Content-Disposition'] = f'attachment; filename="{download_name}"'
-        response.headers['Cache-Control'] = 'no-store'
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        return response
-    return send_file(
-        asset['path'],
-        mimetype=asset.get('mime_type'),
-        as_attachment=True,
-        download_name=download_name,
-        max_age=0,
-    )
+    return _task_asset_response(task, asset, filename, as_attachment=True)
 
 
 @app.route('/api/png-info', methods=['POST'])
@@ -2899,6 +3181,10 @@ def poll_video_task_once(task_id):
 
     external_task_id = task.get('external_task_id')
     provider = task.get('provider') or 'ark'
+    task_params = task.get('params') or {}
+    output_format = task_params.get('output_format', 'mp4')
+    if output_format not in {'mp4', 'mov'}:
+        output_format = 'mp4'
     prov = VIDEO_PROVIDERS.get(provider, {})
     api_key = prov.get('api_key', '')
     endpoint = prov.get('endpoint', '')
@@ -2946,7 +3232,7 @@ def poll_video_task_once(task_id):
     if provider == 'ark':
         mapped_status = ARK_STATUS_MAP.get(response_data.get('status', ''), response_data.get('status', ''))
         content = response_data.get('content') or {}
-        videos = [{'video_url': content['video_url'], 'video_type': 'mp4'}] if content.get('video_url') else []
+        videos = [{'video_url': content['video_url'], 'video_type': output_format}] if content.get('video_url') else []
         images = [{'image_url': content['last_frame_url']}] if content.get('last_frame_url') else []
         error_obj = response_data.get('error', {})
         reason = error_obj.get('message', '') if isinstance(error_obj, dict) else str(error_obj or '')
@@ -2983,13 +3269,17 @@ def poll_video_task_once(task_id):
             url = video.get('video_url')
             if not url:
                 continue
-            filename = 'video.mp4' if index == 0 else f'video_{index}.mp4'
+            video_format = str(video.get('video_type') or output_format).lower()
+            if video_format not in {'mp4', 'mov'}:
+                video_format = 'mp4'
+            filename = f'video.{video_format}' if index == 0 else f'video_{index}.{video_format}'
+            mime_type = 'video/quicktime' if video_format == 'mov' else 'video/mp4'
             path = os.path.join(output_dir, filename)
             with HTTP.get(url, timeout=(10, DOWNLOAD_TIMEOUT), stream=True) as download:
                 if download.status_code >= 400:
                     return {'state': 'retry', 'error': f'视频下载失败 {download.status_code}'}
                 storage.stream_response_to_file(download, path)
-            storage.register_file(task_id, 'output_video', path, 'video/mp4')
+            storage.register_file(task_id, 'output_video', path, mime_type)
             result['local_videos'].append(f'/api/tasks/{task_id}/file/{filename}')
 
         for index, image in enumerate(images):

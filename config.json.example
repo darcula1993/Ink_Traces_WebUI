@@ -77,7 +77,9 @@
     "ark": {
       "api_key": "",
       "endpoint": "https://ark.ap-southeast.bytepluses.com",
-      "model": ""
+      "model": "",
+      "fast_model": "",
+      "seedance_2_5_model": "ep-20260807145632-xprc6"
     }
   },
   "openai": {

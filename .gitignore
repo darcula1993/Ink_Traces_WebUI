@@ -11,6 +11,7 @@ server/.env
 config.json
 server/prompts.json
 .flask_secret_key
+/agents.md
 
 # Build output
 client/dist/

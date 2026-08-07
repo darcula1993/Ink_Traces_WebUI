@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { UploadCloud, X, Plus } from 'lucide-react'
+import { Maximize2, UploadCloud, X, Plus } from 'lucide-react'
+import SortableReferenceItem, { moveArrayItem } from './SortableReferenceItem'
 
 const IMAGE_EXTENSION = /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i
 
@@ -7,7 +8,7 @@ function isImageFile(file) {
   return file && (file.type?.startsWith('image/') || IMAGE_EXTENSION.test(file.name || ''))
 }
 
-const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, maxImages = 14 }) => {
+const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, onPreview, maxImages = 14 }) => {
   const uploadedImages = Array.isArray(rawImages) ? rawImages : []
   const fileInputRef = useRef(null)
   const dragDepthRef = useRef(0)
@@ -86,6 +87,20 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, maxImages 
     setUploadedImages(current => current.filter((_, index) => index !== indexToRemove))
   }
 
+  const moveImage = useCallback((fromIndex, toIndex) => {
+    setUploadedImages(current => moveArrayItem(current, fromIndex, toIndex))
+  }, [setUploadedImages])
+
+  const recordImageDimensions = useCallback((image, width, height) => {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+    if (Number(image.width) === width && Number(image.height) === height) return
+    setUploadedImages(current => current.map(item => (
+      item === image || (image.preview && item.preview === image.preview)
+        ? { ...item, width, height }
+        : item
+    )))
+  }, [setUploadedImages])
+
   return (
     <div className="flex h-full min-h-[120px] flex-col">
       <div
@@ -110,21 +125,46 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, maxImages 
         {uploadedImages.length > 0 ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(64px,1fr))] gap-2">
             {uploadedImages.map((img, index) => (
-              <div key={index} className="group relative aspect-square min-w-0 overflow-hidden rounded border border-nexus-border bg-nexus-surface">
-                <img src={img.preview} alt={`参考图片 ${index + 1}`} className="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100" />
+              <SortableReferenceItem
+                key={index}
+                listId="image-generation-references"
+                index={index}
+                itemCount={uploadedImages.length}
+                label="参考图片"
+                onMove={moveImage}
+                testId={`image-reference-item-${index}`}
+                className="group relative aspect-square min-w-0 overflow-hidden rounded border border-nexus-border bg-nexus-surface"
+              >
+                <button
+                  type="button"
+                  aria-label={`打开参考图片 ${index + 1}`}
+                  title="查看全图"
+                  onClick={() => onPreview?.({ type: 'image', src: img.preview, name: img.name || `参考图片 ${index + 1}` })}
+                  className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                >
+                  <img
+                    src={img.preview}
+                    alt={`参考图片 ${index + 1}`}
+                    onLoad={event => recordImageDimensions(img, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
+                    className="h-full w-full object-cover opacity-90 transition-opacity group-hover:opacity-100"
+                  />
+                  <span className="absolute bottom-1 left-1 flex size-5 items-center justify-center rounded bg-black/70 text-white opacity-0 transition-opacity group-hover:opacity-100">
+                    <Maximize2 size={11} />
+                  </span>
+                </button>
                 <button 
                   type="button"
                   aria-label={`删除参考图片 ${index + 1}`}
                   title="删除图片"
                   onClick={(e) => { e.stopPropagation(); removeImage(index); }} 
-                  className="absolute right-1 top-1 rounded bg-black/75 p-1 text-nexus-text-light transition-colors hover:bg-nexus-red hover:text-white"
+                  className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-nexus-text-light transition-colors hover:bg-nexus-red hover:text-white"
                 >
                   <X size={12} />
                 </button>
-                <div className="absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-[10px] text-nexus-text">
+                <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-[10px] text-nexus-text">
                   {index + 1}
                 </div>
-              </div>
+              </SortableReferenceItem>
             ))}
             
             {uploadedImages.length < maxImages && (
@@ -133,7 +173,7 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, maxImages 
                 aria-label="添加参考图片"
                 title="添加参考图片"
                 onClick={() => fileInputRef.current?.click()}
-                className="aspect-square min-w-0 rounded border border-dashed border-nexus-border text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green"
+                className="flex aspect-square min-w-0 items-center justify-center rounded border border-dashed border-nexus-border text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green"
               >
                 <Plus size={16} />
               </button>

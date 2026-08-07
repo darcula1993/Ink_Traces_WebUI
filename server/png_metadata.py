@@ -9,6 +9,9 @@ SCHEMA = 'ink-traces/png-info/v1'
 ALLOWED_PARAMS = (
     'aspect_ratio',
     'resolution',
+    'size',
+    'custom_width',
+    'custom_height',
     'output_format',
     'watermark',
     'use_search',
