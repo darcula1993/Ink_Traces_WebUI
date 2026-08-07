@@ -405,7 +405,7 @@ function TaskDetailModal({
     ['画幅', aspectRatio],
     ['尺寸', params.size],
     ['分辨率', params.resolution],
-    ['时长', params.duration ? `${params.duration}s` : null],
+    ['时长', params.duration === -1 ? 'Auto' : params.duration ? `${params.duration}s` : null],
     ['格式', params.output_format?.toUpperCase()],
     ['Provider', item.provider],
   ].filter(([, value]) => value !== undefined && value !== null && value !== '')

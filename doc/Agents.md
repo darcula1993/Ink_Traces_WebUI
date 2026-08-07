@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-Ink Traces WebUI 是一个多 Provider AI 图片/视频生成 Web 应用。前后端分离，前端 React，后端 Python Flask。支持 Google Gemini（Vertex AI / AI Studio）和 BytePlus Ark（Seedream 图片 / Seedance 视频）。
+Ink Traces WebUI 是一个多 Provider AI 图片/视频生成 Web 应用。前后端分离，前端 React，后端 Python Flask。图片支持 Google Gemini Vertex AI 和 BytePlus Ark Seedream，视频固定使用 BytePlus Ark Seedance。
 
 GitHub: `darcula1993/Ink_Traces_WebUI`
 
@@ -16,9 +16,9 @@ GitHub: `darcula1993/Ink_Traces_WebUI`
 Flask 后端 (localhost:5000)
   ↓ SQLite 任务 + 独立 Worker
   ↓ REST API (HTTPS)
-  ├── Google Gemini API (Vertex AI 或 AI Studio) — 图片生成
+  ├── Google Gemini API (Vertex AI) — 图片生成
   ├── BytePlus Ark (Seedream 5.0 Pro) — 图片生成
-  └── BytePlus Ark (Seedance 2.0) — 视频生成
+  └── BytePlus Ark (Seedance 2.0 / 2.5) — 视频生成
 ```
 
 - Vite 开发服务器将 `/api` 请求代理到 Flask 后端（见 `client/vite.config.js`，timeout 300s）
@@ -63,9 +63,8 @@ Flask 后端 (localhost:5000)
 
 ### Provider 切换
 
-三个 Provider 循环切换（前端 NODE 按钮）：
+两个 Provider 循环切换（前端 NODE 按钮）：
 - `vertex` — Google Vertex AI
-- `ai_studio` — Google AI Studio
 - `ark` — BytePlus Ark (Seedream 5.0 Pro)
 
 ### 统一生成接口
@@ -90,8 +89,7 @@ POST /api/generate
 
 ### Provider
 
-- `ark` — BytePlus Ark (Seedance 2.0)
-- `jiekou` — 自定义接口
+视频生成固定使用 `ark`（BytePlus Ark），支持 Seedance 2.0 和 Seedance 2.5。
 
 ### 工作流
 
@@ -160,15 +158,12 @@ POST /api/generate
   },
   "client": { "host": "0.0.0.0", "port": 4545 },
   "api": {
-    "default_provider": "vertex",
+    "default_provider": "ark",
     "vertex": { "key": "", "project_id": "", "endpoint": "aiplatform.googleapis.com" },
-    "ai_studio": { "key": "", "endpoint": "generativelanguage.googleapis.com" },
     "ark": { "api_key": "", "model": "", "endpoint": "https://ark.ap-southeast.bytepluses.com" }
   },
   "video": {
-    "default_provider": "ark",
-    "ark": { "api_key": "", "model": "dreamina-seedance-2-0-260128", "endpoint": "..." },
-    "jiekou": { "endpoint": "" }
+    "ark": { "api_key": "", "model": "dreamina-seedance-2-0-260128", "endpoint": "..." }
   },
   "safety": "BLOCK_NONE",
   "model": "gemini-3.1-flash-image-preview"

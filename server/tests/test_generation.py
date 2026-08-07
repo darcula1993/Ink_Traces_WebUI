@@ -506,9 +506,29 @@ class FakeResponse:
         return False
 
 
+def test_retired_provider_and_generation_endpoints_are_unavailable():
+    client = application.app.test_client()
+
+    assert client.post('/api/generate/text-to-image', json={'prompt': 'test'}).status_code in {404, 405}
+    assert client.post('/api/generate/image-to-image', json={'prompt': 'test'}).status_code in {404, 405}
+    assert client.get('/api/video/task?task_id=retired').status_code == 404
+    assert client.post('/api/video/provider', json={'provider': 'ark'}).status_code == 405
+
+    image_providers = client.get('/api/provider').get_json()['providers']
+    assert set(image_providers) == {'ark', 'vertex'}
+    assert client.post('/api/provider', json={'provider': 'ai_studio'}).status_code == 400
+
+    response = client.post('/api/video/generate', json={
+        'provider': 'jiekou',
+        'prompt': 'test',
+    })
+    assert response.status_code == 400
+    assert 'provider: ark' in response.get_json()['error']
+
+
 def test_seedance_25_submission_reuses_ark_key_and_endpoint(monkeypatch):
     observed = {}
-    monkeypatch.setitem(application.VIDEO_PROVIDERS, 'ark', {
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
         'api_key': 'shared-seedance-key',
         'endpoint': 'https://provider.invalid',
         'model': 'seedance-20-endpoint',
@@ -548,6 +568,112 @@ def test_seedance_25_submission_reuses_ark_key_and_endpoint(monkeypatch):
     assert task['params']['output_format'] == 'mov'
 
 
+def test_seedance_25_reference_video_preserves_explicit_output_settings(monkeypatch):
+    observed = {}
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
+        'api_key': 'shared-seedance-key',
+        'endpoint': 'https://provider.invalid',
+        'seedance_2_5_model': 'ep-20260807145632-xprc6',
+    })
+
+    def fake_post(_url, **kwargs):
+        observed['body'] = kwargs['json']
+        return FakeResponse(payload={'id': 'seedance-25-edit-task'})
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    response = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'ark',
+        'model': 'seedance-2.5',
+        'prompt': 'Use video 1 as a motion reference to create a new neon city scene',
+        'ratio': '16:9',
+        'duration': 28,
+        'resolution': '480p',
+        'output_format': 'mp4',
+        'video_mode': 'reference',
+        'ref_video_urls': ['https://media.invalid/reference.mp4'],
+    })
+
+    assert response.status_code == 200
+    assert observed['body']['duration'] == 28
+    assert observed['body']['ratio'] == '16:9'
+    task = task_db.get_task(response.get_json()['db_task_id'])
+    assert task['params']['duration'] == 28
+    assert task['params']['ratio'] == '16:9'
+
+
+def test_seedance_25_uses_documented_auto_duration_when_omitted(monkeypatch):
+    observed = {}
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
+        'api_key': 'shared-seedance-key',
+        'endpoint': 'https://provider.invalid',
+        'seedance_2_5_model': 'ep-20260807145632-xprc6',
+    })
+
+    def fake_post(_url, **kwargs):
+        observed['body'] = kwargs['json']
+        return FakeResponse(payload={'id': 'seedance-25-auto-task'})
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    response = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'ark',
+        'model': 'seedance-2.5',
+        'prompt': 'A cinematic reference-to-video scene',
+        'ratio': '16:9',
+        'resolution': '480p',
+        'video_mode': 'reference',
+        'ref_video_urls': ['https://media.invalid/reference.mp4'],
+    })
+
+    assert response.status_code == 200
+    assert observed['body']['duration'] == -1
+    assert observed['body']['ratio'] == '16:9'
+    task = task_db.get_task(response.get_json()['db_task_id'])
+    assert task['params']['duration'] == -1
+
+
+def test_seedance_ark_write_timeout_uses_shared_upload_timeout(monkeypatch):
+    observed = {}
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'upload_timeout_seconds': 135,
+        'request_timeout_seconds': 360,
+    })
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
+        'api_key': 'shared-seedance-key',
+        'endpoint': 'https://provider.invalid',
+        'model': 'seedance-20-endpoint',
+        'seedance_2_5_model': 'ep-20260807145632-xprc6',
+    })
+
+    def fake_post(_url, **kwargs):
+        observed['timeout'] = kwargs['timeout']
+        raise requests.exceptions.ConnectionError(
+            "('Connection aborted.', TimeoutError('The write operation timed out'))"
+        )
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    response = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'ark',
+        'model': 'seedance-2.5',
+        'prompt': 'A continuous cinematic shot',
+        'ratio': 'adaptive',
+        'duration': 28,
+        'resolution': '480p',
+        'output_format': 'mp4',
+        'video_mode': 'reference',
+    })
+
+    assert observed['timeout'] == (135, 360)
+    assert response.status_code == 504
+    payload = response.get_json()
+    assert payload['error_type'] == 'upload_timeout'
+    assert payload['retryable'] is False
+    assert payload['result_unknown'] is True
+    assert payload['error_details']['timeout_seconds'] == 135
+    task = task_db.get_task(payload['db_task_id'])
+    assert task['status'] == 'failed'
+    assert '135 秒' in task['error']
+
+
 def test_seedance_model_specific_constraints():
     spec_20 = application.VIDEO_MODEL_SPECS[application.SEEDANCE_20]
     spec_25 = application.VIDEO_MODEL_SPECS[application.SEEDANCE_25]
@@ -577,11 +703,11 @@ def test_seedance_model_specific_constraints():
 def test_ark_fast_model_requires_a_distinct_endpoint():
     with pytest.raises(ValueError, match='fast_model'):
         application._resolve_video_model(
-            'ark', 'seedance-2.0', {'model': 'ep-standard'}, fast=True,
+            'seedance-2.0', {'model': 'ep-standard'}, fast=True,
         )
 
     model_key, model_id, _spec = application._resolve_video_model(
-        'ark', 'seedance-2.0', {
+        'seedance-2.0', {
             'model': 'ep-standard',
             'fast_model': 'ep-fast',
         }, fast=True,
@@ -590,13 +716,13 @@ def test_ark_fast_model_requires_a_distinct_endpoint():
     assert model_id == 'ep-fast'
 
     _model_key, canonical_fast_id, _spec = application._resolve_video_model(
-        'ark', 'seedance-2.0', {'model': 'dreamina-seedance-2-0-260128'}, fast=True,
+        'seedance-2.0', {'model': 'dreamina-seedance-2-0-260128'}, fast=True,
     )
     assert canonical_fast_id == 'dreamina-seedance-2-0-fast-260128'
 
 
 def test_video_poll_downloads_once_and_completes(monkeypatch):
-    monkeypatch.setitem(application.VIDEO_PROVIDERS, 'ark', {
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
         'api_key': 'test-key',
         'endpoint': 'https://provider.invalid',
     })
@@ -635,7 +761,7 @@ def test_video_poll_downloads_once_and_completes(monkeypatch):
 
 
 def test_video_poll_preserves_seedance_25_mov_output(monkeypatch):
-    monkeypatch.setitem(application.VIDEO_PROVIDERS, 'ark', {
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
         'api_key': 'test-key',
         'endpoint': 'https://provider.invalid',
     })

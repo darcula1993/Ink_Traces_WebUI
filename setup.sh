@@ -83,20 +83,18 @@ else
   "server": { "host": "0.0.0.0", "port": 5000 },
   "client": { "host": "0.0.0.0", "port": 4545 },
   "api": {
-    "default_provider": "vertex",
+    "default_provider": "ark",
     "default_model": "gemini-3.1-flash-image-preview",
     "available_models": [
       { "id": "gemini-3.1-flash-image-preview", "name": "Gemini 3.1 Flash", "description": "Fast" },
       { "id": "gemini-3-pro-image-preview", "name": "Gemini 3 Pro", "description": "High quality" }
     ],
     "vertex": { "key": "", "model_id": "gemini-3.1-flash-image-preview", "endpoint": "aiplatform.googleapis.com", "project_id": "" },
-    "ai_studio": { "key": "", "model_id": "gemini-3.1-flash-image-preview", "endpoint": "generativelanguage.googleapis.com" }
+    "ark": { "api_key": "", "model": "seedream-5-0-pro", "endpoint": "https://ark.ap-southeast.bytepluses.com" }
   },
   "safety": { "hate_speech": "BLOCK_NONE", "dangerous_content": "BLOCK_NONE", "sexually_explicit": "BLOCK_NONE", "harassment": "BLOCK_NONE" },
   "video": {
-    "default_provider": "ark",
-    "jiekou": { "api_key": "", "endpoint": "https://api.jiekou.ai" },
-    "ark": { "api_key": "", "endpoint": "https://ark.ap-southeast.bytepluses.com", "model": "dreamina-seedance-2-0-260128" }
+    "ark": { "api_key": "", "endpoint": "https://ark.ap-southeast.bytepluses.com", "model": "dreamina-seedance-2-0-260128", "seedance_2_5_model": "ep-20260807145632-xprc6" }
   }
 }
 EOF

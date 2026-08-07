@@ -117,7 +117,6 @@ test('workspace persistence ignores server JSON key ordering', async ({ page }, 
         refImages: [],
         lastFrame: null,
         firstFrame: null,
-        search: false,
         mode: 'keyframe',
         returnLastFrame: false,
         audio: true,
@@ -156,9 +155,10 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥4.97')
   await page.getByLabel('视频模型').selectOption('seedance-2.5')
   await expect(page.getByText('Seedance 2.5', { exact: true }).first()).toBeVisible()
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥7.45')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥5.96~¥44.71')
   await expect(page.getByLabel('视频分辨率').locator('option')).toHaveText(['480p', '720p'])
   await expect(page.getByLabel('视频时长').locator('option[value="30"]')).toHaveText('30s')
+  await expect(page.getByLabel('视频时长')).toHaveValue('-1')
   await expect(page.getByLabel('视频输出格式')).toBeVisible()
   await expect(page.getByRole('switch', { name: '快速模式' })).toHaveCount(0)
 
@@ -181,6 +181,63 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await expect(page.getByText('视频 · 10')).toBeVisible()
   await expect(page.getByText('音频 · 10')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('desktop-seedance-2.5.png') })
+})
+
+test('Seedance 2.5 reference video preserves explicit ratio and duration', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Reference video parameters only need one desktop run')
+  let submitted = null
+  await page.route('**/api/video/generate', async route => {
+    submitted = route.request().postDataJSON()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, task_id: 'remote-edit-25', db_task_id: 2501, provider: 'ark' }),
+    })
+  })
+  await login(page, {
+    initialWorkspaceState: {
+      appMode: 'video',
+      vid_activeTab: 1,
+      vid_tabs: [{
+        id: 1,
+        prompt: 'Use video 1 as a motion reference to create a new neon city scene',
+        model: 'seedance-2.5',
+        ratio: '16:9',
+        duration: 28,
+        resolution: '480p',
+        outputFormat: 'mp4',
+        fast: false,
+        audio: true,
+        returnLastFrame: false,
+        mode: 'reference',
+        firstFrame: null,
+        lastFrame: null,
+        refImages: [],
+        refVideos: [{
+          uid: 'edit-video',
+          name: 'reference.mp4',
+          url: '/api/upload_video/reference.mp4',
+          thumbnail: null,
+          duration: 27.8,
+          uploading: false,
+          progress: 100,
+        }],
+        refAudios: [],
+      }],
+    },
+  })
+
+  await expect(page.getByLabel('视频画幅')).toBeEnabled()
+  await expect(page.getByLabel('视频画幅')).toHaveValue('16:9')
+  await expect(page.getByLabel('视频时长')).toBeEnabled()
+  await expect(page.getByLabel('视频时长')).toHaveValue('28')
+  await expect(page.getByLabel('视频时长').locator('option[value="-1"]')).toHaveText('Auto · 编辑跟随输入')
+
+  await page.getByRole('button', { name: '生成视频' }).click()
+  await expect.poll(() => submitted).not.toBeNull()
+  expect(submitted.model).toBe('seedance-2.5')
+  expect(submitted.ratio).toBe('16:9')
+  expect(submitted.duration).toBe(28)
 })
 
 test('workspace adapts without horizontal overflow', async ({ page }, testInfo) => {
@@ -892,7 +949,6 @@ test('video parameter references open image, video, and audio previews', async (
         audio: true,
         returnLastFrame: false,
         mode: 'reference',
-        search: false,
         firstFrame: null,
         lastFrame: null,
         refImages: [{ name: 'reference.png', preview }],
@@ -974,7 +1030,6 @@ test('reference materials can be reordered and generation preserves that order',
         ],
       }],
       vid_activeTab: 1,
-      vid_provider: 'ark',
       vid_tabs: [{
         id: 1,
         prompt: '',

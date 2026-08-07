@@ -143,7 +143,7 @@ function makeImgTab(id) {
 function makeVideoTab(id) {
   return {
     id, prompt: '', model: SEEDANCE_20, ratio: 'adaptive', duration: 5, resolution: '720p', outputFormat: 'mp4',
-    fast: false, audio: true, returnLastFrame: false, mode: 'keyframe', search: false,
+    fast: false, audio: true, returnLastFrame: false, mode: 'keyframe',
     firstFrame: null, lastFrame: null, refImages: [], refVideos: [], refAudios: [],
     loading: false, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0, error: null,
     taskId: null, dbTaskId: null, taskProvider: null, taskStatus: null,
@@ -346,7 +346,7 @@ function App({ onLogout }) {
     }
   }, [])
 
-  const [apiProvider, setApiProvider] = useState('vertex')
+  const [apiProvider, setApiProvider] = useState('ark')
   const [providerInfoReady, setProviderInfoReady] = useState(false)
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
   const [availableModels, setAvailableModels] = useState([])
@@ -368,9 +368,7 @@ function App({ onLogout }) {
   // 顶部模式切换：image / video
   const [appMode, setAppMode] = useWorkspaceState('appMode', 'image')
 
-  // 视频 Provider
-  const [videoProvider, setVideoProvider] = useWorkspaceState('vid_provider', 'ark')
-  const [videoProviderCapabilities, setVideoProviderCapabilities] = useState({})
+  const [videoFastAvailable, setVideoFastAvailable] = useState(false)
 
   // 视频生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
   const [videoTabs, setVideoTabs, videoWorkspace] = useWorkspaceState('vid_tabs', [makeVideoTab(1)], VIDEO_WORKSPACE_OPTIONS)
@@ -386,27 +384,29 @@ function App({ onLogout }) {
     }))
   }, [setVideoTabs])
 
-  const effectiveVideoModel = videoProvider === 'ark' && activeTab.model === SEEDANCE_25
-    ? SEEDANCE_25
-    : SEEDANCE_20
+  const effectiveVideoModel = activeTab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
   const isSeedance25 = effectiveVideoModel === SEEDANCE_25
   const videoCapabilities = VIDEO_MODEL_CAPABILITIES[effectiveVideoModel]
-  const videoFastAvailable = videoProviderCapabilities[videoProvider]?.fast_available !== false
   const videoDurationOptions = Array.from(
     { length: videoCapabilities.maxDuration - videoCapabilities.minDuration + 1 },
     (_, index) => videoCapabilities.minDuration + index,
   )
+  const hasReadyReferenceVideo = activeTab.refVideos.some(video => video.url && !video.uploading)
   const videoRatioLocked = isSeedance25
     && activeTab.mode === 'keyframe'
     && Boolean(activeTab.firstFrame || activeTab.lastFrame)
+  const effectiveVideoRatio = videoRatioLocked ? 'adaptive' : activeTab.ratio
+  const effectiveVideoDuration = activeTab.duration
 
   const handleVideoModelChange = useCallback((model) => {
     const nextModel = model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
     updateTab(activeTab.id, tab => {
       const capabilities = VIDEO_MODEL_CAPABILITIES[nextModel]
-      const duration = tab.duration !== -1 && tab.duration > capabilities.maxDuration
-        ? capabilities.maxDuration
-        : tab.duration
+      const duration = nextModel === SEEDANCE_25
+        ? -1
+        : tab.duration !== -1 && tab.duration > capabilities.maxDuration
+          ? capabilities.maxDuration
+          : tab.duration
       const resolution = capabilities.resolutions.includes(tab.resolution) ? tab.resolution : '720p'
       const ratio = nextModel === SEEDANCE_25
         && tab.mode === 'keyframe'
@@ -693,7 +693,7 @@ function App({ onLogout }) {
   const fetchVideoProviderInfo = async () => {
     try {
       const response = await axios.get('/api/video/provider')
-      if (response.data.success) setVideoProviderCapabilities(response.data.capabilities || {})
+      if (response.data.success) setVideoFastAvailable(response.data.fast_available !== false)
     } catch (error) {
       console.error('Failed to fetch video provider info:', error)
     }
@@ -714,7 +714,7 @@ function App({ onLogout }) {
   }
 
   const switchApiProvider = async () => {
-    const order = ['vertex', 'ai_studio', 'ark']
+    const order = ['vertex', 'ark']
     const idx = order.indexOf(apiProvider)
     const newProvider = order[(idx + 1) % order.length]
     try {
@@ -726,26 +726,7 @@ function App({ onLogout }) {
     } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
   
-  const switchVideoProvider = async () => {
-    const newProvider = videoProvider === 'jiekou' ? 'ark' : 'jiekou'
-    try {
-      const response = await axios.post('/api/video/provider', { provider: newProvider })
-      if (response.data.success) {
-        setVideoProvider(newProvider)
-        if (newProvider !== 'ark') {
-          setVideoTabs(prev => prev.map(tab => ({
-            ...tab,
-            model: SEEDANCE_20,
-            outputFormat: 'mp4',
-            duration: tab.duration !== -1 && tab.duration > 15 ? 15 : tab.duration,
-          })))
-        }
-      }
-    } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
-  }
-
   const switchVideoModel = () => {
-    if (videoProvider !== 'ark') return
     handleVideoModelChange(effectiveVideoModel === SEEDANCE_25 ? SEEDANCE_20 : SEEDANCE_25)
   }
 
@@ -876,14 +857,14 @@ function App({ onLogout }) {
         const f = files[0]
         const reader = new FileReader()
         reader.onload = ev => {
-          const model = videoProvider === 'ark' && tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+          const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
           const modelUpdates = model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}
           if (!tab.firstFrame) updateTab(tab.id, { firstFrame: { file: f, preview: ev.target.result }, ...modelUpdates })
           else if (!tab.lastFrame) updateTab(tab.id, { lastFrame: { file: f, preview: ev.target.result }, ...modelUpdates })
         }
         reader.readAsDataURL(f)
       } else {
-        const model = videoProvider === 'ark' && tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+        const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
         const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefImages - tab.refImages.length
         const toProcess = files.slice(0, remaining)
         Promise.all(toProcess.map(f => new Promise(r => {
@@ -935,17 +916,15 @@ function App({ onLogout }) {
       if (hasFiles) {
         const formData = new FormData()
         formData.append('prompt', tab.prompt)
-        formData.append('ratio', tab.ratio)
-        formData.append('duration', tab.duration)
+        formData.append('ratio', effectiveVideoRatio)
+        formData.append('duration', effectiveVideoDuration)
         formData.append('resolution', tab.resolution)
         formData.append('model', effectiveVideoModel)
         formData.append('output_format', tab.outputFormat || 'mp4')
         formData.append('fast', tab.fast)
         formData.append('generate_audio', tab.audio)
         formData.append('return_last_frame', tab.returnLastFrame)
-        formData.append('web_search', tab.search)
         formData.append('video_mode', tab.mode)
-        formData.append('provider', videoProvider)
         const pendingFetches = []
         if (tab.mode === 'keyframe') {
           if (tab.firstFrame) {
@@ -981,12 +960,11 @@ function App({ onLogout }) {
         resp = await axios.post('/api/video/generate', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 })
       } else {
         resp = await axios.post('/api/video/generate', {
-          prompt: tab.prompt, ratio: tab.ratio, duration: tab.duration,
+          prompt: tab.prompt, ratio: effectiveVideoRatio, duration: effectiveVideoDuration,
           resolution: tab.resolution, model: effectiveVideoModel,
           output_format: tab.outputFormat || 'mp4', fast: tab.fast, generate_audio: tab.audio,
-          return_last_frame: tab.returnLastFrame, web_search: tab.search,
+          return_last_frame: tab.returnLastFrame,
           video_mode: tab.mode,
-          provider: videoProvider,
           ref_video_urls: videoUrls.length ? videoUrls : undefined
         }, { timeout: 300000 })
       }
@@ -1142,7 +1120,6 @@ function App({ onLogout }) {
       }
       setVideoTabs([tab])
       setActiveVideoTabId(id)
-      if (task.provider === 'ark' || task.provider === 'jiekou') setVideoProvider(task.provider)
       setAppMode('video')
     }
   }
@@ -1185,11 +1162,9 @@ function App({ onLogout }) {
       ? 'Seedream 5.0 Pro'
       : currentModel.includes('flash') ? 'Gemini Flash 3.1' : 'Gemini Pro 3.0'
   const currentProviderLabel = appMode === 'video'
-    ? (videoProvider === 'ark' ? 'Ark' : 'Jiekou')
-    : apiProvider === 'vertex' ? 'Vertex AI' : apiProvider === 'ark' ? 'Ark' : 'AI Studio'
-  const canSwitchModel = appMode === 'video'
-    ? videoProvider === 'ark'
-    : apiProvider !== 'ark' && availableModels.length > 1
+    ? 'Ark'
+    : apiProvider === 'vertex' ? 'Vertex AI' : 'Ark'
+  const canSwitchModel = appMode === 'video' || (apiProvider !== 'ark' && availableModels.length > 1)
 
   return (
     <div ref={appShellRef} className="app-shell bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative">
@@ -1222,10 +1197,17 @@ function App({ onLogout }) {
             <Cpu size={14} className="text-nexus-green" />
             <span className="header-model-label truncate">{currentModelLabel}</span>
           </button>
-          <button onClick={appMode === 'video' ? switchVideoProvider : switchApiProvider} className="header-chip btn-base btn-outline max-w-[150px]" title="切换 Provider">
-            <Database size={14} className="text-nexus-blue" />
-            <span className="header-provider-label truncate">{currentProviderLabel}</span>
-          </button>
+          {appMode === 'image' ? (
+            <button onClick={switchApiProvider} className="header-chip btn-base btn-outline max-w-[150px]" title="切换 Provider">
+              <Database size={14} className="text-nexus-blue" />
+              <span className="header-provider-label truncate">{currentProviderLabel}</span>
+            </button>
+          ) : (
+            <div className="header-chip btn-base btn-outline max-w-[150px] cursor-default" title="当前 Provider">
+              <Database size={14} className="text-nexus-blue" />
+              <span className="header-provider-label truncate">{currentProviderLabel}</span>
+            </div>
+          )}
           <div className="glass-control-group flex items-center gap-0.5">
             <IconButton label="PNG Info" onClick={() => setShowPngInfo(true)}><FileSearch size={16} /></IconButton>
             <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
@@ -1572,7 +1554,7 @@ function App({ onLogout }) {
           <aside className="inspector-pane custom-scrollbar">
             <div className="inspector-header">
               <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />视频参数</div>
-              <span className="font-mono text-[11px] text-nexus-muted">{activeTab.resolution} · {activeTab.duration === -1 ? 'Auto' : `${activeTab.duration}s`}</span>
+              <span className="font-mono text-[11px] text-nexus-muted">{activeTab.resolution} · {effectiveVideoDuration === -1 ? 'Auto' : `${effectiveVideoDuration}s`}</span>
             </div>
 
               {/* 生成模式 */}
@@ -1586,19 +1568,18 @@ function App({ onLogout }) {
                     <select
                       aria-label="视频模型"
                       value={effectiveVideoModel}
-                      disabled={videoProvider !== 'ark'}
                       onChange={e => handleVideoModelChange(e.target.value)}
                       className="field-select min-w-0"
                     >
                       <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>
-                      {videoProvider === 'ark' && <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>}
+                      <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
                     </select>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="field-label">画幅</span>
                     <select
                       aria-label="视频画幅"
-                      value={videoRatioLocked ? 'adaptive' : activeTab.ratio}
+                      value={effectiveVideoRatio}
                       disabled={videoRatioLocked}
                       title={videoRatioLocked ? 'Seedance 2.5 首尾帧模式自动保持首帧比例' : '视频画幅'}
                       onChange={e => updateTab(activeTab.id, { ratio: e.target.value })}
@@ -1629,10 +1610,6 @@ function App({ onLogout }) {
                       <option value="reference" className="bg-nexus-bg">全能参考</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="field-label">联网搜索</span>
-                    <ToggleSwitch label="联网搜索" checked={activeTab.search} onChange={search => updateTab(activeTab.id, { search })} />
-                  </div>
                 </div>
               </div>
 
@@ -1653,12 +1630,21 @@ function App({ onLogout }) {
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="field-label">时长</span>
-                    <select aria-label="视频时长" value={activeTab.duration} onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
-                      className="field-select font-mono">
+                    <select
+                      aria-label="视频时长"
+                      value={effectiveVideoDuration}
+                      title={isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
+                        ? '参考生视频可指定 4–30 秒；视频编辑必须选择 Auto'
+                        : '视频时长'}
+                      onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
+                      className="field-select font-mono"
+                    >
                       {videoDurationOptions.map(d => (
                         <option key={d} value={d} className="bg-nexus-bg">{d}s</option>
                       ))}
-                      <option value={-1} className="bg-nexus-bg">Auto</option>
+                      <option value={-1} className="bg-nexus-bg">
+                        {isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo ? 'Auto · 编辑跟随输入' : 'Auto'}
+                      </option>
                     </select>
                   </div>
                   {!isSeedance25 && (
@@ -1981,15 +1967,11 @@ function App({ onLogout }) {
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   {(() => {
-                    if (videoProvider !== 'ark') return (<>
-                      <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-muted">--</div>
-                      <div className="text-xs font-mono leading-5 text-nexus-text opacity-80">仅 BytePlus Ark 支持此估算</div>
-                    </>)
                     const estimate = estimateBytePlusVideoCost({
                       model: effectiveVideoModel,
                       resolution: activeTab.resolution,
-                      ratio: activeTab.ratio,
-                      duration: activeTab.duration,
+                      ratio: effectiveVideoRatio,
+                      duration: effectiveVideoDuration,
                       fast: activeTab.fast,
                       referenceVideos: activeTab.refVideos,
                     })

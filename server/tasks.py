@@ -344,20 +344,6 @@ def get_task_statuses(task_ids):
     return statuses
 
 
-def get_task_by_external(provider, external_task_id):
-    row = get_db().execute(
-        '''SELECT * FROM tasks
-           WHERE provider = ? AND external_task_id = ? AND deleted_at IS NULL
-           ORDER BY id DESC LIMIT 1''',
-        (provider, external_task_id),
-    ).fetchone()
-    if not row:
-        return None
-    task = _row_to_dict(row)
-    _attach_favorite_groups([task])
-    return task
-
-
 def _fts_search_query(value):
     tokens = re.findall(r'[\w]+', str(value).lower(), flags=re.UNICODE)
     return ' AND '.join(f'"{token}"*' for token in tokens[:12])

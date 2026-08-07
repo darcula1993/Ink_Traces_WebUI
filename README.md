@@ -28,7 +28,7 @@ Ink Traces WebUI is a local web workstation for prompt-driven image and video cr
 |---|---|
 | Image generation | Text-to-image and image-to-image through one unified workflow |
 | Video generation | Seedance 2.0/2.5 keyframe and multimodal reference workflows with image, video, and audio inputs |
-| Providers | Google Vertex AI, Google AI Studio, BytePlus Ark Seedream 5.0 Pro, BytePlus Ark Seedance 2.0/2.5, Jiekou Seedance |
+| Providers | Google Vertex AI and BytePlus Ark for images; BytePlus Ark Seedance 2.0/2.5 for video |
 | Prompt workflow | Prompt Vault, fullscreen editor, multi-tab workspaces, reusable saved prompts |
 | Runtime history | SQLite task queue for image/video results, local file recovery, task restore |
 | Controls | Aspect ratio, resolution, thinking level, Google Search grounding, chat mode |
@@ -160,9 +160,8 @@ Ink_Traces_WebUI/
 | `POST /api/generate` | Queue image generation; chat mode remains synchronous |
 | `GET/POST /api/prompts` | List or save Prompt Vault entries |
 | `PUT/DELETE /api/prompts/:id` | Edit or delete Prompt Vault entries |
-| `GET/POST /api/video/provider` | Get or switch video provider |
+| `GET /api/video/provider` | Get Ark video capabilities |
 | `POST /api/video/generate` | Submit video generation task |
-| `GET /api/video/task` | Legacy-compatible local video status lookup |
 | `GET /api/tasks` | List local task history |
 | `GET/DELETE /api/tasks/:id` | Restore or delete local task |
 | `POST /api/upload_video` | Upload reference video for external provider access |

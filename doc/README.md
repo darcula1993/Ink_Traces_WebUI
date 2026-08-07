@@ -28,7 +28,7 @@ Ink Traces WebUI 是一个本地运行的 AI 图片 / 视频生成工作站。�
 |---|---|
 | 图片生成 | 文生图和图生图共用一个工作流，自动识别是否有参考图 |
 | 视频生成 | 支持首尾帧模式，以及图片、视频、音频参考模式 |
-| Provider | Google Vertex AI、Google AI Studio、BytePlus Ark Seedream 5.0 Pro、Ark/Jiekou Seedance |
+| Provider | 图片支持 Google Vertex AI 与 BytePlus Ark；视频支持 BytePlus Ark Seedance 2.0/2.5 |
 | Prompt 工作流 | Prompt Vault、全屏编辑器、多标签页、收藏复用 |
 | 任务历史 | SQLite 任务队列，支持图片/视频结果记录、恢复和删除 |
 | 参数控制 | 宽高比、分辨率、思考深度、Google 搜索增强、Chat 模式 |
@@ -154,9 +154,8 @@ Ink_Traces_WebUI/
 | `POST /api/generate` | 提交异步图片任务；Chat 模式保持同步 |
 | `GET/POST /api/prompts` | 读取或保存 Prompt Vault |
 | `PUT/DELETE /api/prompts/:id` | 编辑或删除 Prompt Vault 条目 |
-| `GET/POST /api/video/provider` | 获取或切换视频 Provider |
+| `GET /api/video/provider` | 获取 Ark 视频能力配置 |
 | `POST /api/video/generate` | 提交视频生成任务 |
-| `GET /api/video/task` | 兼容旧客户端的本地视频状态查询 |
 | `GET /api/tasks` | 查看本地任务历史 |
 | `GET/DELETE /api/tasks/:id` | 恢复或删除本地任务 |
 | `POST /api/upload_video` | 上传供外部 Provider 下载的参考视频 |

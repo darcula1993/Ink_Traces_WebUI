@@ -84,11 +84,6 @@ BUILTIN_DEFAULT_CONFIG = {
             'endpoint': 'aiplatform.googleapis.com',
             'project_id': '',
         },
-        'ai_studio': {
-            'key': '',
-            'model_id': 'gemini-3.1-flash-image-preview',
-            'endpoint': 'generativelanguage.googleapis.com',
-        },
         'ark': {
             'api_key': '',
             'model': 'seedream-5-0-pro',
@@ -104,10 +99,8 @@ BUILTIN_DEFAULT_CONFIG = {
         'harassment': 'BLOCK_NONE',
     },
     'video': {
-        'default_provider': 'ark',
         'poll_interval_seconds': 4,
         'poll_max_attempts': 1800,
-        'jiekou': {'api_key': '', 'endpoint': ''},
         'ark': {
             'api_key': '',
             'endpoint': 'https://ark.ap-southeast.bytepluses.com',
@@ -289,12 +282,12 @@ def log_request(response):
     return response
 
 # API Provider 配置
-CURRENT_PROVIDER = config['api'].get('default_provider', 'ark')
 API_PROVIDERS = {
     'vertex': config['api'].get('vertex', {}),
-    'ai_studio': config['api'].get('ai_studio', {}),
     'ark': config['api'].get('ark', {})
 }
+configured_image_provider = config['api'].get('default_provider', 'ark')
+CURRENT_PROVIDER = configured_image_provider if configured_image_provider in API_PROVIDERS else 'ark'
 
 # 可用模型配置
 AVAILABLE_MODELS = config['api'].get('available_models', [
@@ -325,12 +318,6 @@ def get_session_image_model():
     valid_models = {m['id'] for m in AVAILABLE_MODELS}
     return model if model in valid_models else CURRENT_MODEL
 
-# 动态获取当前 provider 的配置
-def get_current_api_config():
-    """获取当前 API provider 的配置"""
-    return API_PROVIDERS.get(CURRENT_PROVIDER, API_PROVIDERS['ark'])
-
-
 def get_image_provider_config(provider):
     provider = provider if provider in API_PROVIDERS else CURRENT_PROVIDER
     return provider, API_PROVIDERS.get(provider, API_PROVIDERS['ark'])
@@ -346,13 +333,6 @@ def get_provider_default_model(provider, provider_config):
     if provider == 'ark':
         return provider_config.get('model') or 'seedream-5-0-pro'
     return provider_config.get('model_id') or CURRENT_MODEL
-
-# 初始化 API 配置（使用默认 provider）
-current_api = get_current_api_config()
-API_KEY = current_api.get('key', '')
-MODEL_ID = CURRENT_MODEL  # 使用全局的当前模型
-API_ENDPOINT = current_api.get('endpoint', 'aiplatform.googleapis.com')
-PROJECT_ID = current_api.get('project_id', '')
 
 # 服务器配置
 SERVER_HOST = config['server']['host']
@@ -379,6 +359,23 @@ ARK_IMAGE_UPLOAD_TIMEOUT = max(
 )
 ALLOWED_VIDEO_EXTENSIONS = {'.mp4', '.mov', '.m4v', '.webm'}
 ALLOWED_VIDEO_MIMES = {'video/mp4', 'video/quicktime', 'video/x-m4v', 'video/webm'}
+
+
+def resolve_ark_timeouts(provider_config=None):
+    """Resolve Ark upload/read timeouts, sharing image defaults with video calls."""
+    provider_config = provider_config or {}
+    shared_config = API_PROVIDERS.get('ark', {})
+    upload_timeout = provider_config.get(
+        'upload_timeout_seconds',
+        shared_config.get('upload_timeout_seconds', ARK_IMAGE_UPLOAD_TIMEOUT),
+    )
+    request_timeout = provider_config.get(
+        'request_timeout_seconds',
+        shared_config.get('request_timeout_seconds', ARK_IMAGE_TIMEOUT),
+    )
+    return max(30, int(upload_timeout or ARK_IMAGE_UPLOAD_TIMEOUT)), max(
+        30, int(request_timeout or ARK_IMAGE_TIMEOUT),
+    )
 
 def build_public_url(path):
     """根据 config 中的 public_host/port/scheme 构建公网可访问的 URL"""
@@ -438,31 +435,8 @@ def build_safety_settings():
         }
     ]
 
-def build_api_url(model_id, endpoint=None, provider=None, api_key=None):
-    """
-    根据当前 provider 构建 API URL
-
-    Vertex AI: https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent?key={key}
-    AI Studio: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}
-    """
-    provider = provider or CURRENT_PROVIDER
-    api_key = API_KEY if api_key is None else api_key
-    endpoint = endpoint or API_ENDPOINT
-
-    if provider == 'vertex':
-        # Vertex AI format
-        return f"https://{endpoint}/v1/publishers/google/models/{model_id}:generateContent?key={api_key}"
-    else:
-        # Google AI Studio format - also uses query parameter for key
-        return f"https://{endpoint}/v1beta/models/{model_id}:generateContent?key={api_key}"
-
-def build_api_headers():
-    """
-    根据当前 provider 构建 API headers
-
-    Both providers only need Content-Type header
-    """
-    return {'Content-Type': 'application/json'}
+def build_vertex_api_url(model_id, endpoint, api_key):
+    return f"https://{endpoint}/v1/publishers/google/models/{model_id}:generateContent?key={api_key}"
 
 
 SENSITIVE_KEYS = {'key', 'apikey', 'api_key', 'authorization', 'password', 'prompt', 'secret', 'secret_key', 'token'}
@@ -920,11 +894,6 @@ def get_provider():
                 'model': API_PROVIDERS['vertex'].get('model_id', ''),
                 'available': bool(API_PROVIDERS['vertex'].get('key'))
             },
-            'ai_studio': {
-                'name': 'Google AI Studio',
-                'model': API_PROVIDERS['ai_studio'].get('model_id', ''),
-                'available': bool(API_PROVIDERS['ai_studio'].get('key'))
-            },
             'ark': {
                 'name': 'BytePlus Ark',
                 'model': API_PROVIDERS['ark'].get('model', ''),
@@ -940,10 +909,10 @@ def switch_provider():
         data = request.get_json()
         new_provider = data.get('provider')
 
-        if new_provider not in ['vertex', 'ai_studio', 'ark']:
+        if new_provider not in API_PROVIDERS:
             return jsonify({
                 'success': False,
-                'error': 'Invalid provider. Must be "vertex", "ai_studio", or "ark"'
+                'error': 'Invalid provider. Must be "vertex" or "ark"'
             }), 400
 
         if new_provider == 'ark':
@@ -962,7 +931,7 @@ def switch_provider():
         current_api = API_PROVIDERS[new_provider]
         model_id = get_provider_default_model(new_provider, current_api)
 
-        provider_names = {'vertex': 'Vertex AI', 'ai_studio': 'Google AI Studio', 'ark': 'BytePlus Ark'}
+        provider_names = {'vertex': 'Vertex AI', 'ark': 'BytePlus Ark'}
         provider_name = provider_names.get(new_provider, new_provider)
 
         return jsonify({
@@ -1237,7 +1206,7 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     provider, provider_config = get_image_provider_config(provider)
     model_id = model_id or get_provider_default_model(provider, provider_config)
     api_key = get_provider_key(provider, provider_config)
-    endpoint = provider_config.get('endpoint') or API_ENDPOINT
+    endpoint = provider_config.get('endpoint') or 'aiplatform.googleapis.com'
 
     # Chat模式：获取或创建会话
     current_session_id = None
@@ -1279,8 +1248,8 @@ def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat
     if use_search:
         request_body['tools'] = [{"google_search": {}}]
 
-    api_url = build_api_url(model_id, endpoint=endpoint, provider=provider, api_key=api_key)
-    headers = build_api_headers()
+    api_url = build_vertex_api_url(model_id, endpoint, api_key)
+    headers = {'Content-Type': 'application/json'}
     print(f'Using API: {provider.upper()}, URL: {redact_url(api_url)}')
 
     try:
@@ -1464,8 +1433,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     api_key = ark_cfg.get('api_key', '')
     endpoint = ark_cfg.get('endpoint', '').rstrip('/')
     model = model_id or ark_cfg.get('model') or 'seedream-5-0-pro'
-    request_timeout = max(30, int(ark_cfg.get('request_timeout_seconds', ARK_IMAGE_TIMEOUT) or ARK_IMAGE_TIMEOUT))
-    upload_timeout = max(30, int(ark_cfg.get('upload_timeout_seconds', ARK_IMAGE_UPLOAD_TIMEOUT) or ARK_IMAGE_UPLOAD_TIMEOUT))
+    upload_timeout, request_timeout = resolve_ark_timeouts(ark_cfg)
     resolution = str(resolution or '1K').upper()
     output_format = str(output_format or 'png').lower()
 
@@ -1741,8 +1709,6 @@ def execute_image_task(task_id):
 
 
 @app.route('/api/generate', methods=['POST'])
-@app.route('/api/generate/text-to-image', methods=['POST'])
-@app.route('/api/generate/image-to-image', methods=['POST'])
 def generate():
     """Queue normal image jobs; keep chat generations synchronous for compatibility."""
     db_task_id = None
@@ -1897,15 +1863,11 @@ def generate():
 
 
 # ============================================================
-# Video Generation (Seedance 2.0 / 2.5 — dual provider: jiekou / ark)
+# Video Generation (Seedance 2.0 / 2.5 via BytePlus Ark)
 # ============================================================
 
 VIDEO_CONFIG = config.get('video', {})
-CURRENT_VIDEO_PROVIDER = VIDEO_CONFIG.get('default_provider', 'jiekou')
-VIDEO_PROVIDERS = {
-    'jiekou': VIDEO_CONFIG.get('jiekou', {}),
-    'ark': VIDEO_CONFIG.get('ark', {})
-}
+ARK_VIDEO_CONFIG = VIDEO_CONFIG.get('ark', {})
 SEEDANCE_20 = 'seedance-2.0'
 SEEDANCE_25 = 'seedance-2.5'
 SEEDANCE_25_DEFAULT_MODEL = 'ep-20260807145632-xprc6'
@@ -1938,7 +1900,7 @@ ARK_VIDEO_MAX_IMAGE_BYTES = 30 * 1024 * 1024
 ARK_VIDEO_MAX_AUDIO_BYTES = 15 * 1024 * 1024
 
 
-def _resolve_video_model(provider, requested_model, provider_config, fast=False):
+def _resolve_video_model(requested_model, provider_config, fast=False):
     """Resolve a stable UI model alias to the provider's concrete model ID."""
     requested = str(requested_model or SEEDANCE_20).strip().lower()
     model_20 = str(provider_config.get('model') or 'dreamina-seedance-2-0-260128').strip()
@@ -1953,14 +1915,12 @@ def _resolve_video_model(provider, requested_model, provider_config, fast=False)
     else:
         raise ValueError(f'不支持的视频模型: {requested_model}')
 
-    if provider != 'ark' and model_key != SEEDANCE_20:
-        raise ValueError('Dreamina Seedance 2.5 仅支持 BytePlus Ark')
     spec = VIDEO_MODEL_SPECS[model_key]
     if fast and not spec['fast']:
         raise ValueError('Dreamina Seedance 2.5 不支持快速模式')
 
     model_id = model_25 if model_key == SEEDANCE_25 else model_20
-    if model_key == SEEDANCE_20 and fast and provider == 'ark':
+    if model_key == SEEDANCE_20 and fast:
         configured_fast = provider_config.get('fast_model')
         if configured_fast:
             model_id = str(configured_fast)
@@ -1971,9 +1931,7 @@ def _resolve_video_model(provider, requested_model, provider_config, fast=False)
     return model_key, model_id, spec
 
 
-def _video_fast_available(provider, provider_config):
-    if provider != 'ark':
-        return True
+def _video_fast_available(provider_config):
     model = str(provider_config.get('model') or 'dreamina-seedance-2-0-260128').strip()
     return bool(provider_config.get('fast_model')) or model == 'dreamina-seedance-2-0-260128'
 
@@ -2011,73 +1969,22 @@ def _validate_video_settings(model_key, spec, ratio, duration, resolution, outpu
     return None
 
 
-def get_session_video_provider():
-    provider = session.get('video_provider', CURRENT_VIDEO_PROVIDER)
-    return provider if provider in VIDEO_PROVIDERS else CURRENT_VIDEO_PROVIDER
-
-def get_video_provider():
-    return VIDEO_PROVIDERS.get(get_session_video_provider(), {})
-
-
-def get_video_provider_config(provider=None):
-    provider = provider if provider in VIDEO_PROVIDERS else get_session_video_provider()
-    return provider, VIDEO_PROVIDERS.get(provider, {})
-
-
 @app.route('/api/video/provider', methods=['GET'])
 def get_video_provider_info():
     return jsonify({
         'success': True,
-        'current': get_session_video_provider(),
-        'providers': list(VIDEO_PROVIDERS.keys()),
-        'capabilities': {
-            provider: {'fast_available': _video_fast_available(provider, provider_config)}
-            for provider, provider_config in VIDEO_PROVIDERS.items()
-        },
+        'current': 'ark',
+        'fast_available': _video_fast_available(ARK_VIDEO_CONFIG),
     })
-
-
-@app.route('/api/video/provider', methods=['POST'])
-def switch_video_provider():
-    data = request.get_json(silent=True) or {}
-    p = data.get('provider', '')
-    if p not in VIDEO_PROVIDERS:
-        return jsonify({'success': False, 'error': f'未知 provider: {p}'}), 400
-    if not VIDEO_PROVIDERS[p].get('api_key'):
-        return jsonify({'success': False, 'error': f'{p} 未配置 API Key'}), 400
-    session['video_provider'] = p
-    return jsonify({'success': True, 'current': p})
-
-
-def _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data):
-    """构建 jiekou.ai 请求体"""
-    body = {
-        'prompt': prompt, 'ratio': ratio, 'duration': duration, 'resolution': resolution,
-        'fast': fast, 'generate_audio': generate_audio, 'watermark': False,
-        'return_last_frame': return_last_frame, 'web_search': web_search
-    }
-    if video_mode == 'keyframe':
-        if files_data.get('first_frame'):
-            body['image'] = files_data['first_frame']
-        if files_data.get('last_frame'):
-            body['last_image'] = files_data['last_frame']
-    else:
-        if files_data.get('ref_images'):
-            body['reference_images'] = files_data['ref_images']
-        if files_data.get('ref_videos'):
-            body['reference_videos'] = files_data['ref_videos']
-        if files_data.get('ref_audios'):
-            body['reference_audios'] = files_data['ref_audios']
-    return body
 
 
 def _build_ark_body(
     prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame,
-    web_search, video_mode, files_data, provider_config=None, model_id=None,
+    video_mode, files_data, provider_config=None, model_id=None,
     model_key=SEEDANCE_20, output_format='mp4',
 ):
     """构建 Ark (BytePlus) 请求体"""
-    prov = provider_config or get_video_provider()
+    prov = provider_config or ARK_VIDEO_CONFIG
     model = model_id or prov.get('model', 'dreamina-seedance-2-0-260128')
 
     content = []
@@ -2141,7 +2048,7 @@ def _reference_audio_data_url(file_storage):
     return f'data:{mime};base64,{base64.b64encode(raw).decode("utf-8")}'
 
 
-def _parse_files(has_files, video_mode, provider=None, model_spec=None):
+def _parse_files(has_files, video_mode, model_spec=None):
     """从请求中提取文件数据，统一为 base64 data URI"""
     files_data = {}
     if not has_files:
@@ -2168,16 +2075,11 @@ def _parse_files(has_files, video_mode, provider=None, model_spec=None):
             files_data['ref_videos'] = []
             files_data['ref_video_paths'] = []
             for f in ref_vids:
-                if provider == 'ark':
-                    filepath, public_url = save_temp_file(f, suffix='.mp4')
-                    if not public_url:
-                        raise ValueError('视频参考需要在 config.json 中配置 server.public_host')
-                    files_data['ref_videos'].append(public_url)
-                    files_data['ref_video_paths'].append(filepath)
-                else:
-                    vid_b64 = base64.b64encode(f.read()).decode('utf-8')
-                    mime = f.content_type or 'video/mp4'
-                    files_data['ref_videos'].append(f'data:{mime};base64,{vid_b64}')
+                filepath, public_url = save_temp_file(f, suffix='.mp4')
+                if not public_url:
+                    raise ValueError('视频参考需要在 config.json 中配置 server.public_host')
+                files_data['ref_videos'].append(public_url)
+                files_data['ref_video_paths'].append(filepath)
         # 支持前端预上传的视频 URL
         ref_video_urls_raw = request.form.get('ref_video_urls')
         if ref_video_urls_raw:
@@ -2211,13 +2113,13 @@ def video_generate():
             prompt = request.form.get('prompt', '')
             ratio = request.form.get('ratio', 'adaptive')
             duration = request.form.get('duration', '5')
+            duration_provided = 'duration' in request.form
             resolution = request.form.get('resolution', '720p')
             fast = request.form.get('fast', 'false').lower() == 'true'
             generate_audio = request.form.get('generate_audio', 'true').lower() == 'true'
             return_last_frame = request.form.get('return_last_frame', 'false').lower() == 'true'
-            web_search = request.form.get('web_search', 'false').lower() == 'true'
             video_mode = request.form.get('video_mode', 'keyframe')
-            provider = request.form.get('provider', get_session_video_provider())
+            requested_provider = request.form.get('provider')
             requested_model = request.form.get('model', SEEDANCE_20)
             output_format = request.form.get('output_format', 'mp4').lower()
         else:
@@ -2225,23 +2127,26 @@ def video_generate():
             prompt = data.get('prompt', '')
             ratio = data.get('ratio', 'adaptive')
             duration = data.get('duration', 5)
+            duration_provided = 'duration' in data
             resolution = data.get('resolution', '720p')
             fast = as_bool(data.get('fast', False))
             generate_audio = as_bool(data.get('generate_audio', True), default=True)
             return_last_frame = as_bool(data.get('return_last_frame', False))
-            web_search = as_bool(data.get('web_search', False))
             video_mode = data.get('video_mode', 'keyframe')
-            provider = data.get('provider', get_session_video_provider())
+            requested_provider = data.get('provider')
             requested_model = data.get('model', SEEDANCE_20)
             output_format = str(data.get('output_format', 'mp4')).lower()
 
-        if provider not in VIDEO_PROVIDERS:
-            return jsonify({'success': False, 'error': f'未知 provider: {provider}'}), 400
-        provider, prov = get_video_provider_config(provider)
+        if requested_provider and requested_provider != 'ark':
+            return jsonify({'success': False, 'error': '视频生成仅支持 provider: ark'}), 400
+        provider = 'ark'
+        prov = ARK_VIDEO_CONFIG
         try:
-            model_key, model_id, model_spec = _resolve_video_model(provider, requested_model, prov, fast)
+            model_key, model_id, model_spec = _resolve_video_model(requested_model, prov, fast)
         except ValueError as error:
             return jsonify({'success': False, 'error': str(error)}), 400
+        if model_key == SEEDANCE_25 and not duration_provided:
+            duration = -1
         try:
             duration = int(duration)
         except (TypeError, ValueError):
@@ -2250,15 +2155,8 @@ def video_generate():
             return jsonify({'success': False, 'error': f'不支持的视频比例: {ratio}'}), 400
         if video_mode not in {'keyframe', 'reference'}:
             return jsonify({'success': False, 'error': f'不支持的视频模式: {video_mode}'}), 400
-        app.logger.warning(
-            'Video generate [%s/%s]: ratio=%s, duration=%s, resolution=%s, fast=%s, '
-            'audio=%s, return_last_frame=%s, mode=%s, output=%s',
-            provider, model_key, ratio, duration, resolution, fast, generate_audio,
-            return_last_frame, video_mode, output_format,
-        )
-
         try:
-            files_data = _parse_files(has_files, video_mode, provider, model_spec)
+            files_data = _parse_files(has_files, video_mode, model_spec)
         except ValueError as ve:
             return jsonify({'success': False, 'error': str(ve)}), 400
 
@@ -2271,6 +2169,13 @@ def video_generate():
                 return jsonify({'success': False, 'error': 'ref_video_urls 包含无效地址'}), 400
             if ref_video_urls:
                 files_data['ref_videos'] = ref_video_urls
+
+        app.logger.warning(
+            'Video generate [%s/%s]: ratio=%s, duration=%s, resolution=%s, fast=%s, '
+            'audio=%s, return_last_frame=%s, mode=%s, output=%s',
+            provider, model_key, ratio, duration, resolution, fast, generate_audio,
+            return_last_frame, video_mode, output_format,
+        )
 
         settings_error = _validate_video_settings(
             model_key, model_spec, ratio, duration, resolution, output_format,
@@ -2287,18 +2192,17 @@ def video_generate():
         if not api_key:
             return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
 
-        if provider == 'ark':
-            body = _build_ark_body(
-                prompt, ratio, duration, resolution, fast, generate_audio,
-                return_last_frame, web_search, video_mode, files_data, prov,
-                model_id=model_id, model_key=model_key, output_format=output_format,
-            )
-            url = f'{endpoint}/api/v3/contents/generations/tasks'
-            if len(json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode('utf-8')) > ARK_VIDEO_MAX_REQUEST_BYTES:
-                return jsonify({'success': False, 'error': '提交给 Ark 的请求体不能超过 64 MB'}), 400
-        else:
-            body = _build_jiekou_body(prompt, ratio, duration, resolution, fast, generate_audio, return_last_frame, web_search, video_mode, files_data)
-            url = f'{endpoint}/v3/async/seedance-2.0'
+        body = _build_ark_body(
+            prompt, ratio, duration, resolution, fast, generate_audio,
+            return_last_frame, video_mode, files_data, prov,
+            model_id=model_id, model_key=model_key, output_format=output_format,
+        )
+        url = f'{endpoint}/api/v3/contents/generations/tasks'
+        request_body_bytes = len(
+            json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        )
+        if request_body_bytes > ARK_VIDEO_MAX_REQUEST_BYTES:
+            return jsonify({'success': False, 'error': '提交给 Ark 的请求体不能超过 64 MB'}), 400
 
         params = {
             'model': model_key,
@@ -2329,7 +2233,73 @@ def video_generate():
         for path in ref_video_paths:
             task_db.link_asset(path, db_task_id, expires_at=None)
 
-        resp = HTTP.post(url, headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}, json=body, timeout=(10, REQUEST_TIMEOUT))
+        upload_timeout, request_timeout = resolve_ark_timeouts(prov)
+
+        request_info = {
+            'db_task_id': db_task_id,
+            'provider': provider,
+            'model': model_key,
+            'request_body_bytes': request_body_bytes,
+            'reference_images': len(files_data.get('ref_images', [])),
+            'reference_videos': len(files_data.get('ref_videos', [])),
+            'reference_audios': len(files_data.get('ref_audios', [])),
+        }
+        try:
+            resp = HTTP.post(
+                url,
+                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
+                json=body,
+                timeout=(upload_timeout, request_timeout),
+            )
+        except requests.exceptions.ConnectTimeout as error:
+            message = f'连接 {provider} API 超时，任务尚未提交，请重试'
+            task_db.fail_task(db_task_id, message)
+            save_error_log(f'{provider}_video_request_error', request_info, {}, str(error))
+            return jsonify({
+                'success': False,
+                'error': message,
+                'error_type': 'connect_timeout',
+                'retryable': True,
+                'result_unknown': False,
+                'db_task_id': db_task_id,
+            }), 503
+        except requests.exceptions.ReadTimeout as error:
+            message = f'{provider} 在 {request_timeout} 秒内未返回，任务结果未知；系统未自动重试'
+            task_db.fail_task(db_task_id, message)
+            save_error_log(f'{provider}_video_request_timeout', request_info, {}, str(error))
+            return jsonify({
+                'success': False,
+                'error': message,
+                'error_type': 'upstream_timeout',
+                'retryable': False,
+                'result_unknown': True,
+                'error_details': {'timeout_seconds': request_timeout},
+                'db_task_id': db_task_id,
+            }), 504
+        except requests.exceptions.RequestException as error:
+            error_text = str(error)
+            save_error_log(f'{provider}_video_request_error', request_info, {}, error_text)
+            if 'write operation timed out' in error_text.lower():
+                message = f'{provider} 请求体在 {upload_timeout} 秒内未上传完成，任务结果未知；系统未自动重试'
+                task_db.fail_task(db_task_id, message)
+                return jsonify({
+                    'success': False,
+                    'error': message,
+                    'error_type': 'upload_timeout',
+                    'retryable': False,
+                    'result_unknown': True,
+                    'error_details': {'timeout_seconds': upload_timeout},
+                    'db_task_id': db_task_id,
+                }), 504
+            message = f'{provider} API 网络请求失败: {error_text}'
+            task_db.fail_task(db_task_id, message)
+            return jsonify({
+                'success': False,
+                'error': message,
+                'error_type': 'request_error',
+                'retryable': False,
+                'db_task_id': db_task_id,
+            }), 502
         try:
             resp_data = resp.json() if resp.text else {}
         except ValueError:
@@ -2378,55 +2348,13 @@ ARK_STATUS_MAP = {
 }
 
 
-@app.route('/api/video/task', methods=['GET'])
-def video_task_status():
-    """Compatibility endpoint backed by the local task database."""
-    external_task_id = request.args.get('task_id')
-    provider = request.args.get('provider', get_session_video_provider())
-    if not external_task_id:
-        return jsonify({'success': False, 'error': '缺少 task_id'}), 400
-    task = task_db.get_task_by_external(provider, external_task_id)
-    if not task:
-        return jsonify({'success': False, 'error': '本地任务不存在'}), 404
-
-    status_map = {
-        'pending': 'TASK_STATUS_QUEUED',
-        'processing': 'TASK_STATUS_PROCESSING',
-        'cancel_requested': 'TASK_STATUS_PROCESSING',
-        'succeeded': 'TASK_STATUS_SUCCEED',
-        'failed': 'TASK_STATUS_FAILED',
-        'cancelled': 'TASK_STATUS_CANCELLED',
-    }
-    stored_result = task.get('result') or {}
-    task_params = task.get('params') or {}
-    output_format = task_params.get('output_format', 'mp4')
-    if output_format not in {'mp4', 'mov'}:
-        output_format = 'mp4'
-    videos = stored_result.get('videos') or []
-    images = stored_result.get('images') or []
-    if stored_result.get('local_video'):
-        videos = [{'video_url': stored_result['local_video'], 'video_type': output_format}]
-    if stored_result.get('local_last_frame'):
-        images = [{'image_url': stored_result['local_last_frame']}]
-    return jsonify({
-        'success': True,
-        'db_task_id': task['id'],
-        'status': status_map.get(task['status'], task['status']),
-        'reason': task.get('error') or '',
-        'progress': task.get('progress') or 0,
-        'eta': 0,
-        'videos': videos,
-        'images': images,
-    })
-
-
 # ============================================================
 # Task Management API
 # ============================================================
 
 WORKSPACE_STATE_KEYS = {
     'img_tabs', 'img_activeTab', 'appMode',
-    'vid_provider', 'vid_tabs', 'vid_activeTab',
+    'vid_tabs', 'vid_activeTab',
     'gallery_preferences',
 }
 
@@ -3181,28 +3109,24 @@ def poll_video_task_once(task_id):
 
     external_task_id = task.get('external_task_id')
     provider = task.get('provider') or 'ark'
+    if provider != 'ark':
+        reason = f'已停止支持视频 Provider: {provider}'
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
     task_params = task.get('params') or {}
     output_format = task_params.get('output_format', 'mp4')
     if output_format not in {'mp4', 'mov'}:
         output_format = 'mp4'
-    prov = VIDEO_PROVIDERS.get(provider, {})
+    prov = ARK_VIDEO_CONFIG
     api_key = prov.get('api_key', '')
     endpoint = prov.get('endpoint', '')
 
     try:
-        if provider == 'ark':
-            response = HTTP.get(
-                f'{endpoint}/api/v3/contents/generations/tasks/{external_task_id}',
-                headers={'Authorization': f'Bearer {api_key}'},
-                timeout=(10, POLL_TIMEOUT),
-            )
-        else:
-            response = HTTP.get(
-                f'{endpoint}/v3/async/task-result',
-                headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-                params={'task_id': external_task_id},
-                timeout=(10, POLL_TIMEOUT),
-            )
+        response = HTTP.get(
+            f'{endpoint}/api/v3/contents/generations/tasks/{external_task_id}',
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=(10, POLL_TIMEOUT),
+        )
     except requests.RequestException as e:
         return {'state': 'retry', 'error': str(e)}
 
@@ -3229,21 +3153,13 @@ def poll_video_task_once(task_id):
         task_db.fail_task(task_id, reason)
         return {'state': 'failed', 'error': reason}
 
-    if provider == 'ark':
-        mapped_status = ARK_STATUS_MAP.get(response_data.get('status', ''), response_data.get('status', ''))
-        content = response_data.get('content') or {}
-        videos = [{'video_url': content['video_url'], 'video_type': output_format}] if content.get('video_url') else []
-        images = [{'image_url': content['last_frame_url']}] if content.get('last_frame_url') else []
-        error_obj = response_data.get('error', {})
-        reason = error_obj.get('message', '') if isinstance(error_obj, dict) else str(error_obj or '')
-        progress = 0
-    else:
-        task_info = response_data.get('task') or {}
-        mapped_status = task_info.get('status', '')
-        videos = response_data.get('videos') or []
-        images = response_data.get('images') or []
-        reason = task_info.get('reason', '')
-        progress = int(task_info.get('progress_percent', 0) or 0)
+    mapped_status = ARK_STATUS_MAP.get(response_data.get('status', ''), response_data.get('status', ''))
+    content = response_data.get('content') or {}
+    videos = [{'video_url': content['video_url'], 'video_type': output_format}] if content.get('video_url') else []
+    images = [{'image_url': content['last_frame_url']}] if content.get('last_frame_url') else []
+    error_obj = response_data.get('error', {})
+    reason = error_obj.get('message', '') if isinstance(error_obj, dict) else str(error_obj or '')
+    progress = 0
 
     if mapped_status == 'TASK_STATUS_FAILED':
         task_db.fail_task(task_id, reason or '视频生成失败')
@@ -3360,31 +3276,26 @@ if __name__ == '__main__':
     print()
     print('API Providers:')
     print(f'  Current: {CURRENT_PROVIDER.upper()}')
+    current_api = API_PROVIDERS[CURRENT_PROVIDER]
     if CURRENT_PROVIDER == 'vertex':
         print(f'    Provider: Vertex AI')
-        print(f'    Endpoint: {API_ENDPOINT}')
-        print(f'    Model: {MODEL_ID}')
-        print(f'    Project ID: {PROJECT_ID}')
-        print(f'    API Key: {"configured" if API_KEY else "missing"}')
-    elif CURRENT_PROVIDER == 'ark':
-        print(f'    Provider: BytePlus Ark')
-        print(f'    Endpoint: {API_PROVIDERS["ark"].get("endpoint", "")}')
-        print(f'    Model: {API_PROVIDERS["ark"].get("model", "")}')
-        print(f'    API Key: {"configured" if API_PROVIDERS["ark"].get("api_key", "") else "missing"}')
+        print(f'    Endpoint: {current_api.get("endpoint", "")}')
+        print(f'    Model: {current_api.get("model_id", CURRENT_MODEL)}')
+        print(f'    API Key: {"configured" if current_api.get("key") else "missing"}')
     else:
-        print(f'    Provider: Google AI Studio')
-        print(f'    Endpoint: {API_ENDPOINT}')
-        print(f'    Model: {MODEL_ID}')
-        print(f'    API Key: {"configured" if API_KEY else "missing"}')
+        print(f'    Provider: BytePlus Ark')
+        print(f'    Endpoint: {current_api.get("endpoint", "")}')
+        print(f'    Model: {current_api.get("model", "")}')
+        print(f'    API Key: {"configured" if current_api.get("api_key") else "missing"}')
     print()
     # 显示备用 provider
-    for alt_provider in ['vertex', 'ai_studio', 'ark']:
+    for alt_provider in ['vertex', 'ark']:
         if alt_provider == CURRENT_PROVIDER:
             continue
         alt_cfg = API_PROVIDERS.get(alt_provider, {})
         has_key = bool(alt_cfg.get('key') or alt_cfg.get('api_key'))
         if has_key:
-            alt_names = {'vertex': 'Vertex AI', 'ai_studio': 'Google AI Studio', 'ark': 'BytePlus Ark'}
+            alt_names = {'vertex': 'Vertex AI', 'ark': 'BytePlus Ark'}
             print(f'  Backup: {alt_provider.upper()} ({alt_names[alt_provider]}) - Available')
     print('=' * 60)
     print(f'Starting server on http://{SERVER_HOST}:{SERVER_PORT}')
