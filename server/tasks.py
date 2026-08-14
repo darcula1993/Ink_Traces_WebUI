@@ -119,6 +119,43 @@ def init_db():
         )
     ''')
     db.execute('''
+        CREATE TABLE IF NOT EXISTS provider_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider TEXT NOT NULL,
+            external_asset_id TEXT,
+            asset_uri TEXT,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            sha256 TEXT NOT NULL,
+            original_name TEXT,
+            mime_type TEXT,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            local_path TEXT NOT NULL,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            last_used_at TEXT,
+            deleted_at TEXT,
+            next_run_at TEXT,
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            lease_owner TEXT,
+            lease_until TEXT,
+            UNIQUE(provider, kind, sha256)
+        )
+    ''')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS task_provider_assets (
+            task_id INTEGER NOT NULL,
+            provider_asset_id INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(task_id, role, position),
+            FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY(provider_asset_id) REFERENCES provider_assets(id) ON DELETE RESTRICT
+        )
+    ''')
+    db.execute('''
         CREATE TABLE IF NOT EXISTS worker_heartbeats (
             worker_id TEXT PRIMARY KEY,
             pid INTEGER NOT NULL,
@@ -204,8 +241,13 @@ def init_db():
     db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type_deleted_id ON tasks(type, deleted_at, id DESC)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type_deleted_updated ON tasks(type, deleted_at, updated_at DESC, id DESC)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type_deleted_favorite ON tasks(type, deleted_at, favorite, id DESC)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type_deleted_provider ON tasks(type, deleted_at, provider, id DESC)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type_deleted_created ON tasks(type, deleted_at, created_at DESC)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_assets_task ON task_assets(task_id)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_assets_expiry ON task_assets(expires_at)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_provider_assets_queue ON provider_assets(status, next_run_at, lease_until)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_provider_assets_external ON provider_assets(provider, external_asset_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_task_provider_assets_asset ON task_provider_assets(provider_asset_id, task_id)')
     db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external ON tasks(provider, external_task_id) WHERE external_task_id IS NOT NULL')
     db.execute('CREATE INDEX IF NOT EXISTS idx_task_favorite_groups_group ON task_favorite_groups(group_id, task_id)')
     now = utcnow()
@@ -350,7 +392,8 @@ def _fts_search_query(value):
 
 
 def _task_filters(task_type=None, status=None, favorite=None, active=False, search=None,
-                  deleted=False, favorite_group=None, ungrouped=False):
+                  deleted=False, favorite_group=None, ungrouped=False, provider=None,
+                  model=None, created_after=None):
     clauses = []
     params = []
     if deleted is True:
@@ -363,6 +406,15 @@ def _task_filters(task_type=None, status=None, favorite=None, active=False, sear
     if status:
         clauses.append('t.status = ?')
         params.append(status)
+    if provider:
+        clauses.append("LOWER(COALESCE(t.provider, '')) = LOWER(?)")
+        params.append(provider)
+    if model:
+        clauses.append("json_valid(t.params) AND COALESCE(json_extract(t.params, '$.model'), '') = ?")
+        params.append(model)
+    if created_after:
+        clauses.append('t.created_at >= ?')
+        params.append(created_after)
     if favorite is not None:
         clauses.append('t.favorite = ?')
         params.append(1 if favorite else 0)
@@ -436,13 +488,15 @@ def _attach_favorite_groups(tasks):
 
 def list_tasks(task_type=None, status=None, limit=50, offset=0, summary=False,
                favorite=None, active=False, search=None, deleted=False,
-               favorite_group=None, ungrouped=False, sort='newest'):
+               favorite_group=None, ungrouped=False, sort='newest', provider=None,
+               model=None, created_after=None):
     if summary:
         result_summary = '''
             CASE WHEN json_valid(t.result) THEN json_object(
                 'local_images', json_extract(t.result, '$.local_images'),
                 'local_thumbnails', json_extract(t.result, '$.local_thumbnails'),
                 'local_refs', json_extract(t.result, '$.local_refs'),
+                'source_urls', json_extract(t.result, '$.source_urls'),
                 'local_video', json_extract(t.result, '$.local_video'),
                 'local_last_frame', json_extract(t.result, '$.local_last_frame'),
                 'local_thumbnail', json_extract(t.result, '$.local_thumbnail'),
@@ -458,6 +512,7 @@ def list_tasks(task_type=None, status=None, limit=50, offset=0, summary=False,
         columns = 't.*'
     clauses, filter_params = _task_filters(
         task_type, status, favorite, active, search, deleted, favorite_group, ungrouped,
+        provider, model, created_after,
     )
     where = f' WHERE {" AND ".join(clauses)}' if clauses else ''
     query = f'SELECT {columns} FROM tasks t{where} ORDER BY {_task_order(sort)}'
@@ -475,9 +530,11 @@ def list_tasks(task_type=None, status=None, limit=50, offset=0, summary=False,
 
 
 def list_task_ids(task_type=None, favorite=None, active=False, search=None,
-                  deleted=False, favorite_group=None, ungrouped=False, sort='newest'):
+                  deleted=False, favorite_group=None, ungrouped=False, sort='newest',
+                  status=None, provider=None, model=None, created_after=None):
     clauses, params = _task_filters(
-        task_type, None, favorite, active, search, deleted, favorite_group, ungrouped,
+        task_type, status, favorite, active, search, deleted, favorite_group, ungrouped,
+        provider, model, created_after,
     )
     where = f' WHERE {" AND ".join(clauses)}' if clauses else ''
     query = f'SELECT t.id FROM tasks t{where} ORDER BY {_task_order(sort)}'
@@ -486,9 +543,11 @@ def list_task_ids(task_type=None, favorite=None, active=False, search=None,
 
 def get_task_navigation(task_id=None, task_type=None, favorite=None, active=False,
                         search=None, deleted=False, favorite_group=None,
-                        ungrouped=False, sort='newest'):
+                        ungrouped=False, sort='newest', status=None, provider=None,
+                        model=None, created_after=None):
     clauses, params = _task_filters(
-        task_type, None, favorite, active, search, deleted, favorite_group, ungrouped,
+        task_type, status, favorite, active, search, deleted, favorite_group, ungrouped,
+        provider, model, created_after,
     )
     where = f' WHERE {" AND ".join(clauses)}' if clauses else ''
     order = _task_order(sort)
@@ -527,6 +586,31 @@ def get_task_navigation(task_id=None, task_type=None, favorite=None, active=Fals
     return {key: row[key] for key in row.keys() if key != 'id'}
 
 
+def get_task_filter_options(task_type=None, deleted=False):
+    clauses, params = _task_filters(task_type=task_type, deleted=deleted)
+    where = f' WHERE {" AND ".join(clauses)}' if clauses else ''
+    connector = ' AND ' if where else ' WHERE '
+    db = get_db()
+    providers = [
+        row['provider'] for row in db.execute(
+            f'''SELECT DISTINCT t.provider AS provider FROM tasks t{where}{connector}
+                COALESCE(t.provider, '') != ''
+                ORDER BY t.provider COLLATE NOCASE''',
+            params,
+        ).fetchall()
+    ]
+    models = [
+        row['model'] for row in db.execute(
+            f'''SELECT DISTINCT json_extract(t.params, '$.model') AS model FROM tasks t{where}{connector}
+                json_valid(t.params)
+                AND COALESCE(json_extract(t.params, '$.model'), '') != ''
+                ORDER BY model COLLATE NOCASE''',
+            params,
+        ).fetchall()
+    ]
+    return {'providers': providers, 'models': models}
+
+
 def claim_next_task(worker_id, lease_seconds=900):
     """Atomically lease one due image execution or video polling task."""
     db = get_db()
@@ -541,7 +625,8 @@ def claim_next_task(worker_id, lease_seconds=900):
               AND (lease_until IS NULL OR lease_until < ?)
               AND (
                     (type = 'image' AND status = 'pending')
-                 OR (type = 'video' AND status IN ('pending', 'processing') AND external_task_id IS NOT NULL)
+                 OR (type = 'video' AND status IN ('pending', 'processing')
+                     AND (external_task_id IS NOT NULL OR provider = 'cupsy'))
               )
             ORDER BY CASE type WHEN 'video' THEN 0 ELSE 1 END, id ASC
             LIMIT 1
@@ -579,6 +664,12 @@ def release_worker_leases(worker_id):
                lease_owner = NULL, lease_until = NULL, updated_at = ?
            WHERE lease_owner = ?''',
         (utcnow(), utcnow(), worker_id),
+    )
+    db.execute(
+        '''UPDATE provider_assets
+           SET lease_owner = NULL, lease_until = NULL, updated_at = ?
+           WHERE lease_owner = ?''',
+        (utcnow(), worker_id),
     )
     db.commit()
 
@@ -1007,6 +1098,186 @@ def delete_assets(paths):
     return db.total_changes - before
 
 
+def create_provider_asset(provider, kind, sha256, original_name, mime_type, size_bytes, local_path):
+    """Create or revive a content-addressed provider Asset record."""
+    now = utcnow()
+    db = get_db()
+    db.execute(
+        '''INSERT INTO provider_assets
+           (provider, kind, sha256, original_name, mime_type, size_bytes, local_path,
+            status, created_at, updated_at, next_run_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+           ON CONFLICT(provider, kind, sha256) DO UPDATE SET
+             original_name = excluded.original_name,
+             mime_type = excluded.mime_type,
+             size_bytes = excluded.size_bytes,
+             local_path = excluded.local_path,
+             status = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN 'pending'
+               ELSE provider_assets.status
+             END,
+             external_asset_id = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN NULL
+               ELSE provider_assets.external_asset_id
+             END,
+             asset_uri = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN NULL
+               ELSE provider_assets.asset_uri
+             END,
+             error = CASE WHEN provider_assets.deleted_at IS NOT NULL THEN NULL ELSE provider_assets.error END,
+             deleted_at = NULL,
+             next_run_at = CASE WHEN provider_assets.deleted_at IS NOT NULL THEN excluded.next_run_at ELSE provider_assets.next_run_at END,
+             updated_at = excluded.updated_at''',
+        (provider, kind, sha256, original_name, mime_type, int(size_bytes or 0),
+         os.path.abspath(local_path), now, now, now),
+    )
+    db.commit()
+    row = db.execute(
+        'SELECT * FROM provider_assets WHERE provider = ? AND kind = ? AND sha256 = ?',
+        (provider, kind, sha256),
+    ).fetchone()
+    return dict(row)
+
+
+def get_provider_asset(asset_id):
+    row = get_db().execute('SELECT * FROM provider_assets WHERE id = ?', (int(asset_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def list_provider_assets(provider='cupsy', include_deleted=False):
+    query = 'SELECT * FROM provider_assets WHERE provider = ?'
+    if not include_deleted:
+        query += ' AND deleted_at IS NULL'
+    query += ' ORDER BY id DESC'
+    return [dict(row) for row in get_db().execute(query, (provider,)).fetchall()]
+
+
+def update_provider_asset(asset_id, **kwargs):
+    allowed = {
+        'external_asset_id', 'asset_uri', 'status', 'error', 'updated_at', 'last_used_at',
+        'deleted_at', 'next_run_at', 'attempt_count', 'lease_owner', 'lease_until',
+        'mime_type', 'size_bytes',
+    }
+    fields = {key: value for key, value in kwargs.items() if key in allowed}
+    if not fields:
+        return False
+    fields.setdefault('updated_at', utcnow())
+    sets = ', '.join(f'{key} = ?' for key in fields)
+    cursor = get_db().execute(
+        f'UPDATE provider_assets SET {sets} WHERE id = ?',
+        list(fields.values()) + [int(asset_id)],
+    )
+    get_db().commit()
+    return cursor.rowcount > 0
+
+
+def claim_next_provider_asset(worker_id, lease_seconds=300):
+    db = get_db()
+    now = utcnow()
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        row = db.execute(
+            '''SELECT * FROM provider_assets
+               WHERE deleted_at IS NULL
+                 AND status IN ('pending', 'processing', 'deleting')
+                 AND (next_run_at IS NULL OR next_run_at <= ?)
+                 AND (lease_until IS NULL OR lease_until < ?)
+               ORDER BY id ASC LIMIT 1''',
+            (now, now),
+        ).fetchone()
+        if row is None:
+            db.commit()
+            return None
+        lease_until = _future(lease_seconds)
+        cursor = db.execute(
+            '''UPDATE provider_assets
+               SET lease_owner = ?, lease_until = ?, attempt_count = attempt_count + 1,
+                   updated_at = ?
+               WHERE id = ? AND (lease_until IS NULL OR lease_until < ?)''',
+            (worker_id, lease_until, now, row['id'], now),
+        )
+        if cursor.rowcount != 1:
+            db.rollback()
+            return None
+        db.commit()
+        return get_provider_asset(row['id'])
+    except Exception:
+        db.rollback()
+        raise
+
+
+def reschedule_provider_asset(asset_id, delay_seconds, status='processing', error=None):
+    now = utcnow()
+    cursor = get_db().execute(
+        '''UPDATE provider_assets
+           SET status = ?, next_run_at = ?, updated_at = ?, lease_owner = NULL, lease_until = NULL,
+               error = CASE WHEN ? IS NULL THEN error ELSE ? END
+           WHERE id = ? AND deleted_at IS NULL''',
+        (status, _future(delay_seconds), now, error, None if error is None else str(error), int(asset_id)),
+    )
+    get_db().commit()
+    return cursor.rowcount > 0
+
+
+def link_task_provider_asset(task_id, provider_asset_id, role, position):
+    now = utcnow()
+    db = get_db()
+    db.execute(
+        '''INSERT INTO task_provider_assets (task_id, provider_asset_id, role, position, created_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(task_id, role, position) DO UPDATE SET provider_asset_id = excluded.provider_asset_id''',
+        (int(task_id), int(provider_asset_id), role, int(position), now),
+    )
+    db.execute(
+        'UPDATE provider_assets SET last_used_at = ?, updated_at = ? WHERE id = ?',
+        (now, now, int(provider_asset_id)),
+    )
+    db.commit()
+
+
+def list_task_provider_assets(task_id):
+    rows = get_db().execute(
+        '''SELECT pa.*, tpa.role, tpa.position
+           FROM task_provider_assets tpa
+           JOIN provider_assets pa ON pa.id = tpa.provider_asset_id
+           WHERE tpa.task_id = ?
+           ORDER BY tpa.position, tpa.role''',
+        (int(task_id),),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_task_provider_assets_for_tasks(task_ids, kinds=None):
+    normalized_ids = list(dict.fromkeys(int(task_id) for task_id in task_ids))
+    if not normalized_ids:
+        return []
+    normalized_kinds = list(dict.fromkeys(kinds or []))
+    placeholders = ','.join('?' for _ in normalized_ids)
+    query = f'''SELECT pa.*, tpa.task_id, tpa.role, tpa.position
+                FROM task_provider_assets tpa
+                JOIN provider_assets pa ON pa.id = tpa.provider_asset_id
+                WHERE tpa.task_id IN ({placeholders})'''
+    params = list(normalized_ids)
+    if normalized_kinds:
+        kind_placeholders = ','.join('?' for _ in normalized_kinds)
+        query += f' AND pa.kind IN ({kind_placeholders})'
+        params.extend(normalized_kinds)
+    query += ' ORDER BY tpa.task_id, tpa.position, tpa.role'
+    return [dict(row) for row in get_db().execute(query, params).fetchall()]
+
+
+def provider_asset_has_active_tasks(asset_id):
+    row = get_db().execute(
+        '''SELECT 1 FROM task_provider_assets tpa
+           JOIN tasks t ON t.id = tpa.task_id
+           WHERE tpa.provider_asset_id = ? AND t.deleted_at IS NULL
+             AND t.status IN ('submitting', 'preparing', 'pending', 'processing', 'cancel_requested')
+           LIMIT 1''',
+        (int(asset_id),),
+    ).fetchone()
+    return row is not None
+
+
 def upsert_worker_heartbeat(worker_id, pid, started_at):
     now = utcnow()
     db = get_db()
@@ -1068,6 +1339,14 @@ def recover_dead_worker_leases(stale_seconds=30):
                    WHEN status = 'cancel_requested' THEN NULL
                    ELSE COALESCE(next_run_at, ?)
                END
+               WHERE lease_owner = ?''',
+            (utcnow(), utcnow(), row['worker_id']),
+        )
+        recovered += cursor.rowcount
+        cursor = db.execute(
+            '''UPDATE provider_assets
+               SET lease_owner = NULL, lease_until = NULL,
+                   next_run_at = COALESCE(next_run_at, ?), updated_at = ?
                WHERE lease_owner = ?''',
             (utcnow(), utcnow(), row['worker_id']),
         )

@@ -59,6 +59,20 @@ const FAST_UNIT_PRICE_CNY = {
   '720p': { withoutVideo: 37, withVideo: 22 },
 }
 
+// BytePlus Seedance 2.5 official rates are USD 10.70/M tokens without video
+// input and USD 6.40/M tokens with video input. Preserve the existing CNY
+// display basis used by the corresponding Seedance 2.0 rates.
+const SEEDANCE_25_UNIT_PRICE_CNY = {
+  '480p': {
+    withoutVideo: STANDARD_UNIT_PRICE_CNY['480p'].withoutVideo * (10.70 / 7.00),
+    withVideo: STANDARD_UNIT_PRICE_CNY['480p'].withVideo * (6.40 / 4.30),
+  },
+  '720p': {
+    withoutVideo: STANDARD_UNIT_PRICE_CNY['720p'].withoutVideo * (10.70 / 7.00),
+    withVideo: STANDARD_UNIT_PRICE_CNY['720p'].withVideo * (6.40 / 4.30),
+  },
+}
+
 function outputDurationRange(model, duration) {
   if (Number(duration) !== -1) {
     const seconds = Number(duration)
@@ -109,11 +123,13 @@ export function estimateBytePlusVideoCost({
   const input = referenceVideoSeconds(normalizedModel, readyVideos)
   const hasVideo = readyVideos.length > 0
   const useFastPrice = normalizedModel === 'seedance-2.0' && Boolean(fast)
-  const priceTable = useFastPrice ? FAST_UNIT_PRICE_CNY : STANDARD_UNIT_PRICE_CNY
+  const priceTable = normalizedModel === 'seedance-2.5'
+    ? SEEDANCE_25_UNIT_PRICE_CNY
+    : useFastPrice
+      ? FAST_UNIT_PRICE_CNY
+      : STANDARD_UNIT_PRICE_CNY
   const priceRow = priceTable[resolution] || priceTable['720p']
-  const baseUnitPrice = hasVideo ? priceRow.withVideo : priceRow.withoutVideo
-  const multiplier = normalizedModel === 'seedance-2.5' ? 1.5 : 1
-  const unitPrice = baseUnitPrice * multiplier
+  const unitPrice = hasVideo ? priceRow.withVideo : priceRow.withoutVideo
   const [minimumOutputSeconds, maximumOutputSeconds] = outputDurationRange(normalizedModel, duration)
   const minimumTokens = tokensForSeconds(input.seconds + minimumOutputSeconds, width, height)
   const maximumTokens = tokensForSeconds(input.seconds + maximumOutputSeconds, width, height)
@@ -134,7 +150,6 @@ export function estimateBytePlusVideoCost({
     minimumTokens,
     maximumTokens,
     unitPrice,
-    multiplier,
     minimumCost: minimumTokens / 1_000_000 * unitPrice,
     maximumCost: maximumTokens / 1_000_000 * unitPrice,
   }

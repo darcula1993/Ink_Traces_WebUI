@@ -34,6 +34,15 @@ def test_video_validation_returns_400(monkeypatch):
     assert response.get_json()['error'] == 'duration 必须是整数'
 
 
+def test_removed_video_prompt_tools_are_not_routable(monkeypatch):
+    monkeypatch.setattr(application, 'AUTH_CONFIG', {})
+    routes = {rule.rule for rule in application.app.url_map.iter_rules()}
+
+    assert '/api/video/optimize-prompt' not in routes
+    assert '/api/video/prompt-agent/session' not in routes
+    assert '/api/video/prompt-agent/message' not in routes
+
+
 def test_task_favorite_api():
     task_id = task_db.create_task('image', 'favorite me', {})
     client = application.app.test_client()
@@ -111,6 +120,39 @@ def test_task_status_batch_and_filtered_navigation():
     assert first not in navigation.values()
 
 
+def test_task_advanced_filters_are_consistent_across_gallery_actions():
+    old_ark = task_db.create_task('video', 'old ark task', {'model': 'seedance-a'}, provider='ark')
+    recent_ark = task_db.create_task('video', 'recent ark task', {'model': 'seedance-a'}, provider='ark')
+    task_db.create_task('video', 'cupsy task', {'model': 'seedance-b'}, provider='cupsy')
+    task_db.create_task('image', 'image task', {'model': 'seedream-a'}, provider='ark')
+    task_db.update_task(old_ark, status='succeeded')
+    task_db.update_task(recent_ark, status='succeeded')
+    task_db.get_db().execute(
+        "UPDATE tasks SET created_at = '2020-01-01T00:00:00+00:00' WHERE id = ?",
+        (old_ark,),
+    )
+    task_db.get_db().commit()
+    client = application.app.test_client()
+    params = (
+        'type=video&provider=ark&model=seedance-a&status=succeeded'
+        '&created_after=2025-01-01T00:00:00Z'
+    )
+
+    listed = client.get(f'/api/tasks?{params}').get_json()
+    assert listed['total'] == 1
+    assert [task['id'] for task in listed['tasks']] == [recent_ark]
+    selected = client.get(f'/api/tasks/selection?view=all&{params}').get_json()
+    assert selected['ids'] == [recent_ark]
+    navigation = client.get(f'/api/tasks/{recent_ark}/navigation?view=all&{params}').get_json()['navigation']
+    assert navigation['total'] == 1
+    assert navigation['position'] == 1
+
+    options = client.get('/api/tasks/filter-options?type=video').get_json()
+    assert options['providers'] == ['ark', 'cupsy']
+    assert options['models'] == ['seedance-a', 'seedance-b']
+    assert client.get('/api/tasks?created_after=not-a-date').status_code == 400
+
+
 def test_favorite_group_api_filters_and_keeps_ungrouped_favorites():
     client = application.app.test_client()
     grouped = task_db.create_task('image', 'grouped task', {})
@@ -147,10 +189,13 @@ def test_favorite_group_api_filters_and_keeps_ungrouped_favorites():
 def test_bulk_download_builds_unique_task_paths():
     first = task_db.create_task('image', 'first', {})
     second = task_db.create_task('image', 'second', {})
+    originals = {}
     for task_id in (first, second):
         output_dir = storage.task_output_dir('image', task_id)
         path = os.path.join(output_dir, 'image_0.png')
         Image.new('RGB', (2, 2), (task_id, 20, 30)).save(path, format='PNG')
+        with open(path, 'rb') as source:
+            originals[task_id] = source.read()
         storage.register_file(task_id, 'output_image', path, 'image/png')
         task_db.complete_task(task_id, {'local_images': [f'/api/tasks/{task_id}/file/image_0.png']}, output_dir)
 
@@ -172,6 +217,18 @@ def test_bulk_download_builds_unique_task_paths():
             assert metadata['prompt'] == prompt
             assert 'provider' not in metadata
             assert 'model' not in metadata
+
+    raw_response = application.app.test_client().post(
+        '/api/tasks/bulk-download', json={'ids': [first, second], 'raw': True},
+    )
+    assert raw_response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(raw_response.data)) as archive:
+        names = archive.namelist()
+        assert len(names) == 2
+        for task_id in (first, second):
+            name = next(name for name in names if name.startswith(f'image-task-{task_id}/'))
+            assert name.endswith('-output-01-original.png')
+            assert archive.read(name) == originals[task_id]
 
 
 def test_workspace_state_externalizes_data_urls():

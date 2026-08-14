@@ -18,22 +18,25 @@ test('estimates Seedance 2.0 against the documented 720p example', () => {
   assert.equal(formatCnyEstimate(estimate), '¥4.97')
 })
 
-test('prices Seedance 2.5 at 1.5 times Seedance 2.0', () => {
-  const seedance20 = estimateBytePlusVideoCost({
-    model: 'seedance-2.0',
-    resolution: '720p',
-    ratio: '16:9',
-    duration: 5,
-  })
-  const seedance25 = estimateBytePlusVideoCost({
+test('prices Seedance 2.5 with the official input-specific rates', () => {
+  const withoutVideo = estimateBytePlusVideoCost({
     model: 'seedance-2.5',
     resolution: '720p',
     ratio: '16:9',
     duration: 5,
   })
+  const withVideo = estimateBytePlusVideoCost({
+    model: 'seedance-2.5',
+    resolution: '720p',
+    ratio: '16:9',
+    duration: 5,
+    referenceVideos: [{ url: '/reference.mp4', duration: 5 }],
+  })
 
-  assert.equal(seedance25.minimumCost, seedance20.minimumCost * 1.5)
-  assert.equal(formatCnyEstimate(seedance25), '¥7.45')
+  assert.equal(withoutVideo.unitPrice, 46 * (10.70 / 7.00))
+  assert.equal(withVideo.unitPrice, 28 * (6.40 / 4.30))
+  assert.equal(formatCnyEstimate(withoutVideo), '¥7.59')
+  assert.equal(formatCnyEstimate(withVideo), '¥9.00')
 })
 
 test('uses actual reference duration and the four-second billing floor', () => {

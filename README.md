@@ -88,8 +88,6 @@ Only templates are committed. Local runtime files are ignored by Git.
 | `config.json.example` | Public config template with empty credentials | Committed |
 | `config.json` | Local credentials, ports, provider settings, auth settings | Ignored |
 | `.flask_secret_key` | Auto-generated local Flask session secret when not set in config | Ignored |
-| `prompts/video_prompt_rewriter.md` | System prompt used by quick one-click video prompt rewriting | Committed |
-| `prompts/video_prompt_optimizer.md` | Skill-style system prompt used by the interactive video Prompt Agent | Committed |
 | `server/prompts.json.example` | Sample Prompt Vault data | Committed |
 | `server/prompts.json` | Legacy Prompt Vault data imported into SQLite on first use | Ignored |
 
@@ -116,9 +114,32 @@ For video reference uploads through Ark, set `server.public_host`, `server.publi
 
 Dreamina Seedance 2.5 reuses `video.ark.api_key`. Configure its endpoint ID in `video.ark.seedance_2_5_model`; `config.json.example` includes the current default. The UI applies the model-specific limits for resolution, duration, output format, and reference counts.
 
-Set `auth.secret_key` or `INK_TRACES_SECRET_KEY` for controlled deployments. If neither is set, the backend creates an ignored local `.flask_secret_key` file so browser sessions survive restarts without committing secrets.
+Cupsy is available as a separate Seedance 2.5 video endpoint. Keep its key out
+of the repository and provide it with `CUPSY_API_KEY` (or the ignored local
+`video.cupsy.api_key`). Reference media is imported through Cupsy Assets, so
+`CUPSY_SOURCE_BASE_URL` or `video.cupsy.source_base_url` must be a public
+HTTP(S) origin that routes back to this application. HTTPS is recommended so
+signed source URLs are not sent in cleartext. The backend exposes only a
+short-lived signed source URL; generated videos are downloaded locally and are
+never imported into Assets. See `doc/cupsy_compatibility.md` for the verified
+provider contract.
 
-For video prompt optimization, set `openai.api_key` in `config.json` or export `OPENAI_API_KEY`. Quick Fix uses `prompts/video_prompt_rewriter.md`; Prompt Agent uses the skill-style workflow in `prompts/video_prompt_optimizer.md`.
+### IP-only HTTPS for Cupsy sources
+
+Cupsy accepts public HTTP(S) source URLs. This deployment terminates HTTPS on
+the public IP with a free, short-lived Let's Encrypt IP certificate and proxies
+only `/api/cupsy/source/` to Gunicorn. Repository templates are in:
+
+- `deploy/nginx/nanobanana-cupsy.conf`
+- `deploy/certbot/reload-nginx.sh`
+
+IP certificates use the `shortlived` profile and require reliable automated
+renewal. Certbot is configured with the Nginx-served webroot
+`/var/www/certbot`; the Snap renewal timer runs automatically and the deploy
+hook reloads Nginx after a successful renewal. Signed source URLs are disabled
+in Nginx access logs and redacted from application logs.
+
+Set `auth.secret_key` or `INK_TRACES_SECRET_KEY` for controlled deployments. If neither is set, the backend creates an ignored local `.flask_secret_key` file so browser sessions survive restarts without committing secrets.
 
 ## Project Layout
 
@@ -160,8 +181,10 @@ Ink_Traces_WebUI/
 | `POST /api/generate` | Queue image generation; chat mode remains synchronous |
 | `GET/POST /api/prompts` | List or save Prompt Vault entries |
 | `PUT/DELETE /api/prompts/:id` | Edit or delete Prompt Vault entries |
-| `GET /api/video/provider` | Get Ark video capabilities |
+| `GET /api/video/provider` | Get Ark and Cupsy video capabilities |
 | `POST /api/video/generate` | Submit video generation task |
+| `GET/POST /api/cupsy/assets` | List or import reusable Cupsy reference Assets |
+| `GET/DELETE /api/cupsy/assets/:id` | Preview or delete a Cupsy Asset |
 | `GET /api/tasks` | List local task history |
 | `GET/DELETE /api/tasks/:id` | Restore or delete local task |
 | `POST /api/upload_video` | Upload reference video for external provider access |

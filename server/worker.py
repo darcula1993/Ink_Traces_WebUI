@@ -65,6 +65,12 @@ class Worker:
                         storage.release_process_memory()
                         self.last_memory_trim = time.monotonic()
                     while len(futures) < self.concurrency and not self.stopping:
+                        asset = task_db.claim_next_provider_asset(
+                            self.worker_id, lease_seconds=min(self.lease_seconds, 300)
+                        )
+                        if asset is not None:
+                            futures.add(executor.submit(self.process_provider_asset, asset))
+                            continue
                         task = task_db.claim_next_task(self.worker_id, lease_seconds=self.lease_seconds)
                         if task is None:
                             break
@@ -77,6 +83,31 @@ class Worker:
             task_db.remove_worker_heartbeat(self.worker_id)
             task_db.close_db()
             LOG.info('worker_stopped id=%s', self.worker_id)
+
+    def process_provider_asset(self, asset):
+        LOG.info('provider_asset_claimed id=%s provider=%s', asset['id'], asset['provider'])
+        try:
+            with application.app.app_context():
+                outcome = application.process_cupsy_asset_once(asset['id'])
+            state = outcome.get('state')
+            if state in ('active', 'failed', 'deleted'):
+                return
+            attempts = int(asset.get('attempt_count') or 0)
+            if attempts >= 30:
+                task_db.update_provider_asset(
+                    asset['id'], status='failed', error=outcome.get('error') or '素材导入超时',
+                    next_run_at=None, lease_owner=None, lease_until=None,
+                )
+                return
+            delay = self._retry_delay(asset, maximum=60) if state == 'retry' else 2
+            task_db.reschedule_provider_asset(
+                asset['id'], delay, status='processing', error=outcome.get('error')
+            )
+        except Exception as exc:
+            LOG.exception('provider_asset_crashed id=%s', asset['id'])
+            task_db.reschedule_provider_asset(asset['id'], 5, status='processing', error=str(exc))
+        finally:
+            task_db.close_db()
 
     def process(self, task):
         LOG.info(
@@ -101,7 +132,10 @@ class Worker:
                 return
             max_attempts = self._image_crash_max_attempts(task) if task['type'] == 'image' else self._video_max_attempts()
             if int(task.get('attempt_count') or 0) < max_attempts:
-                status = 'pending' if task['type'] == 'image' else 'processing'
+                status = 'pending' if task['type'] == 'image' or (
+                    task['type'] == 'video' and task.get('provider') == 'cupsy'
+                    and not task.get('external_task_id')
+                ) else 'processing'
                 task_db.reschedule_task(task['id'], self._retry_delay(task), status=status, error=str(exc))
             else:
                 task_db.fail_task(task['id'], str(exc))
@@ -157,7 +191,7 @@ class Worker:
         task_db.reschedule_task(
             task['id'],
             delay,
-            status='processing',
+            status='pending' if state == 'preparing' else 'processing',
             error=outcome.get('error'),
             progress=outcome.get('progress'),
         )

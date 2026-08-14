@@ -42,5 +42,8 @@ class PooledHttpClient:
     def post(self, *args, **kwargs):
         return self._session().post(*args, **kwargs)
 
+    def delete(self, *args, **kwargs):
+        return self._session().delete(*args, **kwargs)
+
 
 HTTP = PooledHttpClient()

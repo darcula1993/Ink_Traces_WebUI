@@ -70,15 +70,13 @@
       "model": "",
       "fast_model": "",
       "seedance_2_5_model": "ep-20260807145632-xprc6"
+    },
+    "cupsy": {
+      "api_key": "",
+      "endpoint": "https://cupsy.io",
+      "model": "seedance-2.5",
+      "source_base_url": "",
+      "asset_token_ttl_seconds": 3600
     }
-  },
-  "openai": {
-    "api_key": "",
-    "endpoint": "https://api.openai.com",
-    "model": "gpt-5",
-    "rewriter_prompt_file": "video_prompt_rewriter.md",
-    "agent_prompt_file": "video_prompt_optimizer.md",
-    "prompt_file": "video_prompt_optimizer.md",
-    "max_output_tokens": 1600
   }
 }

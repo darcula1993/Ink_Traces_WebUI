@@ -91,7 +91,12 @@ def test_image_generation_is_queued_and_result_is_lightweight(monkeypatch):
     })
 
     def fake_generate(*_args, **_kwargs):
-        return jsonify({'success': True, 'images': [_png_data_url()], 'thinking': 'done'})
+        return jsonify({
+            'success': True,
+            'images': [_png_data_url()],
+            'source_urls': ['https://media.invalid/generated.png'],
+            'thinking': 'done',
+        })
 
     monkeypatch.setattr(application, '_generate_ark_image', fake_generate)
     client = application.app.test_client()
@@ -117,6 +122,7 @@ def test_image_generation_is_queued_and_result_is_lightweight(monkeypatch):
     assert 'images' not in task['result']
     assert task['result']['local_images'] == payload['images']
     assert task['result']['local_thumbnails'] == [f'/api/tasks/{task_id}/file/thumb_0.webp']
+    assert task['result']['source_urls'] == ['https://media.invalid/generated.png']
     assert os.path.isfile(os.path.join(task['output_dir'], 'image_0.png'))
     thumbnail_path = os.path.join(task['output_dir'], 'thumb_0.webp')
     assert os.path.isfile(thumbnail_path)
@@ -261,6 +267,14 @@ def test_png_download_embeds_only_reusable_generation_metadata():
     }
     assert 'provider' not in readable
     assert 'private-model-name' not in readable
+
+    raw = client.get(f'/api/tasks/{task_id}/download/image_0.png?raw=1')
+    assert raw.status_code == 200
+    assert raw.headers['Content-Disposition'].rstrip('"').endswith('-output-01-original.png')
+    assert hashlib.sha256(raw.data).hexdigest() == original_digest
+    with Image.open(io.BytesIO(raw.data)) as image:
+        assert 'ink_traces' not in image.text
+        assert 'parameters' not in image.text
 
     inline = client.get(f'/api/tasks/{task_id}/file/image_0.png?png_info=1')
     assert inline.status_code == 200
@@ -451,6 +465,7 @@ def test_ark_request_omits_prompt_optimization(monkeypatch):
     assert observed['body']['response_format'] == 'url'
     assert observed['download_url'] == 'https://media.invalid/generated.png'
     assert observed['download_timeout'] == (10, application.DOWNLOAD_TIMEOUT)
+    assert payload['source_urls'] == ['https://media.invalid/generated.png']
 
     with application.app.app_context():
         application._generate_ark_image(
@@ -523,7 +538,129 @@ def test_retired_provider_and_generation_endpoints_are_unavailable():
         'prompt': 'test',
     })
     assert response.status_code == 400
-    assert 'provider: ark' in response.get_json()['error']
+    assert '不支持的视频 provider' in response.get_json()['error']
+
+
+def test_cupsy_asset_lifecycle_uses_signed_local_source(monkeypatch):
+    assert application._cupsy_source_ready({'source_base_url': 'http://203.0.113.10:5000'})
+    assert application._cupsy_source_ready({'source_base_url': 'https://203.0.113.10'})
+    assert not application._cupsy_source_ready({'source_base_url': ''})
+    monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
+        'api_key': 'cupsy-test-key',
+        'endpoint': 'https://cupsy.invalid',
+        'model': 'seedance-2.5',
+        'source_base_url': 'https://studio.example',
+        'asset_token_ttl_seconds': 3600,
+    })
+    client = application.app.test_client()
+    response = client.post('/api/cupsy/assets', data={
+        'file': (io.BytesIO(_png_bytes()), 'reference.png'),
+    }, content_type='multipart/form-data')
+    assert response.status_code == 202
+    asset_id = response.get_json()['asset']['id']
+    asset = task_db.get_provider_asset(asset_id)
+    assert asset['status'] == 'pending'
+
+    observed = {}
+    def fake_post(url, **kwargs):
+        observed['url'] = url
+        observed['body'] = kwargs['json']
+        return FakeResponse(status_code=202, payload={
+            'id': 'asset_remote_1', 'asset_uri': 'asset://asset_remote_1', 'status': 'pending',
+        })
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    assert application.process_cupsy_asset_once(asset_id)['state'] == 'pending'
+    assert observed['body']['type'] == 'image'
+    source_path = observed['body']['source_url'].split('https://studio.example', 1)[1]
+    source = client.get(source_path)
+    assert source.status_code == 200
+    assert source.data == _png_bytes()
+
+    monkeypatch.setattr(application.HTTP, 'get', lambda *_args, **_kwargs: FakeResponse(payload={
+        'id': 'asset_remote_1', 'asset_uri': 'asset://asset_remote_1',
+        'status': 'active', 'usable': True, 'mime_type': 'image/png',
+    }))
+    assert application.process_cupsy_asset_once(asset_id)['state'] == 'active'
+    assert task_db.get_provider_asset(asset_id)['status'] == 'active'
+    monkeypatch.setattr(
+        application.HTTP, 'delete',
+        lambda *_args, **_kwargs: FakeResponse(status_code=200, payload={'status': 'deleted'}),
+    )
+    deleted = client.delete(f'/api/cupsy/assets/{asset_id}')
+    assert deleted.status_code == 200
+    assert task_db.get_provider_asset(asset_id)['status'] == 'deleted'
+
+
+def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
+    monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
+        'api_key': 'cupsy-test-key',
+        'endpoint': 'https://cupsy.invalid',
+        'model': 'seedance-2.5',
+        'source_base_url': 'https://studio.example',
+    })
+    local_path = os.path.join(storage.WORKSPACE_ASSET_DIR, 'reference.png')
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, 'wb') as handle:
+        handle.write(_png_bytes())
+    asset = task_db.create_provider_asset(
+        'cupsy', 'image', hashlib.sha256(_png_bytes()).hexdigest(), 'reference.png',
+        'image/png', len(_png_bytes()), local_path,
+    )
+    task_db.update_provider_asset(
+        asset['id'], external_asset_id='asset_remote_2', asset_uri='asset://asset_remote_2',
+        status='active', next_run_at=None,
+    )
+
+    response = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'cupsy',
+        'model': 'seedance-2.5',
+        'prompt': 'A slow cinematic camera move',
+        'ratio': '16:9',
+        'duration': 4,
+        'resolution': '480p',
+        'generate_audio': True,
+        'video_mode': 'reference',
+        'cupsy_assets': [{'id': asset['id'], 'role': 'reference_image'}],
+    })
+    assert response.status_code == 202
+    task_id = response.get_json()['db_task_id']
+    detail = application.app.test_client().get(f'/api/tasks/{task_id}').get_json()['task']
+    assert detail['result']['local_refs'] == [f'/api/cupsy/assets/{asset["id"]}/content']
+    assert task_db.claim_next_task('cupsy-worker')['id'] == task_id
+
+    observed = {}
+    def fake_post(url, **kwargs):
+        observed['url'] = url
+        observed['headers'] = kwargs['headers']
+        observed['body'] = kwargs['json']
+        return FakeResponse(status_code=202, payload={'id': 'video_remote_1', 'status': 'queued'})
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    outcome = application.poll_video_task_once(task_id)
+    assert outcome['state'] == 'pending'
+    assert observed['url'] == 'https://cupsy.invalid/v1/videos'
+    assert observed['headers']['Idempotency-Key'] == f'nanobanana-video-{task_id}'
+    assert set(observed['body']) == {
+        'model', 'content', 'ratio', 'duration', 'resolution', 'generate_audio', 'watermark',
+    }
+    assert observed['body']['content'][1] == {
+        'type': 'image_url', 'image_url': {'url': 'asset://asset_remote_2'},
+        'role': 'reference_image',
+    }
+    assert task_db.list_task_provider_assets(task_id)[0]['id'] == asset['id']
+
+    def fake_get(url, **_kwargs):
+        if url.endswith('/content'):
+            return FakeResponse(content=b'cupsy-video')
+        return FakeResponse(payload={'id': 'video_remote_1', 'status': 'succeeded'})
+
+    monkeypatch.setattr(application.HTTP, 'get', fake_get)
+    outcome = application.poll_video_task_once(task_id)
+    assert outcome['state'] == 'succeeded'
+    task = task_db.get_task(task_id)
+    assert task['result']['local_video'] == f'/api/tasks/{task_id}/file/video.mp4'
+    assert task_db.list_provider_assets('cupsy')[0]['external_asset_id'] == 'asset_remote_2'
 
 
 def test_seedance_25_submission_reuses_ark_key_and_endpoint(monkeypatch):

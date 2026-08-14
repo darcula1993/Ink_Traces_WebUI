@@ -7,15 +7,19 @@ import {
   ArchiveRestore,
   Ban,
   Braces,
+  CalendarDays,
   Check,
   CheckCheck,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Columns3,
   Copy,
   Download,
   Film,
+  Filter,
   FolderHeart,
   FolderPlus,
   Heart,
@@ -30,6 +34,8 @@ import {
   SortDesc,
   Trash2,
   X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import CodeRainCanvas from './CodeRainCanvas'
 import IconButton from './ui/IconButton'
@@ -39,18 +45,35 @@ const ACTIVE_STATUSES = new Set(['submitting', 'preparing', 'pending', 'processi
 const TASK_PAGE_SIZE = 30
 const DEFAULT_GALLERY_PREFERENCES = { cardSize: 'standard', cardDetails: 'detailed', sort: 'newest' }
 const CARD_SIZE_OPTIONS = [
-  { value: 'compact', label: 'Compact' },
-  { value: 'standard', label: 'Standard' },
-  { value: 'large', label: 'Large' },
+  { value: 'compact', label: '紧凑' },
+  { value: 'standard', label: '标准' },
+  { value: 'large', label: '大卡片' },
 ]
 const CARD_DETAIL_OPTIONS = [
-  { value: 'clean', label: 'Clean' },
-  { value: 'detailed', label: 'Detailed' },
+  { value: 'clean', label: '纯预览' },
+  { value: 'detailed', label: '显示详情' },
 ]
 const SORT_OPTIONS = [
-  { value: 'newest', label: 'Newest first' },
-  { value: 'oldest', label: 'Oldest first' },
-  { value: 'updated', label: 'Recently updated' },
+  { value: 'newest', label: '最新创建' },
+  { value: 'oldest', label: '最早创建' },
+  { value: 'updated', label: '最近更新' },
+]
+const DEFAULT_TASK_FILTERS = { status: '', provider: '', model: '', dateRange: '' }
+const STATUS_FILTER_OPTIONS = [
+  { value: '', label: '全部状态' },
+  { value: 'succeeded', label: '已完成' },
+  { value: 'failed', label: '失败' },
+  { value: 'cancelled', label: '已取消' },
+  { value: 'pending', label: '排队中' },
+  { value: 'preparing', label: '准备中' },
+  { value: 'processing', label: '生成中' },
+]
+const DATE_FILTER_OPTIONS = [
+  { value: '', label: '全部时间' },
+  { value: '1', label: '最近 24 小时' },
+  { value: '7', label: '最近 7 天' },
+  { value: '30', label: '最近 30 天' },
+  { value: '90', label: '最近 90 天' },
 ]
 const GROUP_COLORS = ['green', 'cyan', 'blue', 'violet', 'rose', 'amber']
 const EMPTY_NAVIGATION = {
@@ -79,6 +102,16 @@ function formatTime(value) {
   }).format(new Date(value))
 }
 
+function providerLabel(provider) {
+  return ({ ark: 'BytePlus Ark', cupsy: 'Cupsy', vertex: 'Vertex AI' })[provider] || provider
+}
+
+function createdAfterForRange(value) {
+  const days = Number(value)
+  if (!Number.isFinite(days) || days <= 0) return ''
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+}
+
 function downloadExtension(item, url) {
   const configured = String(item.params?.output_format || '').toLowerCase()
   if (configured === 'jpeg') return 'jpg'
@@ -90,20 +123,20 @@ function downloadExtension(item, url) {
   return item.type === 'video' ? 'mp4' : 'png'
 }
 
-function uniqueDownloadName(item, outputIndex, url, openedAt) {
+function uniqueDownloadName(item, outputIndex, url, openedAt, original = false) {
   const identity = `task-${item.taskId}`
   const sourceDate = new Date(item.createdAt || openedAt)
   const safeDate = Number.isNaN(sourceDate.getTime()) ? openedAt : sourceDate
   const timestamp = safeDate.toISOString().replace(/\D/g, '').slice(0, 14)
   const output = item.type === 'image' ? `-output-${String(outputIndex + 1).padStart(2, '0')}` : ''
-  return `ink-traces-${item.type}-${identity}-${timestamp}${output}.${downloadExtension(item, url)}`
+  return `ink-traces-${item.type}-${identity}-${timestamp}${output}${original ? '-original' : ''}.${downloadExtension(item, url)}`
 }
 
-function taskDownloadUrl(item, url) {
+function taskDownloadUrl(item, url, original = false) {
   const prefix = `/api/tasks/${item.taskId}/file/`
   if (!item.taskId || !String(url || '').startsWith(prefix)) return url
   const filename = String(url).slice(prefix.length).split('?', 1)[0]
-  return `/api/tasks/${item.taskId}/download/${encodeURIComponent(filename)}`
+  return `/api/tasks/${item.taskId}/download/${encodeURIComponent(filename)}${original ? '?raw=1' : ''}`
 }
 
 function taskDisplayUrl(taskId, url) {
@@ -133,6 +166,7 @@ function serverItem(task) {
     error: task.error || '',
     params,
     images: (result.local_images || []).map(url => taskDisplayUrl(task.id, url)),
+    sourceUrls: Array.isArray(result.source_urls) ? result.source_urls : [],
     thumbnail: result.local_thumbnail || result.local_thumbnails?.[0] || null,
     video: taskDisplayUrl(task.id, result.local_video) || null,
     poster: taskDisplayUrl(task.id, result.local_last_frame) || null,
@@ -226,16 +260,19 @@ function TaskCard({
           activate()
         }
       }}
+      data-status={item.status}
       className={`task-gallery-card group relative min-w-0 overflow-hidden border bg-black/35 text-left transition-colors ${checked ? 'task-gallery-card-selected' : 'border-white/10 hover:border-white/25'}`}
     >
       <div className="task-card-preview relative overflow-hidden bg-[#050708]">
         <TaskPreview item={item} />
-        <div className="absolute left-2 top-2 z-20 flex items-center gap-1.5">
-          <span className={`status-pill min-h-6 px-2 text-[10px] ${status.tone}`}>
-            <StatusIcon size={11} className={status.spin ? 'animate-spin' : ''} />
-            {status.label}
-          </span>
-        </div>
+        {item.status !== 'succeeded' && (
+          <div className="absolute left-2 top-2 z-20 flex items-center gap-1.5">
+            <span className={`status-pill min-h-6 px-2 text-[10px] ${status.tone}`}>
+              <StatusIcon size={11} className={status.spin ? 'animate-spin' : ''} />
+              {status.label}
+            </span>
+          </div>
+        )}
         {selectionMode ? (
           <span
             className={`task-selection-check absolute right-2 top-2 z-20 ${checked ? 'task-selection-check-active' : ''}`}
@@ -244,7 +281,7 @@ function TaskCard({
             {checked && <Check size={13} />}
           </span>
         ) : (
-          <div className="absolute right-2 top-2 z-20 flex items-center gap-1">
+          <div className={`task-card-actions absolute right-2 top-2 z-20 flex items-center gap-1 ${item.favorite ? 'task-card-actions-pinned' : ''}`}>
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (
               <button
                 type="button"
@@ -262,7 +299,7 @@ function TaskCard({
                 aria-label={item.favorite ? '取消收藏任务' : '收藏任务'}
                 title={item.favorite ? '取消收藏' : '收藏'}
                 onClick={event => { event.stopPropagation(); onFavorite(item) }}
-                className={`task-card-action ${item.favorite ? 'text-[#ff5c7c]' : ''}`}
+                className={`task-card-action ${item.favorite ? 'task-card-favorite-active text-[#ff5c7c]' : ''}`}
               >
                 <Heart size={14} fill={item.favorite ? 'currentColor' : 'none'} />
               </button>
@@ -283,7 +320,7 @@ function TaskCard({
           )}
           <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-[10px] text-nexus-muted">
             <span>#{item.taskId}</span>
-            {item.provider && <span className="truncate uppercase">{item.provider}</span>}
+            {item.provider && <span className="truncate">{providerLabel(item.provider)}</span>}
             {item.createdAt && <time className="ml-auto shrink-0">{formatTime(item.createdAt)}</time>}
           </div>
         </div>
@@ -316,6 +353,125 @@ function DetailMedia({ item, outputIndex, setOutputIndex }) {
         </div>
       )}
     </div>
+  )
+}
+
+const COMPARE_ROWS = [
+  ['模型', item => item.params?.model],
+  ['端点', item => providerLabel(item.provider)],
+  ['画幅', item => item.params?.aspect_ratio || item.params?.ratio],
+  ['尺寸', item => item.params?.size || (
+    item.params?.custom_width && item.params?.custom_height
+      ? `${item.params.custom_width}×${item.params.custom_height}`
+      : null
+  )],
+  ['分辨率', item => item.params?.resolution],
+  ['时长', item => item.params?.duration === -1 ? 'Auto' : (
+    item.params?.duration ? `${item.params.duration}s` : null
+  )],
+  ['格式', item => item.params?.output_format?.toUpperCase()],
+  ['状态', item => STATUS[item.status]?.label || item.status],
+]
+
+function CompareMedia({ item, zoom }) {
+  const style = { transform: `scale(${zoom})` }
+  if (item.type === 'video' && item.video) {
+    return <video src={item.video} poster={item.poster || undefined} controls preload="metadata" style={style} />
+  }
+  const image = item.images?.[0] || item.poster || item.thumbnail
+  if (image) return <img src={image} loading="eager" decoding="async" style={style} alt={`任务 ${item.taskId} 输出`} />
+  return <div className="relative size-full"><TaskPreview item={item} compact={false} /></div>
+}
+
+function TaskCompareModal({ items, onClose, onReuse }) {
+  const [zoom, setZoom] = useState(1)
+  useEffect(() => {
+    const onKeyDown = event => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
+
+  const changedRows = new Set(COMPARE_ROWS.filter(([label, getValue]) => {
+    const values = new Set(items.map(item => String(getValue(item) || '—')))
+    return values.size > 1
+  }).map(([label]) => label))
+
+  return ReactDOM.createPortal(
+    <motion.div
+      className="task-compare-backdrop fixed inset-0 z-[230] flex items-center justify-center p-5"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+    >
+      <motion.section
+        role="dialog"
+        aria-modal="true"
+        aria-label="任务对比"
+        className="task-compare-modal liquid-glass-strong flex min-h-0 flex-col overflow-hidden"
+        initial={{ opacity: 0, scale: 0.98, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.985, y: 8 }}
+      >
+        <header className="task-compare-toolbar flex h-13 shrink-0 items-center gap-3 border-b border-white/10 px-4">
+          <Columns3 size={16} className="text-nexus-cyan" />
+          <div>
+            <div className="text-sm font-semibold text-nexus-text-light">任务对比</div>
+            <div className="font-mono text-[9px] text-nexus-muted">{items.length} ITEMS</div>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <ZoomOut size={14} className="text-nexus-muted" />
+            <input
+              type="range"
+              min="1"
+              max="2.5"
+              step="0.1"
+              value={zoom}
+              onChange={event => setZoom(Number(event.target.value))}
+              aria-label="同步缩放"
+              className="task-compare-zoom"
+            />
+            <ZoomIn size={14} className="text-nexus-muted" />
+            <span className="w-10 text-right font-mono text-[10px] text-nexus-text">{Math.round(zoom * 100)}%</span>
+            <IconButton label="关闭任务对比" onClick={onClose}><X size={18} /></IconButton>
+          </div>
+        </header>
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-auto p-3">
+          <div className="task-compare-grid" style={{ '--compare-columns': items.length }}>
+            {items.map(item => (
+              <article key={item.key} className="task-compare-column">
+                <div className="task-compare-media">
+                  <CompareMedia item={item} zoom={zoom} />
+                </div>
+                <div className="task-compare-heading">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-nexus-text-light">TASK #{item.taskId}</span>
+                    <span className={`status-pill ml-auto ${STATUS[item.status]?.tone || STATUS.pending.tone}`}>
+                      {STATUS[item.status]?.label || item.status}
+                    </span>
+                  </div>
+                  <p className="line-clamp-3 mt-2 min-h-15 break-words text-xs leading-5 text-nexus-text">{item.prompt || '未填写提示词'}</p>
+                </div>
+                <dl className="task-compare-params">
+                  {COMPARE_ROWS.map(([label, getValue]) => (
+                    <div key={label} className={`task-compare-param ${changedRows.has(label) ? 'task-compare-param-different' : ''}`}>
+                      <dt>{label}</dt>
+                      <dd title={String(getValue(item) || '—')}>{String(getValue(item) || '—')}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <footer className="mt-auto border-t border-white/8 p-2">
+                  <button type="button" onClick={() => onReuse(item.source)} className="btn-base btn-outline w-full text-xs">
+                    <RotateCcw size={13} /> 复用参数
+                  </button>
+                </footer>
+              </article>
+            ))}
+          </div>
+        </div>
+      </motion.section>
+    </motion.div>,
+    document.body,
   )
 }
 
@@ -367,13 +523,30 @@ function TaskDetailModal({
 }) {
   const [outputIndex, setOutputIndex] = useState(0)
   const [referenceIndex, setReferenceIndex] = useState(null)
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false)
   const [openedAt] = useState(() => new Date())
   const backdropRef = useRef(null)
+  const downloadMenuRef = useRef(null)
   const dragControls = useDragControls()
   useEffect(() => {
     setOutputIndex(0)
     setReferenceIndex(null)
+    setDownloadMenuOpen(false)
   }, [item.key])
+  useEffect(() => {
+    if (!downloadMenuOpen) return undefined
+    const closeMenu = event => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return
+      if (event.type === 'pointerdown' && downloadMenuRef.current?.contains(event.target)) return
+      setDownloadMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', closeMenu)
+    document.addEventListener('keydown', closeMenu)
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu)
+      document.removeEventListener('keydown', closeMenu)
+    }
+  }, [downloadMenuOpen])
   useEffect(() => {
     const onKeyDown = event => {
       if (referenceIndex !== null) {
@@ -398,6 +571,9 @@ function TaskDetailModal({
   const download = item.type === 'video' ? item.video : item.images?.[outputIndex]
   const downloadName = download ? uniqueDownloadName(item, outputIndex, download, openedAt) : ''
   const downloadUrl = download ? taskDownloadUrl(item, download) : ''
+  const originalDownloadName = download ? uniqueDownloadName(item, outputIndex, download, openedAt, true) : ''
+  const originalDownloadUrl = download ? taskDownloadUrl(item, download, true) : ''
+  const supportsPngInfo = download && item.type === 'image' && downloadExtension(item, download) === 'png'
   const aspectRatio = params.aspect_ratio === 'auto'
     ? 'Auto'
     : params.aspect_ratio === 'custom' ? '自定义' : (params.aspect_ratio || params.ratio)
@@ -473,6 +649,23 @@ function TaskDetailModal({
                 ))}
               </dl>
             </section>
+            {item.type === 'image' && item.sourceUrls?.length > 0 && (
+              <section className="border-b border-white/8 p-4">
+                <div className="mb-3 text-xs font-semibold text-nexus-text-light">端点图像 URL</div>
+                <div className="space-y-2">
+                  {item.sourceUrls.map((url, index) => (
+                    <div key={`${url}-${index}`} className="flex min-w-0 items-start gap-2 rounded border border-white/8 bg-black/20 p-2">
+                      <a href={url} target="_blank" rel="noreferrer" title={url} className="min-w-0 flex-1 break-all font-mono text-[10px] leading-4 text-nexus-cyan hover:text-white">
+                        {url}
+                      </a>
+                      <button type="button" aria-label={`复制端点图像 URL ${index + 1}`} title="复制 URL" onClick={() => navigator.clipboard?.writeText(url)} className="icon-button size-7 shrink-0">
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
             {item.taskId && !trash && (
               <section className="border-b border-white/8 p-4">
                 <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-nexus-text-light">
@@ -508,7 +701,43 @@ function TaskDetailModal({
                 <Heart size={17} fill={item.favorite ? 'currentColor' : 'none'} />
               </IconButton>
             )}
-            {download && <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="icon-button"><Download size={17} /></a>}
+            {supportsPngInfo ? (
+              <div ref={downloadMenuRef} className="relative">
+                <button
+                  type="button"
+                  aria-label="下载任务结果"
+                  aria-haspopup="menu"
+                  aria-expanded={downloadMenuOpen}
+                  title="选择下载格式"
+                  onClick={() => setDownloadMenuOpen(open => !open)}
+                  className={`icon-button ${downloadMenuOpen ? 'text-nexus-green' : ''}`}
+                >
+                  <Download size={17} />
+                  <ChevronDown size={10} />
+                </button>
+                <AnimatePresence>
+                  {downloadMenuOpen && (
+                    <motion.div
+                      role="menu"
+                      aria-label="图片下载选项"
+                      className="task-layout-menu absolute bottom-[calc(100%+8px)] left-0 z-50 w-48 p-2"
+                      initial={{ opacity: 0, y: 5, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 4, scale: 0.98 }}
+                    >
+                      <a role="menuitem" href={downloadUrl} download={downloadName} onClick={() => setDownloadMenuOpen(false)} className="task-group-option">
+                        <Download size={14} /> 带生成参数
+                      </a>
+                      <a role="menuitem" href={originalDownloadUrl} download={originalDownloadName} onClick={() => setDownloadMenuOpen(false)} className="task-group-option">
+                        <ImageIcon size={14} /> 原始生成图
+                      </a>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : download ? (
+              <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="icon-button"><Download size={17} /></a>
+            ) : null}
             {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (
               <IconButton label="取消任务" onClick={() => onCancel(item)} className="hover:text-nexus-amber"><Ban size={17} /></IconButton>
@@ -605,6 +834,9 @@ export default function TaskGallery({
   const [favoriteGroups, setFavoriteGroups] = useState([])
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [filters, setFilters] = useState(DEFAULT_TASK_FILTERS)
+  const [filterOptions, setFilterOptions] = useState({ providers: [], models: [] })
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
   const [selectedKey, setSelectedKey] = useState(null)
   const [selectedOverride, setSelectedOverride] = useState(null)
   const [selectionMode, setSelectionMode] = useState(false)
@@ -616,6 +848,9 @@ export default function TaskGallery({
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
   const [groupMenuOpen, setGroupMenuOpen] = useState(false)
   const [bulkGroupMenuOpen, setBulkGroupMenuOpen] = useState(false)
+  const [bulkDownloadMenuOpen, setBulkDownloadMenuOpen] = useState(false)
+  const [compareItems, setCompareItems] = useState([])
+  const [compareLoading, setCompareLoading] = useState(false)
   const [newGroupName, setNewGroupName] = useState('')
   const [newGroupColor, setNewGroupColor] = useState('green')
   const [editingGroupId, setEditingGroupId] = useState(null)
@@ -625,8 +860,10 @@ export default function TaskGallery({
     DEFAULT_GALLERY_PREFERENCES,
   )
   const layoutMenuRef = useRef(null)
+  const filterMenuRef = useRef(null)
   const groupMenuRef = useRef(null)
   const bulkGroupMenuRef = useRef(null)
+  const bulkDownloadMenuRef = useRef(null)
   const fetchSequenceRef = useRef(0)
   const navigationRequestRef = useRef({ controller: null, sequence: 0 })
   const handledRefreshTokenRef = useRef(refreshToken)
@@ -639,13 +876,29 @@ export default function TaskGallery({
   const cardSort = SORT_OPTIONS.some(option => option.value === galleryPreferences?.sort)
     ? galleryPreferences.sort
     : DEFAULT_GALLERY_PREFERENCES.sort
+  const createdAfter = useMemo(() => createdAfterForRange(filters.dateRange), [filters.dateRange])
+  const activeFilters = useMemo(() => [
+    filters.status && {
+      key: 'status',
+      label: STATUS_FILTER_OPTIONS.find(option => option.value === filters.status)?.label || filters.status,
+    },
+    filters.provider && { key: 'provider', label: providerLabel(filters.provider) },
+    filters.model && { key: 'model', label: filters.model },
+    filters.dateRange && {
+      key: 'dateRange',
+      label: DATE_FILTER_OPTIONS.find(option => option.value === filters.dateRange)?.label || filters.dateRange,
+    },
+  ].filter(Boolean), [filters])
 
   useEffect(() => {
-    if (!layoutMenuOpen) return undefined
+    if (!layoutMenuOpen && !filterMenuOpen) return undefined
     const closeMenu = event => {
       if (event.type === 'keydown' && event.key !== 'Escape') return
-      if (event.type === 'pointerdown' && layoutMenuRef.current?.contains(event.target)) return
+      if (event.type === 'pointerdown' && (
+        layoutMenuRef.current?.contains(event.target) || filterMenuRef.current?.contains(event.target)
+      )) return
       setLayoutMenuOpen(false)
+      setFilterMenuOpen(false)
     }
     document.addEventListener('pointerdown', closeMenu)
     document.addEventListener('keydown', closeMenu)
@@ -653,17 +906,20 @@ export default function TaskGallery({
       document.removeEventListener('pointerdown', closeMenu)
       document.removeEventListener('keydown', closeMenu)
     }
-  }, [layoutMenuOpen])
+  }, [filterMenuOpen, layoutMenuOpen])
 
   useEffect(() => {
-    if (!groupMenuOpen && !bulkGroupMenuOpen) return undefined
+    if (!groupMenuOpen && !bulkGroupMenuOpen && !bulkDownloadMenuOpen) return undefined
     const closeMenus = event => {
       if (event.type === 'keydown' && event.key !== 'Escape') return
       if (event.type === 'pointerdown' && (
-        groupMenuRef.current?.contains(event.target) || bulkGroupMenuRef.current?.contains(event.target)
+        groupMenuRef.current?.contains(event.target) ||
+        bulkGroupMenuRef.current?.contains(event.target) ||
+        bulkDownloadMenuRef.current?.contains(event.target)
       )) return
       setGroupMenuOpen(false)
       setBulkGroupMenuOpen(false)
+      setBulkDownloadMenuOpen(false)
       setEditingGroupId(null)
     }
     document.addEventListener('pointerdown', closeMenus)
@@ -672,7 +928,7 @@ export default function TaskGallery({
       document.removeEventListener('pointerdown', closeMenus)
       document.removeEventListener('keydown', closeMenus)
     }
-  }, [bulkGroupMenuOpen, groupMenuOpen])
+  }, [bulkDownloadMenuOpen, bulkGroupMenuOpen, groupMenuOpen])
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 280)
@@ -698,7 +954,11 @@ export default function TaskGallery({
       ? { favorite_group: Number(favoriteGroup) }
       : {}),
     ...(search ? { q: search } : {}),
-  }), [cardSort, debouncedQuery, favoriteGroup, mode, view])
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.provider ? { provider: filters.provider } : {}),
+    ...(filters.model ? { model: filters.model } : {}),
+    ...(createdAfter ? { created_after: createdAfter } : {}),
+  }), [cardSort, createdAfter, debouncedQuery, favoriteGroup, filters, mode, view])
 
   const buildSelectionParams = useCallback((search = query.trim()) => ({
     type: mode,
@@ -709,7 +969,34 @@ export default function TaskGallery({
       ? { favorite_group: Number(favoriteGroup) }
       : {}),
     ...(search ? { q: search } : {}),
-  }), [cardSort, favoriteGroup, mode, query, view])
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.provider ? { provider: filters.provider } : {}),
+    ...(filters.model ? { model: filters.model } : {}),
+    ...(createdAfter ? { created_after: createdAfter } : {}),
+  }), [cardSort, createdAfter, favoriteGroup, filters, mode, query, view])
+
+  const clearFilters = useCallback(() => setFilters(DEFAULT_TASK_FILTERS), [])
+  const clearSearchAndFilters = useCallback(() => {
+    setQuery('')
+    setDebouncedQuery('')
+    setFilters(DEFAULT_TASK_FILTERS)
+  }, [])
+
+  const fetchFilterOptions = useCallback(async () => {
+    try {
+      const response = await axios.get('/api/tasks/filter-options', {
+        params: { type: mode, ...(view === 'trash' ? { deleted: true } : {}) },
+      })
+      if (response.data.success) {
+        setFilterOptions({
+          providers: response.data.providers || [],
+          models: response.data.models || [],
+        })
+      }
+    } catch (requestError) {
+      console.warn('Task filter options unavailable', requestError.message)
+    }
+  }, [mode, view])
 
   const fetchFavoriteGroups = useCallback(async () => {
     try {
@@ -723,6 +1010,10 @@ export default function TaskGallery({
   useEffect(() => {
     fetchFavoriteGroups()
   }, [fetchFavoriteGroups])
+
+  useEffect(() => {
+    fetchFilterOptions()
+  }, [fetchFilterOptions])
 
   const fetchTasks = useCallback(async ({ append = false, offset = 0, preserveLoaded = false } = {}) => {
     const sequence = ++fetchSequenceRef.current
@@ -845,7 +1136,7 @@ export default function TaskGallery({
     setSelectedKey(null)
     setSelectedOverride(null)
     setNavigation(EMPTY_NAVIGATION)
-  }, [cardSort, debouncedQuery, favoriteGroup, mode, view])
+  }, [cardSort, debouncedQuery, favoriteGroup, filters, mode, view])
 
   const loadNavigation = useCallback(async taskId => {
     navigationRequestRef.current.controller?.abort()
@@ -1123,6 +1414,7 @@ export default function TaskGallery({
     if (selectionMode) {
       setSelectedKeys(new Set())
       setSelectionUniverse(new Set())
+      setBulkDownloadMenuOpen(false)
       setSelectionMode(false)
       return
     }
@@ -1161,6 +1453,27 @@ export default function TaskGallery({
       setSelectingAll(false)
     }
   }, [allCategorySelected, buildSelectionParams])
+
+  const openSelectedComparison = useCallback(async () => {
+    const taskIds = [...selectedKeys]
+      .filter(token => token.startsWith('task-'))
+      .map(token => Number(token.slice(5)))
+      .filter(Number.isInteger)
+    if (taskIds.length < 2 || taskIds.length > 4) return
+    setCompareLoading(true)
+    try {
+      const responses = await Promise.all(taskIds.map(taskId => axios.get(`/api/tasks/${taskId}`)))
+      const compared = responses
+        .filter(response => response.data.success)
+        .map(response => serverItem(response.data.task))
+      if (compared.length >= 2) setCompareItems(compared)
+      setError('')
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || '任务对比加载失败')
+    } finally {
+      setCompareLoading(false)
+    }
+  }, [selectedKeys])
 
   const deleteSelected = useCallback(async () => {
     if (!selectedKeys.size) return
@@ -1222,14 +1535,14 @@ export default function TaskGallery({
     }
   }, [selectedKeys])
 
-  const downloadSelected = useCallback(async () => {
+  const downloadSelected = useCallback(async (raw = false) => {
     const taskIds = [...selectedKeys]
       .filter(token => token.startsWith('task-'))
       .map(token => Number(token.slice(5)))
       .filter(Number.isInteger)
     if (!taskIds.length) return
     try {
-      const response = await axios.post('/api/tasks/bulk-download', { ids: taskIds }, { responseType: 'blob' })
+      const response = await axios.post('/api/tasks/bulk-download', { ids: taskIds, raw }, { responseType: 'blob' })
       const disposition = response.headers['content-disposition'] || ''
       const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
       const plainName = disposition.match(/filename="?([^";]+)"?/i)?.[1]
@@ -1243,6 +1556,7 @@ export default function TaskGallery({
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
+      setBulkDownloadMenuOpen(false)
       setError('')
     } catch (requestError) {
       setError(requestError.response?.data?.error || '批量下载失败')
@@ -1280,25 +1594,36 @@ export default function TaskGallery({
     if (nextView !== 'favorite') setFavoriteGroup('all')
   }, [view])
 
+  const hasSearchOrFilters = Boolean(query.trim() || activeFilters.length)
+  const emptyTitle = hasSearchOrFilters
+    ? '没有匹配的任务'
+    : view === 'active'
+      ? '没有正在生成的任务'
+      : view === 'favorite'
+        ? '当前收藏为空'
+        : view === 'trash'
+          ? '回收站为空'
+          : mode === 'video' ? '还没有视频任务' : '还没有图片任务'
+
   return (
     <div
       className="task-gallery relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden"
       data-card-size={cardSize}
       data-card-details={cardDetails}
     >
-      <div className="task-gallery-toolbar liquid-glass flex h-12 shrink-0 items-center gap-2 px-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
+      <div className={`task-gallery-toolbar liquid-glass flex h-13 shrink-0 items-center gap-2 px-3 ${selectionMode ? 'task-gallery-toolbar-selection' : ''}`}>
+        <div className="task-gallery-title flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
           {mode === 'image' ? <ImageIcon size={15} className="text-nexus-blue" /> : <Film size={15} className="text-nexus-violet" />}
-          任务
-          <span className="font-mono text-[10px] font-normal text-nexus-muted">{categoryTotal}</span>
+          {mode === 'image' ? '图片任务' : '视频任务'}
+          <span className="task-gallery-count font-mono text-[10px] font-normal">{categoryTotal}</span>
         </div>
         {selectionMode ? (
-          <div data-testid="selection-summary" className="ml-3 font-mono text-xs text-nexus-text">
+          <div data-testid="selection-summary" className="task-selection-summary ml-3 font-mono text-xs text-nexus-text">
             已选 <span className="text-nexus-green">{selectedKeys.size}</span>
             <span className="ml-2 text-[10px] text-nexus-muted">共 {categoryTotal}</span>
           </div>
         ) : (
-          <div className="ml-3 flex items-center gap-1" role="group" aria-label="任务视图">
+          <div className="task-view-segment ml-3 flex items-center gap-1" role="group" aria-label="任务视图">
             <button type="button" aria-pressed={view === 'all'} onClick={() => changeView('all')} className={`task-view-button ${view === 'all' ? 'task-view-button-active' : ''}`}>全部</button>
             <button type="button" aria-pressed={view === 'favorite'} onClick={() => changeView('favorite')} className={`task-view-button ${view === 'favorite' ? 'task-view-button-active' : ''}`}><Heart size={12} /> 收藏</button>
             <button type="button" aria-pressed={view === 'active'} onClick={() => changeView('active')} className={`task-view-button ${view === 'active' ? 'task-view-button-active' : ''}`}><LoaderCircle size={12} /> 进行中</button>
@@ -1400,9 +1725,67 @@ export default function TaskGallery({
           </div>
         )}
         {!selectionMode && (
-          <div className="relative ml-auto w-44">
+          <div className="relative ml-auto w-48">
             <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-nexus-muted" />
-            <input value={query} onChange={event => setQuery(event.target.value)} aria-label="搜索任务画廊" placeholder="搜索任务" className="glass-input h-8 w-full pl-8 pr-2 text-xs outline-none" />
+            <input value={query} onChange={event => setQuery(event.target.value)} aria-label="搜索任务画廊" placeholder="搜索任务、ID、端点" className="glass-input h-8 w-full pl-8 pr-2 text-xs outline-none" />
+          </div>
+        )}
+        {!selectionMode && (
+          <div ref={filterMenuRef} className="relative">
+            <IconButton
+              label="筛选任务"
+              aria-haspopup="menu"
+              aria-expanded={filterMenuOpen}
+              onClick={() => setFilterMenuOpen(open => !open)}
+              className={filterMenuOpen || activeFilters.length ? 'text-nexus-cyan' : ''}
+            >
+              <Filter size={15} />
+              {activeFilters.length > 0 && <span className="task-filter-count">{activeFilters.length}</span>}
+            </IconButton>
+            <AnimatePresence>
+              {filterMenuOpen && (
+                <motion.div
+                  role="menu"
+                  aria-label="任务筛选"
+                  className="task-filter-menu absolute right-0 top-[calc(100%+8px)] z-50 w-72 p-3"
+                  initial={{ opacity: 0, y: -5, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                >
+                  <div className="mb-3 flex items-center gap-2">
+                    <Filter size={13} className="text-nexus-cyan" />
+                    <span className="text-xs font-semibold text-nexus-text-light">筛选任务</span>
+                    <button type="button" onClick={clearFilters} disabled={!activeFilters.length} className="ml-auto text-[10px] text-nexus-muted hover:text-nexus-text-light disabled:opacity-35">全部清除</button>
+                  </div>
+                  <label className="task-filter-field">
+                    <span>状态</span>
+                    <select aria-label="按任务状态筛选" value={filters.status} onChange={event => setFilters(previous => ({ ...previous, status: event.target.value }))}>
+                      {STATUS_FILTER_OPTIONS.map(option => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="task-filter-field">
+                    <span>端点</span>
+                    <select aria-label="按任务端点筛选" value={filters.provider} onChange={event => setFilters(previous => ({ ...previous, provider: event.target.value }))}>
+                      <option value="">全部端点</option>
+                      {filterOptions.providers.map(provider => <option key={provider} value={provider}>{providerLabel(provider)}</option>)}
+                    </select>
+                  </label>
+                  <label className="task-filter-field">
+                    <span>模型</span>
+                    <select aria-label="按任务模型筛选" value={filters.model} onChange={event => setFilters(previous => ({ ...previous, model: event.target.value }))}>
+                      <option value="">全部模型</option>
+                      {filterOptions.models.map(model => <option key={model} value={model}>{model}</option>)}
+                    </select>
+                  </label>
+                  <label className="task-filter-field">
+                    <span>创建时间</span>
+                    <select aria-label="按任务日期筛选" value={filters.dateRange} onChange={event => setFilters(previous => ({ ...previous, dateRange: event.target.value }))}>
+                      {DATE_FILTER_OPTIONS.map(option => <option key={option.value || 'all'} value={option.value}>{option.label}</option>)}
+                    </select>
+                  </label>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
         <div ref={layoutMenuRef} className={`relative ${selectionMode ? 'ml-auto' : ''}`}>
@@ -1425,7 +1808,7 @@ export default function TaskGallery({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -4, scale: 0.98 }}
               >
-                <div className="task-layout-heading">Card size</div>
+                <div className="task-layout-heading">卡片尺寸</div>
                 {CARD_SIZE_OPTIONS.map(option => (
                   <button
                     key={option.value}
@@ -1440,7 +1823,7 @@ export default function TaskGallery({
                   </button>
                 ))}
                 <div className="task-layout-divider" />
-                <div className="task-layout-heading">Card details</div>
+                <div className="task-layout-heading">卡片内容</div>
                 {CARD_DETAIL_OPTIONS.map(option => (
                   <button
                     key={option.value}
@@ -1455,7 +1838,7 @@ export default function TaskGallery({
                   </button>
                 ))}
                 <div className="task-layout-divider" />
-                <div className="task-layout-heading flex items-center gap-1.5"><SortDesc size={11} /> Sort by</div>
+                <div className="task-layout-heading flex items-center gap-1.5"><SortDesc size={11} /> 排序</div>
                 {SORT_OPTIONS.map(option => (
                   <button
                     key={option.value}
@@ -1492,12 +1875,54 @@ export default function TaskGallery({
               <CheckCheck size={15} className={selectingAll ? 'animate-pulse' : ''} />
             </IconButton>
             <IconButton
-              label="下载已选任务结果"
-              onClick={downloadSelected}
-              disabled={selectedTaskCount === 0}
+              label={selectedTaskCount >= 2 && selectedTaskCount <= 4 ? '对比已选任务' : '选择 2 到 4 个任务进行对比'}
+              onClick={openSelectedComparison}
+              disabled={compareLoading || selectedTaskCount < 2 || selectedTaskCount > 4}
+              className="hover:text-nexus-cyan"
             >
-              <Download size={15} />
+              <Columns3 size={15} className={compareLoading ? 'animate-pulse' : ''} />
             </IconButton>
+            {mode === 'image' ? (
+              <div ref={bulkDownloadMenuRef} className="relative">
+                <IconButton
+                  label="下载已选任务结果"
+                  aria-haspopup="menu"
+                  aria-expanded={bulkDownloadMenuOpen}
+                  onClick={() => setBulkDownloadMenuOpen(open => !open)}
+                  disabled={selectedTaskCount === 0}
+                  className={bulkDownloadMenuOpen ? 'text-nexus-green' : ''}
+                >
+                  <Download size={15} />
+                </IconButton>
+                <AnimatePresence>
+                  {bulkDownloadMenuOpen && (
+                    <motion.div
+                      role="menu"
+                      aria-label="批量图片下载选项"
+                      className="task-layout-menu absolute right-0 top-[calc(100%+8px)] z-50 w-48 p-2"
+                      initial={{ opacity: 0, y: -5, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                    >
+                      <button type="button" role="menuitem" onClick={() => downloadSelected(false)} className="task-group-option">
+                        <Download size={14} /> 带生成参数
+                      </button>
+                      <button type="button" role="menuitem" onClick={() => downloadSelected(true)} className="task-group-option">
+                        <ImageIcon size={14} /> 原始生成图
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <IconButton
+                label="下载已选任务结果"
+                onClick={() => downloadSelected(false)}
+                disabled={selectedTaskCount === 0}
+              >
+                <Download size={15} />
+              </IconButton>
+            )}
             {view !== 'trash' && favoriteGroups.length > 0 && (
               <div ref={bulkGroupMenuRef} className="relative">
                 <IconButton
@@ -1551,6 +1976,24 @@ export default function TaskGallery({
         )}
       </div>
 
+      {!selectionMode && activeFilters.length > 0 && (
+        <div className="task-filter-strip flex h-10 shrink-0 items-center gap-2 px-3" aria-label="已应用筛选">
+          <span className="flex items-center gap-1.5 text-[10px] text-nexus-muted"><Filter size={11} /> 已筛选</span>
+          {activeFilters.map(filter => (
+            <button
+              key={filter.key}
+              type="button"
+              aria-label={`移除筛选 ${filter.label}`}
+              onClick={() => setFilters(previous => ({ ...previous, [filter.key]: '' }))}
+              className="task-filter-chip"
+            >
+              <span className="max-w-36 truncate">{filter.label}</span><X size={11} />
+            </button>
+          ))}
+          <button type="button" onClick={clearFilters} className="ml-auto text-[10px] text-nexus-muted hover:text-nexus-text-light">清除全部</button>
+        </div>
+      )}
+
       <div className="custom-scrollbar flex-1 overflow-y-auto p-3">
         {error && (
           <div role="alert" className="mb-3 flex min-h-9 items-center gap-2 rounded border border-nexus-red/25 bg-nexus-red/10 px-3 text-xs text-nexus-red">
@@ -1558,6 +2001,12 @@ export default function TaskGallery({
           </div>
         )}
         <div className="task-gallery-grid">
+          {loading && visibleItems.length === 0 && Array.from({ length: 8 }, (_, index) => (
+            <div key={`skeleton-${index}`} className="task-card-skeleton" aria-hidden="true">
+              <div className="task-card-skeleton-media" />
+              {cardDetails === 'detailed' && <div className="task-card-skeleton-lines"><span /><span /></div>}
+            </div>
+          ))}
           {visibleItems.map(item => (
             <TaskCard
               key={item.key}
@@ -1574,8 +2023,15 @@ export default function TaskGallery({
             />
           ))}
         </div>
-        {visibleItems.length === 0 && (
-          <div className="py-20 text-center text-sm text-nexus-muted">没有符合条件的任务</div>
+        {!loading && visibleItems.length === 0 && (
+          <div className="task-empty-state">
+            <div className="task-empty-icon">{mode === 'image' ? <ImageIcon size={22} /> : <Film size={22} />}</div>
+            <div className="text-sm font-medium text-nexus-text-light">{emptyTitle}</div>
+            <div className="font-mono text-[10px] text-nexus-muted">{hasSearchOrFilters ? 'FILTER RESULT: 0' : `${mode.toUpperCase()} TASKS: 0`}</div>
+            {hasSearchOrFilters && (
+              <button type="button" onClick={clearSearchAndFilters} className="btn-base btn-outline mt-2 min-h-8 text-xs">清除筛选</button>
+            )}
+          </div>
         )}
         {!selectionMode && tasks.length < total && (
           <button
@@ -1607,6 +2063,15 @@ export default function TaskGallery({
             onSetGroup={toggleItemGroup}
             favoriteGroups={favoriteGroups}
             trash={view === 'trash'}
+          />
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {compareItems.length >= 2 && (
+          <TaskCompareModal
+            items={compareItems}
+            onClose={() => setCompareItems([])}
+            onReuse={onReuseTask}
           />
         )}
       </AnimatePresence>

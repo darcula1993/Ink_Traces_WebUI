@@ -6,6 +6,7 @@ import PromptCollection from './components/PromptCollection'
 import TaskGallery from './components/TaskGallery'
 import PngInfoModal from './components/PngInfoModal'
 import ReferenceMediaModal from './components/ReferenceMediaModal'
+import CupsyAssetManager from './components/CupsyAssetManager'
 import SortableReferenceItem, { moveArrayItem } from './components/SortableReferenceItem'
 import CodeRainCanvas from './components/CodeRainCanvas'
 import GlassBackdrop from './components/GlassBackdrop'
@@ -14,7 +15,7 @@ import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Settings, Cpu, HardDrive, Grid3X3, Grid2X2Check, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Bot, Send, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, Lock, LockOpen, ArrowLeftRight, AudioLines, CircleAlert, FileSearch } from 'lucide-react'
+import { Play, Settings, Cpu, HardDrive, Grid3X3, Grid2X2Check, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, Lock, LockOpen, ArrowLeftRight, AudioLines, CircleAlert, FileSearch } from 'lucide-react'
 import { estimateBytePlusVideoCost, formatCnyEstimate, formatWanTokens } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceState } from './lib/useWorkspaceState'
 
@@ -24,6 +25,8 @@ const SEEDREAM_MIN_PIXELS = 1280 * 720
 const SEEDREAM_MAX_PIXELS = 4_624_220
 const SEEDANCE_20 = 'seedance-2.0'
 const SEEDANCE_25 = 'seedance-2.5'
+const VIDEO_REFERENCE_EXTENSIONS = new Set(['mp4', 'mov'])
+const AUDIO_REFERENCE_EXTENSIONS = new Set(['wav', 'mp3'])
 const VIDEO_MODEL_CAPABILITIES = {
   [SEEDANCE_20]: {
     label: 'Dreamina Seedance 2.0',
@@ -55,6 +58,71 @@ const SEEDREAM_SIZE_PRESETS = {
     '16:9': [2816, 1584], '9:16': [1584, 2816], '3:2': [2496, 1664],
     '2:3': [1664, 2496], '21:9': [3136, 1344],
   },
+}
+
+function fileExtension(file) {
+  return String(file?.name || '').split('.').pop()?.toLowerCase() || ''
+}
+
+function isImageFile(file) {
+  return Boolean(file && String(file.type || '').startsWith('image/'))
+}
+
+function isVideoFile(file) {
+  return Boolean(file && (
+    ['video/mp4', 'video/quicktime'].includes(String(file.type || '').toLowerCase()) ||
+    VIDEO_REFERENCE_EXTENSIONS.has(fileExtension(file))
+  ))
+}
+
+function isAudioFile(file) {
+  return Boolean(file && (
+    ['audio/wav', 'audio/x-wav', 'audio/mpeg', 'audio/mp3'].includes(String(file.type || '').toLowerCase()) ||
+    AUDIO_REFERENCE_EXTENSIONS.has(fileExtension(file))
+  ))
+}
+
+function readFileDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = event => resolve(event.target.result)
+    reader.onerror = () => reject(reader.error || new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function hasExternalFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files')
+}
+
+function videoDropZoneHandlers(onFiles) {
+  return {
+    onDragEnter: event => {
+      if (!hasExternalFiles(event)) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.dataset.dragging = 'true'
+    },
+    onDragOver: event => {
+      if (!hasExternalFiles(event)) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.dataTransfer.dropEffect = 'copy'
+    },
+    onDragLeave: event => {
+      if (!hasExternalFiles(event) || event.currentTarget.contains(event.relatedTarget)) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.dataset.dragging = 'false'
+    },
+    onDrop: event => {
+      if (!hasExternalFiles(event)) return
+      event.preventDefault()
+      event.stopPropagation()
+      event.currentTarget.dataset.dragging = 'false'
+      onFiles(Array.from(event.dataTransfer?.files || []))
+    },
+  }
 }
 
 function alignSeedreamDimension(value) {
@@ -306,13 +374,7 @@ function App({ onLogout }) {
   const [referenceSizeIndex, setReferenceSizeIndex] = useState('')
   const [showFullEditor, setShowFullEditor] = useState(false)
   const [showEditorVault, setShowEditorVault] = useState(false)
-  const [optimizingVideoPrompt, setOptimizingVideoPrompt] = useState(false)
-  const [showVideoPromptAgent, setShowVideoPromptAgent] = useState(false)
-  const [videoPromptAgentSessionId, setVideoPromptAgentSessionId] = useState(null)
-  const [videoPromptAgentMessages, setVideoPromptAgentMessages] = useState([])
-  const [videoPromptAgentInput, setVideoPromptAgentInput] = useState('')
-  const [videoPromptAgentLoading, setVideoPromptAgentLoading] = useState(false)
-  const [videoPromptAgentDraft, setVideoPromptAgentDraft] = useState('')
+  const [showCupsyAssets, setShowCupsyAssets] = useState(false)
   const [notification, setNotification] = useState(null)
   const notificationTimer = useRef(null)
   const appShellRef = useRef(null)
@@ -348,6 +410,7 @@ function App({ onLogout }) {
 
   const [apiProvider, setApiProvider] = useState('ark')
   const [providerInfoReady, setProviderInfoReady] = useState(false)
+  const [imageProviders, setImageProviders] = useState({})
   const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
   const [availableModels, setAvailableModels] = useState([])
 
@@ -369,6 +432,7 @@ function App({ onLogout }) {
   const [appMode, setAppMode] = useWorkspaceState('appMode', 'image')
 
   const [videoFastAvailable, setVideoFastAvailable] = useState(false)
+  const [videoProviders, setVideoProviders] = useState({ ark: { available: true }, cupsy: { available: false, source_ready: false } })
 
   // 视频生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
   const [videoTabs, setVideoTabs, videoWorkspace] = useWorkspaceState('vid_tabs', [makeVideoTab(1)], VIDEO_WORKSPACE_OPTIONS)
@@ -384,7 +448,8 @@ function App({ onLogout }) {
     }))
   }, [setVideoTabs])
 
-  const effectiveVideoModel = activeTab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+  const activeVideoProvider = activeTab.provider === 'cupsy' ? 'cupsy' : 'ark'
+  const effectiveVideoModel = activeVideoProvider === 'cupsy' || activeTab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
   const isSeedance25 = effectiveVideoModel === SEEDANCE_25
   const videoCapabilities = VIDEO_MODEL_CAPABILITIES[effectiveVideoModel]
   const videoDurationOptions = Array.from(
@@ -424,12 +489,205 @@ function App({ onLogout }) {
     })
   }, [activeTab.id, updateTab])
 
+  const handleVideoProviderChange = useCallback((provider) => {
+    updateTab(activeTab.id, tab => provider === 'cupsy' ? {
+      provider: 'cupsy', model: SEEDANCE_25, duration: tab.duration === -1 ? 5 : tab.duration,
+      resolution: ['480p', '720p'].includes(tab.resolution) ? tab.resolution : '720p',
+      fast: false, outputFormat: 'mp4', returnLastFrame: false,
+    } : { provider: 'ark' })
+  }, [activeTab.id, updateTab])
+
   const moveVideoReference = useCallback((tabId, field, fromIndex, toIndex) => {
     setVideoTabs(prev => prev.map(tab => tab.id === tabId ? {
       ...tab,
       [field]: moveArrayItem(tab[field], fromIndex, toIndex),
     } : tab))
   }, [setVideoTabs])
+
+  const useCupsyAsset = useCallback((asset, role) => {
+    const common = {
+      cupsyAssetId: asset.id,
+      name: asset.name || `Asset ${asset.id}`,
+      preview: asset.content_url,
+    }
+    updateTab(activeTab.id, tab => {
+      if (role === 'first_frame') return { firstFrame: { ...common, file: null } }
+      if (role === 'last_frame') return { lastFrame: { ...common, file: null } }
+      if (role === 'reference_image') {
+        if (tab.refImages.some(item => item.cupsyAssetId === asset.id)) return {}
+        return { refImages: [...tab.refImages, { ...common, file: null }] }
+      }
+      if (role === 'reference_video') {
+        if (tab.refVideos.some(item => item.cupsyAssetId === asset.id)) return {}
+        return { refVideos: [...tab.refVideos, { ...common, uid: `cupsy-${asset.id}`, url: asset.content_url, uploading: false }] }
+      }
+      if (role === 'reference_audio') {
+        if (tab.refAudios.some(item => item.cupsyAssetId === asset.id)) return {}
+        return { refAudios: [...tab.refAudios, { ...common, file: null }] }
+      }
+      return {}
+    })
+    notify('素材已引用')
+  }, [activeTab.id, notify, updateTab])
+
+  const setVideoKeyframeFile = useCallback((tabId, field, files) => {
+    const file = Array.from(files || []).find(isImageFile)
+    if (!file) {
+      notify('关键帧仅支持图片文件', 'error')
+      return
+    }
+    readFileDataUrl(file).then(preview => {
+      setVideoTabs(previous => previous.map(tab => tab.id === tabId ? {
+        ...tab,
+        [field]: { file, preview, name: file.name },
+        ...(tab.model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}),
+      } : tab))
+    }).catch(() => notify('关键帧图片读取失败', 'error'))
+  }, [notify, setVideoTabs])
+
+  const addPastedKeyframes = useCallback((tabId, files) => {
+    const accepted = Array.from(files || []).filter(isImageFile).slice(0, 2)
+    if (!accepted.length) return
+    Promise.all(accepted.map(async file => ({ file, name: file.name, preview: await readFileDataUrl(file) })))
+      .then(items => {
+        setVideoTabs(previous => previous.map(tab => {
+          if (tab.id !== tabId) return tab
+          const available = [...items]
+          const firstFrame = tab.firstFrame || available.shift() || null
+          const lastFrame = tab.lastFrame || available.shift() || null
+          if (firstFrame === tab.firstFrame && lastFrame === tab.lastFrame) return tab
+          return {
+            ...tab,
+            firstFrame,
+            lastFrame,
+            ...(tab.model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}),
+          }
+        }))
+      })
+      .catch(() => notify('关键帧图片读取失败', 'error'))
+  }, [notify, setVideoTabs])
+
+  const addVideoReferenceImages = useCallback((tabId, files) => {
+    const accepted = Array.from(files || []).filter(isImageFile)
+    if (!accepted.length) {
+      notify('此区域仅支持图片文件', 'error')
+      return
+    }
+    Promise.all(accepted.map(async file => ({ file, name: file.name, preview: await readFileDataUrl(file) })))
+      .then(items => {
+        setVideoTabs(previous => previous.map(tab => {
+          if (tab.id !== tabId) return tab
+          const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+          const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefImages - tab.refImages.length
+          if (remaining <= 0) return tab
+          return { ...tab, refImages: [...tab.refImages, ...items.slice(0, remaining)] }
+        }))
+      })
+      .catch(() => notify('参考图片读取失败', 'error'))
+  }, [notify, setVideoTabs])
+
+  const updateReferenceVideo = useCallback((tabId, uid, updates) => {
+    setVideoTabs(previous => previous.map(tab => tab.id === tabId ? {
+      ...tab,
+      refVideos: tab.refVideos.map(video => video.uid === uid ? { ...video, ...updates } : video),
+    } : tab))
+  }, [setVideoTabs])
+
+  const uploadReferenceVideo = useCallback((tabId, uid, file) => {
+    const video = document.createElement('video')
+    const objectUrl = URL.createObjectURL(file)
+    const releasePreview = () => URL.revokeObjectURL(objectUrl)
+    video.preload = 'metadata'
+    video.muted = true
+    video.src = objectUrl
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) ? Math.round(video.duration * 100) / 100 : null
+      updateReferenceVideo(tabId, uid, { duration })
+      video.currentTime = Math.min(0.1, Math.max(0, (duration || 0) / 2))
+    }
+    video.onseeked = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      canvas.getContext('2d')?.drawImage(video, 0, 0)
+      updateReferenceVideo(tabId, uid, { thumbnail: canvas.toDataURL('image/jpeg', 0.6) })
+      releasePreview()
+    }
+    video.onerror = releasePreview
+
+    const body = new FormData()
+    body.append('file', file)
+    axios.post('/api/upload_video', body, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: event => {
+        const progress = event.total ? Math.round((event.loaded / event.total) * 100) : 0
+        updateReferenceVideo(tabId, uid, { progress })
+      },
+    }).then(response => {
+      if (!response.data.success) throw new Error(response.data.error || '上传失败')
+      updateReferenceVideo(tabId, uid, {
+        url: response.data.url,
+        filepath: response.data.filepath,
+        progress: 100,
+        uploading: false,
+      })
+    }).catch(error => {
+      setVideoTabs(previous => previous.map(tab => tab.id === tabId ? {
+        ...tab,
+        refVideos: tab.refVideos.filter(videoItem => videoItem.uid !== uid),
+      } : tab))
+      notify(error.response?.data?.error || error.message || '参考视频上传失败', 'error')
+    })
+  }, [notify, setVideoTabs, updateReferenceVideo])
+
+  const addVideoReferenceVideos = useCallback((tabId, files) => {
+    const accepted = Array.from(files || []).filter(isVideoFile)
+    if (!accepted.length) {
+      notify('此区域仅支持 MP4 或 MOV 视频', 'error')
+      return
+    }
+    const tab = videoTabs.find(item => item.id === tabId)
+    if (!tab) return
+    const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+    const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefVideos - tab.refVideos.length
+    const selected = accepted.slice(0, Math.max(0, remaining))
+    if (!selected.length) return
+    const batchId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const items = selected.map((file, index) => ({
+      uid: `${batchId}_${index}`,
+      name: file.name,
+      url: null,
+      thumbnail: null,
+      progress: 0,
+      uploading: true,
+    }))
+    setVideoTabs(previous => previous.map(item => item.id === tabId ? {
+      ...item,
+      refVideos: [...item.refVideos, ...items],
+    } : item))
+    selected.forEach((file, index) => uploadReferenceVideo(tabId, items[index].uid, file))
+  }, [notify, setVideoTabs, uploadReferenceVideo, videoTabs])
+
+  const addVideoReferenceAudios = useCallback((tabId, files) => {
+    const accepted = Array.from(files || []).filter(isAudioFile)
+    if (!accepted.length) {
+      notify('此区域仅支持 WAV 或 MP3 音频', 'error')
+      return
+    }
+    setVideoTabs(previous => previous.map(tab => {
+      if (tab.id !== tabId) return tab
+      const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+      const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefAudios - tab.refAudios.length
+      if (remaining <= 0) return tab
+      return {
+        ...tab,
+        refAudios: [
+          ...tab.refAudios,
+          ...accepted.slice(0, remaining).map(file => ({ file, name: file.name })),
+        ],
+      }
+    }))
+  }, [notify, setVideoTabs])
   const [taskGalleryRevision, setTaskGalleryRevision] = useState(0)
 
   useEffect(() => {
@@ -671,6 +929,7 @@ function App({ onLogout }) {
       const response = await axios.get('/api/provider')
       if (response.data.success) {
         setApiProvider(response.data.current_provider)
+        setImageProviders(response.data.providers || {})
         if (response.data.current_provider !== 'ark' && response.data.current_model) setCurrentModel(response.data.current_model)
       }
     } catch (error) {
@@ -693,18 +952,17 @@ function App({ onLogout }) {
   const fetchVideoProviderInfo = async () => {
     try {
       const response = await axios.get('/api/video/provider')
-      if (response.data.success) setVideoFastAvailable(response.data.fast_available !== false)
+      if (response.data.success) {
+        setVideoFastAvailable(response.data.fast_available !== false)
+        if (response.data.providers) setVideoProviders(response.data.providers)
+      }
     } catch (error) {
       console.error('Failed to fetch video provider info:', error)
     }
   }
 
-  const switchModel = async () => {
-    if (apiProvider === 'ark') return
-    if (availableModels.length < 2) return
-    const currentIndex = availableModels.findIndex(m => m.id === currentModel)
-    const nextIndex = (currentIndex + 1) % availableModels.length
-    const newModel = availableModels[nextIndex].id
+  const handleImageModelChange = async (newModel) => {
+    if (apiProvider === 'ark' || newModel === currentModel) return
     try {
       const response = await axios.post('/api/model', { model: newModel })
       if (response.data.success) {
@@ -713,10 +971,8 @@ function App({ onLogout }) {
     } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
 
-  const switchApiProvider = async () => {
-    const order = ['vertex', 'ark']
-    const idx = order.indexOf(apiProvider)
-    const newProvider = order[(idx + 1) % order.length]
+  const handleImageProviderChange = async (newProvider) => {
+    if (newProvider === apiProvider) return
     try {
       const response = await axios.post('/api/provider', { provider: newProvider })
       if (response.data.success) {
@@ -726,10 +982,6 @@ function App({ onLogout }) {
     } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
   
-  const switchVideoModel = () => {
-    handleVideoModelChange(effectiveVideoModel === SEEDANCE_25 ? SEEDANCE_20 : SEEDANCE_25)
-  }
-
   const handleSavePrompt = async () => {
     const p = appMode === 'video' ? activeTab.prompt : activeImgTab.prompt
     if (!p || !p.trim()) return notify('请先输入提示词', 'error')
@@ -822,61 +1074,44 @@ function App({ onLogout }) {
     return Boolean(tab.prompt.trim() || tab.refImages.length > 0 || uploadedVideos || tab.refAudios.length > 0)
   }
 
-  const buildVideoPromptContextPayload = (tab) => {
-    const videoUrls = tab.refVideos.filter(v => v.url && !v.uploading)
-    return {
-      prompt: tab.prompt,
-      model: effectiveVideoModel,
-      mode: tab.mode,
-      ratio: tab.ratio,
-      duration: tab.duration,
-      resolution: tab.resolution,
-      output_format: tab.outputFormat || 'mp4',
-      fast: tab.fast,
-      generate_audio: tab.audio,
-      return_last_frame: tab.returnLastFrame,
-      has_first_frame: Boolean(tab.firstFrame),
-      has_last_frame: Boolean(tab.lastFrame),
-      ref_image_count: tab.refImages.length,
-      ref_video_count: videoUrls.length,
-      ref_audio_count: tab.refAudios.length
-    }
-  }
-
-  // 视频模式粘贴上传图片
+  // 视频模式下，将剪贴板中的媒体发送到当前素材区域。
   useEffect(() => {
-    if (appMode !== 'video') return
-    const handlePaste = (e) => {
-      const files = []
-      for (const item of e.clipboardData.items) {
-        if (item.type.startsWith('image/')) files.push(item.getAsFile())
+    if (appMode !== 'video') return undefined
+    const handlePaste = event => {
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter(item => item.kind === 'file')
+        .map(item => item.getAsFile())
+        .filter(Boolean)
+      if (!files.length) return
+
+      if (activeTab.mode === 'keyframe') {
+        const images = files.filter(isImageFile)
+        if (!images.length) return
+        event.preventDefault()
+        addPastedKeyframes(activeTab.id, images)
+        return
       }
-      if (files.length === 0) return
-      const tab = activeTab
-      if (tab.mode === 'keyframe') {
-        const f = files[0]
-        const reader = new FileReader()
-        reader.onload = ev => {
-          const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
-          const modelUpdates = model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}
-          if (!tab.firstFrame) updateTab(tab.id, { firstFrame: { file: f, preview: ev.target.result }, ...modelUpdates })
-          else if (!tab.lastFrame) updateTab(tab.id, { lastFrame: { file: f, preview: ev.target.result }, ...modelUpdates })
-        }
-        reader.readAsDataURL(f)
-      } else {
-        const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
-        const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefImages - tab.refImages.length
-        const toProcess = files.slice(0, remaining)
-        Promise.all(toProcess.map(f => new Promise(r => {
-          const rd = new FileReader()
-          rd.onload = ev => r({ file: f, preview: ev.target.result })
-          rd.readAsDataURL(f)
-        }))).then(items => updateTab(tab.id, { refImages: [...tab.refImages, ...items] }))
-      }
+
+      const images = files.filter(isImageFile)
+      const videos = files.filter(isVideoFile)
+      const audios = files.filter(isAudioFile)
+      if (!images.length && !videos.length && !audios.length) return
+      event.preventDefault()
+      if (images.length) addVideoReferenceImages(activeTab.id, images)
+      if (videos.length) addVideoReferenceVideos(activeTab.id, videos)
+      if (audios.length) addVideoReferenceAudios(activeTab.id, audios)
     }
     document.addEventListener('paste', handlePaste)
     return () => document.removeEventListener('paste', handlePaste)
-  })
+  }, [
+    activeTab.id,
+    activeTab.mode,
+    addPastedKeyframes,
+    addVideoReferenceAudios,
+    addVideoReferenceImages,
+    addVideoReferenceVideos,
+    appMode,
+  ])
 
   const handleVideoGenerate = async () => {
     const tab = activeTab
@@ -910,8 +1145,19 @@ function App({ onLogout }) {
       let resp
       const hasFiles = Boolean(tab.firstFrame || tab.lastFrame || tab.refImages.length > 0 || tab.refAudios.length > 0)
 
+      const cupsyAssets = tab.mode === 'keyframe'
+        ? [
+            tab.firstFrame?.cupsyAssetId && { id: tab.firstFrame.cupsyAssetId, role: 'first_frame' },
+            tab.lastFrame?.cupsyAssetId && { id: tab.lastFrame.cupsyAssetId, role: 'last_frame' },
+          ].filter(Boolean)
+        : [
+            ...tab.refImages.filter(item => item.cupsyAssetId).map(item => ({ id: item.cupsyAssetId, role: 'reference_image' })),
+            ...readyRefVideos.filter(item => item.cupsyAssetId).map(item => ({ id: item.cupsyAssetId, role: 'reference_video' })),
+            ...tab.refAudios.filter(item => item.cupsyAssetId).map(item => ({ id: item.cupsyAssetId, role: 'reference_audio' })),
+          ]
+
       // 收集已上传的视频 URL
-      const videoUrls = readyRefVideos.map(v => v.url)
+      const videoUrls = readyRefVideos.filter(v => !v.cupsyAssetId).map(v => v.url)
 
       if (hasFiles) {
         const formData = new FormData()
@@ -925,15 +1171,17 @@ function App({ onLogout }) {
         formData.append('generate_audio', tab.audio)
         formData.append('return_last_frame', tab.returnLastFrame)
         formData.append('video_mode', tab.mode)
+        formData.append('provider', activeVideoProvider)
+        if (cupsyAssets.length) formData.append('cupsy_assets', JSON.stringify(cupsyAssets))
         const pendingFetches = []
         if (tab.mode === 'keyframe') {
-          if (tab.firstFrame) {
+          if (tab.firstFrame && !tab.firstFrame.cupsyAssetId) {
             if (tab.firstFrame.file) formData.append('image', tab.firstFrame.file)
             else if (tab.firstFrame.preview) pendingFetches.push(
               ensureFetchOk(tab.firstFrame.preview).then(blob => formData.append('image', blob, 'first_frame.png'))
             )
           }
-          if (tab.lastFrame) {
+          if (tab.lastFrame && !tab.lastFrame.cupsyAssetId) {
             if (tab.lastFrame.file) formData.append('last_image', tab.lastFrame.file)
             else if (tab.lastFrame.preview) pendingFetches.push(
               ensureFetchOk(tab.lastFrame.preview).then(blob => formData.append('last_image', blob, 'last_frame.png'))
@@ -942,11 +1190,13 @@ function App({ onLogout }) {
         } else {
           const [resolvedRefImages, resolvedRefAudios] = await Promise.all([
             Promise.all(tab.refImages.map(async (img, index) => {
+              if (img.cupsyAssetId) return null
               if (img.file) return { blob: img.file, name: img.name || img.file.name || `ref_${index}.png` }
               if (!img.preview) return null
               return { blob: await ensureFetchOk(img.preview), name: img.name || `ref_${index}.png` }
             })),
             Promise.all(tab.refAudios.map(async (aud, index) => {
+              if (aud.cupsyAssetId) return null
               if (aud.file) return { blob: aud.file, name: aud.name || aud.file.name || `audio_${index}.wav` }
               if (!aud.preview) return null
               return { blob: await ensureFetchOk(aud.preview), name: aud.name || `audio_${index}.wav` }
@@ -965,7 +1215,9 @@ function App({ onLogout }) {
           output_format: tab.outputFormat || 'mp4', fast: tab.fast, generate_audio: tab.audio,
           return_last_frame: tab.returnLastFrame,
           video_mode: tab.mode,
-          ref_video_urls: videoUrls.length ? videoUrls : undefined
+          provider: activeVideoProvider,
+          ref_video_urls: videoUrls.length ? videoUrls : undefined,
+          cupsy_assets: cupsyAssets.length ? cupsyAssets : undefined,
         }, { timeout: 300000 })
       }
 
@@ -981,84 +1233,6 @@ function App({ onLogout }) {
       window.clearTimeout(revealTimer)
       setTaskGalleryRevision(revision => revision + 1)
     }
-  }
-
-  const handleOptimizeVideoPrompt = async () => {
-    const tab = activeTab
-    if (!tab.prompt.trim()) return
-    setOptimizingVideoPrompt(true)
-    updateTab(tab.id, { error: null })
-    try {
-      const resp = await axios.post('/api/video/optimize-prompt', buildVideoPromptContextPayload(tab), { timeout: 120000 })
-      if (resp.data.success && resp.data.prompt) {
-        updateTab(tab.id, { prompt: resp.data.prompt })
-      } else {
-        updateTab(tab.id, { error: resp.data.error || 'Prompt 优化失败' })
-      }
-    } catch (e) {
-      updateTab(tab.id, { error: e.response?.data?.error || e.message || 'Prompt 优化失败' })
-    } finally {
-      setOptimizingVideoPrompt(false)
-    }
-  }
-
-  const sendVideoPromptAgentMessage = async (message, startNew = false) => {
-    const tab = activeTab
-    if (!videoTabHasInput(tab) && !message.trim()) return
-
-    const userMessage = message.trim() || '请根据当前视频 prompt 和参数开始优化。'
-    setVideoPromptAgentLoading(true)
-    setShowVideoPromptAgent(true)
-    setVideoPromptAgentInput('')
-    setVideoPromptAgentMessages(prev => [...prev, { role: 'user', content: userMessage }])
-    updateTab(tab.id, { error: null })
-
-    try {
-      const resp = await axios.post('/api/video/prompt-agent/message', {
-        ...buildVideoPromptContextPayload(tab),
-        session_id: startNew ? null : videoPromptAgentSessionId,
-        message: userMessage
-      }, { timeout: 120000 })
-
-      if (resp.data.success) {
-        setVideoPromptAgentSessionId(resp.data.session_id)
-        setVideoPromptAgentMessages(resp.data.history || [
-          { role: 'user', content: userMessage },
-          { role: 'assistant', content: resp.data.message || '' }
-        ])
-        setVideoPromptAgentDraft(resp.data.optimized_prompt || '')
-      } else {
-        updateTab(tab.id, { error: resp.data.error || 'Prompt Agent 失败' })
-      }
-    } catch (e) {
-      updateTab(tab.id, { error: e.response?.data?.error || e.message || 'Prompt Agent 失败' })
-      setVideoPromptAgentMessages(prev => [...prev, { role: 'assistant', content: e.response?.data?.error || e.message || 'Prompt Agent 失败' }])
-    } finally {
-      setVideoPromptAgentLoading(false)
-    }
-  }
-
-  const openVideoPromptAgent = () => {
-    if (!showVideoPromptAgent) setShowVideoPromptAgent(true)
-    if (videoPromptAgentMessages.length === 0) {
-      sendVideoPromptAgentMessage('', true)
-    }
-  }
-
-  const resetVideoPromptAgent = async () => {
-    const oldSessionId = videoPromptAgentSessionId
-    setVideoPromptAgentSessionId(null)
-    setVideoPromptAgentMessages([])
-    setVideoPromptAgentInput('')
-    setVideoPromptAgentDraft('')
-    if (oldSessionId) {
-      axios.delete(`/api/video/prompt-agent/session/${oldSessionId}`).catch(() => {})
-    }
-  }
-
-  const applyVideoPromptAgentDraft = () => {
-    if (!videoPromptAgentDraft.trim()) return
-    updateTab(activeTab.id, { prompt: videoPromptAgentDraft.trim() })
   }
 
   // 左侧面板拖拽调整宽度
@@ -1156,15 +1330,9 @@ function App({ onLogout }) {
     else updateImgTab(activeImgTab.id, { prompt })
     setShowPromptCollection(false)
   }
-  const currentModelLabel = appMode === 'video'
-    ? VIDEO_MODEL_CAPABILITIES[effectiveVideoModel].label.replace('Dreamina ', '')
-    : apiProvider === 'ark'
-      ? 'Seedream 5.0 Pro'
-      : currentModel.includes('flash') ? 'Gemini Flash 3.1' : 'Gemini Pro 3.0'
-  const currentProviderLabel = appMode === 'video'
-    ? 'Ark'
-    : apiProvider === 'vertex' ? 'Vertex AI' : 'Ark'
-  const canSwitchModel = appMode === 'video' || (apiProvider !== 'ark' && availableModels.length > 1)
+  const imageModelValue = isArk
+    ? (imageProviders.ark?.model || 'seedream-5-0-pro')
+    : currentModel
 
   return (
     <div ref={appShellRef} className="app-shell bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative">
@@ -1193,21 +1361,6 @@ function App({ onLogout }) {
           />
         </div>
         <div className="header-actions flex min-w-0 items-center gap-1.5">
-          <button onClick={canSwitchModel ? (appMode === 'video' ? switchVideoModel : switchModel) : undefined} aria-disabled={!canSwitchModel} className={`header-chip btn-base btn-outline max-w-[220px] ${canSwitchModel ? '' : 'cursor-default'}`} title={canSwitchModel ? '切换模型' : '当前模型'}>
-            <Cpu size={14} className="text-nexus-green" />
-            <span className="header-model-label truncate">{currentModelLabel}</span>
-          </button>
-          {appMode === 'image' ? (
-            <button onClick={switchApiProvider} className="header-chip btn-base btn-outline max-w-[150px]" title="切换 Provider">
-              <Database size={14} className="text-nexus-blue" />
-              <span className="header-provider-label truncate">{currentProviderLabel}</span>
-            </button>
-          ) : (
-            <div className="header-chip btn-base btn-outline max-w-[150px] cursor-default" title="当前 Provider">
-              <Database size={14} className="text-nexus-blue" />
-              <span className="header-provider-label truncate">{currentProviderLabel}</span>
-            </div>
-          )}
           <div className="glass-control-group flex items-center gap-0.5">
             <IconButton label="PNG Info" onClick={() => setShowPngInfo(true)}><FileSearch size={16} /></IconButton>
             <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
@@ -1275,6 +1428,51 @@ function App({ onLogout }) {
             <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />图片参数</div>
             <span className="font-mono text-[11px] text-nexus-muted">{imageSizeSummary}</span>
           </div>
+
+            <div className="inspector-section">
+              <div className="inspector-title">
+                <Cpu size={14} className="text-nexus-green" /> 生成设置
+              </div>
+              <div className="inspector-fields">
+                <div className="inspector-field-row">
+                  <span className="field-label">端点</span>
+                  <select
+                    aria-label="图片端点"
+                    value={apiProvider}
+                    disabled={!providerInfoReady}
+                    onChange={event => handleImageProviderChange(event.target.value)}
+                    className="field-select min-w-0"
+                  >
+                    <option value="ark" disabled={imageProviders.ark?.available === false} className="bg-nexus-bg">
+                      BytePlus Ark{imageProviders.ark?.available === false ? ' · 未配置' : ''}
+                    </option>
+                    <option value="vertex" disabled={imageProviders.vertex?.available === false} className="bg-nexus-bg">
+                      Vertex AI{imageProviders.vertex?.available === false ? ' · 未配置' : ''}
+                    </option>
+                  </select>
+                </div>
+                <div className="inspector-field-row">
+                  <span className="field-label">模型</span>
+                  <select
+                    aria-label="图片模型"
+                    value={imageModelValue}
+                    disabled={!providerInfoReady || isArk || availableModels.length < 2}
+                    onChange={event => handleImageModelChange(event.target.value)}
+                    className="field-select min-w-0"
+                  >
+                    {isArk ? (
+                      <option value={imageModelValue} className="bg-nexus-bg">Seedream 5.0 Pro</option>
+                    ) : availableModels.length > 0 ? (
+                      availableModels.map(model => (
+                        <option key={model.id} value={model.id} className="bg-nexus-bg">{model.name || model.id}</option>
+                      ))
+                    ) : (
+                      <option value={currentModel} className="bg-nexus-bg">{currentModel}</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+            </div>
             
             {/* GEOMETRY (宽高比) */}
             <div className="inspector-section">
@@ -1282,10 +1480,12 @@ function App({ onLogout }) {
                 <Grid3X3 size={14} className="text-nexus-blue" /> 画幅
               </div>
               <div className="flex-grow">
+                <div className="inspector-field-row">
+                  <span className="field-label">比例</span>
                  <select 
                    value={activeImgTab.aspectRatio} onChange={e => updateImgTab(activeImgTab.id, { aspectRatio: e.target.value })}
                    aria-label="画幅"
-                   className="field-select w-full font-mono"
+                   className="field-select font-mono"
                  >
                    {aspectRatios.map((ratio) => (
                      <option key={ratio} value={ratio} className="bg-nexus-bg">
@@ -1293,6 +1493,7 @@ function App({ onLogout }) {
                      </option>
                    ))}
                  </select>
+                </div>
                  <div className="custom-size-editor" data-active={isCustomSeedreamSize ? 'true' : 'false'}>
                    <div className="custom-size-toolbar">
                      <div className="min-w-0">
@@ -1396,8 +1597,8 @@ function App({ onLogout }) {
               <div className="inspector-title">
                 <Settings size={14} className="text-nexus-green" /> 输出设置
               </div>
-              <div className="flex flex-col justify-between flex-grow gap-2">
-                 {!isCustomSeedreamSize && <div className="flex items-center justify-between">
+              <div className="inspector-fields flex-grow">
+                 {!isCustomSeedreamSize && <div className="inspector-field-row">
                    <span className="field-label">分辨率</span>
                    <select 
                      value={activeImgTab.resolution} onChange={e => updateImgTab(activeImgTab.id, { resolution: e.target.value })}
@@ -1410,7 +1611,7 @@ function App({ onLogout }) {
                    </select>
                  </div>}
                  {isArk ? (<>
-                 <div className="flex items-center justify-between">
+                 <div className="inspector-field-row">
                    <span className="field-label">格式</span>
                    <select
                      value={activeImgTab.outputFormat || 'png'}
@@ -1421,24 +1622,24 @@ function App({ onLogout }) {
                      <option value="jpeg" className="bg-nexus-bg">JPEG</option>
                    </select>
                  </div>
-                 <div className="flex items-center justify-between">
+                 <div className="inspector-field-row">
                    <span className="field-label">添加水印</span>
                    <ToggleSwitch label="添加水印" checked={activeImgTab.watermark} onChange={watermark => updateImgTab(activeImgTab.id, { watermark })} />
                  </div>
-                 <div className="flex items-center justify-between">
+                 <div className="inspector-field-row">
                    <span className="field-label">提示词优化</span>
                    <span className="text-xs font-medium text-nexus-green">标准</span>
                  </div>
                  </>) : (<>
-                 <div className="flex items-center justify-between">
+                 <div className="inspector-field-row">
                    <span className="field-label">联网搜索</span>
                    <ToggleSwitch label="联网搜索" checked={activeImgTab.useSearch} onChange={useSearch => updateImgTab(activeImgTab.id, { useSearch })} />
                  </div>
-                 <div className="flex items-center justify-between">
+                 <div className="inspector-field-row">
                    <span className="field-label">连续对话</span>
                    <ToggleSwitch label="连续对话" checked={activeImgTab.chatMode} onChange={chatMode => updateImgTab(activeImgTab.id, { chatMode })} />
                  </div>
-                 <div className="flex items-center justify-between">
+                 <div className="inspector-field-row">
                    <span className="field-label">思考深度</span>
                    <select
                      value={activeImgTab.thinkLevel} onChange={e => updateImgTab(activeImgTab.id, { thinkLevel: e.target.value })}
@@ -1497,26 +1698,6 @@ function App({ onLogout }) {
               </div>
             </div>
             <div className="prompt-actions p-3 border-t border-nexus-border z-10">
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <button
-                  onClick={handleOptimizeVideoPrompt}
-                  disabled={optimizingVideoPrompt || !activeTab.prompt.trim()}
-                  className="btn-base btn-outline min-h-9 px-2 text-xs"
-                >
-                  {optimizingVideoPrompt ? (
-                    <><Cpu size={12} className="animate-pulse" /> <span>优化中</span></>
-                  ) : (
-                    <><Settings size={12} /> <span>快速优化</span></>
-                  )}
-                </button>
-                <button
-                  onClick={openVideoPromptAgent}
-                  disabled={videoPromptAgentLoading || !videoTabHasInput(activeTab)}
-                  className={`btn-base min-h-9 px-2 text-xs ${showVideoPromptAgent ? 'btn-active' : 'btn-outline'}`}
-                >
-                  <Bot size={12} /> <span>{videoPromptAgentLoading ? '处理中' : '提示词助手'}</span>
-                </button>
-              </div>
               <button
                 onClick={handleVideoGenerate}
                 className="btn-base btn-primary w-full min-h-11"
@@ -1562,20 +1743,35 @@ function App({ onLogout }) {
                 <div className="inspector-title">
                   <Grid3X3 size={14} className="text-nexus-blue" /> 生成设置
                 </div>
-                <div className="flex flex-col justify-between flex-grow gap-2">
-                  <div className="flex items-center justify-between gap-3">
+                <div className="inspector-fields flex-grow">
+                  <div className="inspector-field-row">
+                    <span className="field-label">端点</span>
+                    <select
+                      aria-label="视频端点"
+                      value={activeVideoProvider}
+                      onChange={event => handleVideoProviderChange(event.target.value)}
+                      className="field-select min-w-0"
+                    >
+                      <option value="ark" className="bg-nexus-bg">BytePlus Ark</option>
+                      <option value="cupsy" disabled={!videoProviders.cupsy?.available} className="bg-nexus-bg">
+                        Cupsy{videoProviders.cupsy?.available ? '' : ' · 未配置'}
+                      </option>
+                    </select>
+                  </div>
+                  <div className="inspector-field-row">
                     <span className="field-label">模型</span>
                     <select
                       aria-label="视频模型"
                       value={effectiveVideoModel}
+                      disabled={activeVideoProvider === 'cupsy'}
                       onChange={e => handleVideoModelChange(e.target.value)}
                       className="field-select min-w-0"
                     >
-                      <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>
+                      {activeVideoProvider === 'ark' && <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>}
                       <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
                     </select>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="inspector-field-row">
                     <span className="field-label">画幅</span>
                     <select
                       aria-label="视频画幅"
@@ -1590,7 +1786,7 @@ function App({ onLogout }) {
                       ))}
                     </select>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="inspector-field-row">
                     <span className="field-label">模式</span>
                     <select
                       aria-label="视频生成模式"
@@ -1618,8 +1814,8 @@ function App({ onLogout }) {
                 <div className="inspector-title">
                   <Settings size={14} className="text-nexus-green" /> 输出参数
                 </div>
-                <div className="flex flex-col justify-between flex-grow gap-2">
-                  <div className="flex items-center justify-between">
+                <div className="inspector-fields flex-grow">
+                  <div className="inspector-field-row">
                     <span className="field-label">分辨率</span>
                     <select aria-label="视频分辨率" value={activeTab.resolution} onChange={e => updateTab(activeTab.id, { resolution: e.target.value })}
                       className="field-select font-mono">
@@ -1628,7 +1824,7 @@ function App({ onLogout }) {
                       ))}
                     </select>
                   </div>
-                  <div className="flex items-center justify-between">
+                  <div className="inspector-field-row">
                     <span className="field-label">时长</span>
                     <select
                       aria-label="视频时长"
@@ -1642,21 +1838,21 @@ function App({ onLogout }) {
                       {videoDurationOptions.map(d => (
                         <option key={d} value={d} className="bg-nexus-bg">{d}s</option>
                       ))}
-                      <option value={-1} className="bg-nexus-bg">
+                      {activeVideoProvider === 'ark' && <option value={-1} className="bg-nexus-bg">
                         {isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo ? 'Auto · 编辑跟随输入' : 'Auto'}
-                      </option>
+                      </option>}
                     </select>
                   </div>
                   {!isSeedance25 && (
-                    <div className="flex items-center justify-between">
+                    <div className="inspector-field-row">
                       <span className="field-label" title={videoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}>
                         快速模式{!videoFastAvailable && <span className="ml-1 text-[9px] text-nexus-muted">未配置</span>}
                       </span>
                       <ToggleSwitch label="快速模式" checked={activeTab.fast} disabled={!videoFastAvailable} onChange={fast => updateTab(activeTab.id, { fast })} />
                     </div>
                   )}
-                  {isSeedance25 && (
-                    <div className="flex items-center justify-between">
+                  {isSeedance25 && activeVideoProvider === 'ark' && (
+                    <div className="inspector-field-row">
                       <span className="field-label">格式</span>
                       <select
                         aria-label="视频输出格式"
@@ -1669,26 +1865,36 @@ function App({ onLogout }) {
                       </select>
                     </div>
                   )}
-                  <div className="flex items-center justify-between">
+                  <div className="inspector-field-row">
                     <span className="field-label">生成音频</span>
                     <ToggleSwitch label="生成音频" checked={activeTab.audio} onChange={audio => updateTab(activeTab.id, { audio })} />
                   </div>
-                  <div className="flex items-center justify-between">
+                  {activeVideoProvider === 'ark' && <div className="inspector-field-row">
                     <span className="field-label">返回尾帧</span>
                     <ToggleSwitch label="返回尾帧" checked={activeTab.returnLastFrame} onChange={returnLastFrame => updateTab(activeTab.id, { returnLastFrame })} />
-                  </div>
+                  </div>}
                 </div>
               </div>
 
               {/* KEYFRAMES / REFERENCE */}
               <div className="inspector-section">
-                <div className="inspector-title">
-                  <Film size={14} className="text-nexus-violet" /> {activeTab.mode === 'keyframe' ? '关键帧' : '参考素材'}
+                <div className="inspector-title justify-between">
+                  <span className="flex items-center gap-2"><Film size={14} className="text-nexus-violet" /> {activeTab.mode === 'keyframe' ? '关键帧' : '参考素材'}</span>
+                  {activeVideoProvider === 'cupsy' && (
+                    <button type="button" className="cupsy-library-button" onClick={() => setShowCupsyAssets(true)}>
+                      <Library size={13} /> 素材库
+                    </button>
+                  )}
                 </div>
 
                 {activeTab.mode === 'keyframe' ? (
                 <div className="flex-grow flex gap-3">
-                  <div className="w-[120px] flex flex-col">
+                  <div
+                    className="video-material-drop-zone flex w-[120px] flex-col"
+                    data-testid="video-first-frame-drop-zone"
+                    data-dragging="false"
+                    {...videoDropZoneHandlers(files => setVideoKeyframeFile(activeTab.id, 'firstFrame', files))}
+                  >
                     <span className="mb-1.5 text-xs text-nexus-text">首帧</span>
                     {activeTab.firstFrame ? (
                       <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
@@ -1710,19 +1916,19 @@ function App({ onLogout }) {
                     ) : (
                       <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
                         <Plus size={16} /> 添加
-                        <input aria-label="上传首帧" type="file" accept="image/*" className="hidden" onChange={e => {
-                          const f = e.target.files[0]; if (!f) return
-                          const reader = new FileReader()
-                          reader.onload = ev => updateTab(activeTab.id, {
-                            firstFrame: { file: f, preview: ev.target.result },
-                            ...(isSeedance25 ? { ratio: 'adaptive' } : {}),
-                          })
-                          reader.readAsDataURL(f)
+                        <input aria-label="上传首帧" type="file" accept="image/*" className="hidden" onChange={event => {
+                          setVideoKeyframeFile(activeTab.id, 'firstFrame', event.target.files)
+                          event.target.value = ''
                         }} />
                       </label>
                     )}
                   </div>
-                  <div className="w-[120px] flex flex-col">
+                  <div
+                    className="video-material-drop-zone flex w-[120px] flex-col"
+                    data-testid="video-last-frame-drop-zone"
+                    data-dragging="false"
+                    {...videoDropZoneHandlers(files => setVideoKeyframeFile(activeTab.id, 'lastFrame', files))}
+                  >
                     <span className="mb-1.5 text-xs text-nexus-text">尾帧</span>
                     {activeTab.lastFrame ? (
                       <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
@@ -1744,14 +1950,9 @@ function App({ onLogout }) {
                     ) : (
                       <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
                         <Plus size={16} /> 添加
-                        <input aria-label="上传尾帧" type="file" accept="image/*" className="hidden" onChange={e => {
-                          const f = e.target.files[0]; if (!f) return
-                          const reader = new FileReader()
-                          reader.onload = ev => updateTab(activeTab.id, {
-                            lastFrame: { file: f, preview: ev.target.result },
-                            ...(isSeedance25 ? { ratio: 'adaptive' } : {}),
-                          })
-                          reader.readAsDataURL(f)
+                        <input aria-label="上传尾帧" type="file" accept="image/*" className="hidden" onChange={event => {
+                          setVideoKeyframeFile(activeTab.id, 'lastFrame', event.target.files)
+                          event.target.value = ''
                         }} />
                       </label>
                     )}
@@ -1760,7 +1961,12 @@ function App({ onLogout }) {
                 ) : (
                 <div className="grid flex-grow grid-cols-3 gap-2">
                   {/* Reference images */}
-                  <div className="flex min-w-0 flex-col">
+                  <div
+                    className="video-material-drop-zone flex min-w-0 flex-col"
+                    data-testid="video-reference-images-drop-zone"
+                    data-dragging="false"
+                    {...videoDropZoneHandlers(files => addVideoReferenceImages(activeTab.id, files))}
+                  >
                     <span className="mb-1.5 truncate text-xs text-nexus-text" title={`图片（最多 ${videoCapabilities.maxRefImages} 个）`}>图片 · {videoCapabilities.maxRefImages}</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refImages.map((img, i) => (
@@ -1793,17 +1999,21 @@ function App({ onLogout }) {
                       {activeTab.refImages.length < videoCapabilities.maxRefImages && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
                           <Plus size={14} />
-                          <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={e => {
-                            const files = Array.from(e.target.files).slice(0, videoCapabilities.maxRefImages - activeTab.refImages.length)
-                            Promise.all(files.map(f => new Promise(r => { const rd = new FileReader(); rd.onload = ev => r({ file: f, preview: ev.target.result }); rd.readAsDataURL(f) })))
-                              .then(items => updateTab(activeTab.id, { refImages: [...activeTab.refImages, ...items] }))
+                          <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={event => {
+                            addVideoReferenceImages(activeTab.id, event.target.files)
+                            event.target.value = ''
                           }} />
                         </label>
                       )}
                     </div>
                   </div>
                   {/* Reference videos */}
-                  <div className="flex min-w-0 flex-col">
+                  <div
+                    className="video-material-drop-zone flex min-w-0 flex-col"
+                    data-testid="video-reference-videos-drop-zone"
+                    data-dragging="false"
+                    {...videoDropZoneHandlers(files => addVideoReferenceVideos(activeTab.id, files))}
+                  >
                     <span className="mb-1.5 truncate text-xs text-nexus-text" title={`视频（最多 ${videoCapabilities.maxRefVideos} 个）`}>视频 · {videoCapabilities.maxRefVideos}</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refVideos.map((vid, i) => (
@@ -1839,7 +2049,7 @@ function App({ onLogout }) {
                             <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{vid.name?.slice(0,6)}</span>
                           </button>
                           <button type="button" aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
-                              if (vid.url) {
+                              if (vid.url && !vid.cupsyAssetId) {
                                 axios.delete('/api/upload_video', { data: { url: vid.url } }).catch(() => {})
                               }
                               updateTab(activeTab.id, { refVideos: activeTab.refVideos.filter((_, j) => j !== i) })
@@ -1852,65 +2062,21 @@ function App({ onLogout }) {
                       {activeTab.refVideos.length < videoCapabilities.maxRefVideos && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
                           <Plus size={14} />
-                          <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={e => {
-                            const files = Array.from(e.target.files).slice(0, videoCapabilities.maxRefVideos - activeTab.refVideos.length)
-                            const items = files.map(f => ({ uid: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name: f.name, url: null, thumbnail: null, progress: 0, uploading: true }))
-                            const tabId = activeTab.id
-                            updateTab(tabId, { refVideos: [...activeTab.refVideos, ...items] })
-                            files.forEach((f, fi) => {
-                              const uid = items[fi].uid
-                              // 提取首帧缩略图
-                              const vidEl = document.createElement('video')
-                              const objectUrl = URL.createObjectURL(f)
-                              const cleanupObjectUrl = () => URL.revokeObjectURL(objectUrl)
-                              vidEl.preload = 'metadata'
-                              vidEl.muted = true
-                              vidEl.src = objectUrl
-                              vidEl.onloadedmetadata = () => {
-                                const duration = Number.isFinite(vidEl.duration)
-                                  ? Math.round(vidEl.duration * 100) / 100
-                                  : null
-                                setVideoTabs(prev => prev.map(t => t.id === tabId ? {
-                                  ...t,
-                                  refVideos: t.refVideos.map(v => v.uid === uid ? { ...v, duration } : v),
-                                } : t))
-                                vidEl.currentTime = Math.min(0.1, Math.max(0, (duration || 0) / 2))
-                              }
-                              vidEl.onseeked = () => {
-                                const canvas = document.createElement('canvas')
-                                canvas.width = vidEl.videoWidth
-                                canvas.height = vidEl.videoHeight
-                                canvas.getContext('2d').drawImage(vidEl, 0, 0)
-                                const thumb = canvas.toDataURL('image/jpeg', 0.6)
-                                cleanupObjectUrl()
-                                setVideoTabs(prev => prev.map(t => t.id === tabId ? { ...t, refVideos: t.refVideos.map(v => v.uid === uid ? { ...v, thumbnail: thumb } : v) } : t))
-                              }
-                              vidEl.onerror = cleanupObjectUrl
-                              // 上传
-                              const fd = new FormData()
-                              fd.append('file', f)
-                              axios.post('/api/upload_video', fd, {
-                                headers: { 'Content-Type': 'multipart/form-data' },
-                                onUploadProgress: (ev) => {
-                                  const pct = Math.round((ev.loaded / ev.total) * 100)
-                                  setVideoTabs(prev => prev.map(t => t.id === tabId ? { ...t, refVideos: t.refVideos.map(v => v.uid === uid ? { ...v, progress: pct } : v) } : t))
-                                }
-                              }).then(res => {
-                                if (res.data.success) {
-                                  setVideoTabs(prev => prev.map(t => t.id === tabId ? { ...t, refVideos: t.refVideos.map(v => v.uid === uid ? { ...v, url: res.data.url, filepath: res.data.filepath, progress: 100, uploading: false } : v) } : t))
-                                }
-                              }).catch(() => {
-                                setVideoTabs(prev => prev.map(t => t.id === tabId ? { ...t, refVideos: t.refVideos.filter(v => v.uid !== uid) } : t))
-                              })
-                            })
-                            e.target.value = ''
+                          <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={event => {
+                            addVideoReferenceVideos(activeTab.id, event.target.files)
+                            event.target.value = ''
                           }} />
                         </label>
                       )}
                     </div>
                   </div>
                   {/* Reference audio */}
-                  <div className="flex min-w-0 flex-col">
+                  <div
+                    className="video-material-drop-zone flex min-w-0 flex-col"
+                    data-testid="video-reference-audios-drop-zone"
+                    data-dragging="false"
+                    {...videoDropZoneHandlers(files => addVideoReferenceAudios(activeTab.id, files))}
+                  >
                     <span className="mb-1.5 truncate text-xs text-nexus-text" title={`音频（最多 ${videoCapabilities.maxRefAudios} 个）`}>音频 · {videoCapabilities.maxRefAudios}</span>
                     <div className="flex-grow flex gap-1.5 flex-wrap items-start">
                       {activeTab.refAudios.map((aud, i) => (
@@ -1948,9 +2114,9 @@ function App({ onLogout }) {
                       {activeTab.refAudios.length < videoCapabilities.maxRefAudios && (
                         <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
                           <Plus size={14} />
-                          <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={e => {
-                            const files = Array.from(e.target.files).slice(0, videoCapabilities.maxRefAudios - activeTab.refAudios.length)
-                            updateTab(activeTab.id, { refAudios: [...activeTab.refAudios, ...files.map(f => ({ file: f, name: f.name }))] })
+                          <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={event => {
+                            addVideoReferenceAudios(activeTab.id, event.target.files)
+                            event.target.value = ''
                           }} />
                         </label>
                       )}
@@ -1984,7 +2150,7 @@ function App({ onLogout }) {
                     return (<>
                       <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatCnyEstimate(estimate)}</div>
                       <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
-                        <div>{isSeedance25 ? 'Seedance 2.5 · 2.0 × 1.5' : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
+                        <div>{isSeedance25 ? 'Seedance 2.5 · 官方费率' : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
                         <div>{estimate.width}×{estimate.height} · {outputDuration} · {estimate.fps}fps</div>
                         <div>{inputVideo}</div>
                         <div className="mt-1 opacity-50">≈{formatWanTokens(estimate.minimumTokens, estimate.maximumTokens)}{estimate.ratioAssumed ? ' · Adaptive 按 16:9' : ''}</div>
@@ -2021,108 +2187,6 @@ function App({ onLogout }) {
         )}
       </AnimatePresence>
 
-      {/* 右侧抽屉：视频提示词助手 */}
-      <AnimatePresence>
-        {showVideoPromptAgent && appMode === 'video' && (
-          <motion.aside
-            initial={{ x: '100%', opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: '100%', opacity: 0 }}
-            transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-            className="agent-drawer liquid-glass-strong absolute bottom-0 right-0 top-0 z-50 flex flex-col"
-          >
-            <div className="glass-drawer-header flex h-12 shrink-0 items-center justify-between px-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
-                <Bot size={15} className="text-nexus-violet" /> 提示词助手
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={resetVideoPromptAgent}
-                  disabled={videoPromptAgentLoading}
-                  className="btn-base min-h-8 px-2 text-xs text-nexus-text hover:bg-nexus-surface hover:text-nexus-text-light"
-                >
-                  重置
-                </button>
-                <IconButton label="关闭提示词助手" onClick={() => setShowVideoPromptAgent(false)}><X size={16} /></IconButton>
-              </div>
-            </div>
-
-            <div className="flex-grow min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3 bg-nexus-bg/30">
-              {videoPromptAgentMessages.length === 0 && !videoPromptAgentLoading && (
-                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-nexus-muted">
-                  <Bot size={28} className="opacity-40" />
-                  <span>暂无对话</span>
-                </div>
-              )}
-              {videoPromptAgentMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[88%] rounded-md border px-3 py-2.5 text-sm leading-5 whitespace-pre-wrap break-words ${
-                    msg.role === 'user'
-                      ? 'border-nexus-blue/35 bg-nexus-blue/10 text-nexus-text-light'
-                      : 'border-nexus-border bg-nexus-surface text-nexus-text-light'
-                  }`}>
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-              {videoPromptAgentLoading && (
-                <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-md border border-nexus-border bg-nexus-surface px-3 py-2 text-xs text-nexus-text">
-                    <Cpu size={12} className="animate-pulse text-nexus-violet" /> 分析中
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {videoPromptAgentDraft && (
-              <div className="shrink-0 border-t border-nexus-border bg-nexus-panel p-3">
-                <div className="mb-2 text-xs font-medium text-nexus-text">建议提示词</div>
-                <div className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-nexus-border bg-nexus-bg p-2.5 text-sm leading-5 text-nexus-text-light custom-scrollbar">
-                  {videoPromptAgentDraft}
-                </div>
-                <button
-                  onClick={applyVideoPromptAgentDraft}
-                  className="btn-base btn-primary mt-2 w-full text-xs"
-                >
-                  <Check size={13} /> 应用提示词
-                </button>
-              </div>
-            )}
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (!videoPromptAgentInput.trim() || videoPromptAgentLoading) return
-                sendVideoPromptAgentMessage(videoPromptAgentInput)
-              }}
-              className="shrink-0 border-t border-nexus-border bg-nexus-panel p-3"
-            >
-              <div className="flex gap-2">
-                <textarea
-                  value={videoPromptAgentInput}
-                  onChange={e => setVideoPromptAgentInput(e.target.value)}
-                  aria-label="给提示词助手发送消息"
-                  disabled={videoPromptAgentLoading}
-                  rows={3}
-                  className="min-w-0 flex-grow resize-none rounded-md border border-nexus-border bg-nexus-bg px-3 py-2 text-sm leading-5 text-nexus-text-light outline-none focus:border-nexus-blue custom-scrollbar disabled:opacity-50"
-                  placeholder="补充要求或回复问题..."
-                />
-                <button
-                  type="submit"
-                  aria-label="发送消息"
-                  title="发送"
-                  disabled={videoPromptAgentLoading || !videoPromptAgentInput.trim()}
-                  className="icon-button h-auto w-10 border-nexus-border bg-nexus-surface hover:text-nexus-violet"
-                >
-                  <Send size={14} />
-                </button>
-              </div>
-            </form>
-          </motion.aside>
-        )}
-      </AnimatePresence>
-
       </main>
 
       <PngInfoModal
@@ -2131,6 +2195,14 @@ function App({ onLogout }) {
         onApply={handleApplyPngInfo}
       />
       <ReferenceMediaModal media={referenceMedia} onClose={() => setReferenceMedia(null)} />
+      <CupsyAssetManager
+        open={showCupsyAssets}
+        mode={activeTab.mode}
+        onClose={() => setShowCupsyAssets(false)}
+        onUse={useCupsyAsset}
+        onPreview={setReferenceMedia}
+        notify={notify}
+      />
 
       {/* 全屏 Prompt 编辑器弹窗 */}
       {ReactDOM.createPortal(

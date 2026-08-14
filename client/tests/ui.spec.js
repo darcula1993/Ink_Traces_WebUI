@@ -89,6 +89,34 @@ async function login(page, {
   return workspaceState
 }
 
+async function dropFiles(locator, files) {
+  await locator.evaluate((element, fileSpecs) => {
+    const transfer = new DataTransfer()
+    for (const spec of fileSpecs) {
+      transfer.items.add(new File([spec.contents || 'test-media'], spec.name, { type: spec.type }))
+    }
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      element.dispatchEvent(new DragEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      }))
+    }
+  }, files)
+}
+
+async function pasteFiles(page, files) {
+  await page.evaluate(fileSpecs => {
+    const transfer = new DataTransfer()
+    for (const spec of fileSpecs) {
+      transfer.items.add(new File([spec.contents || 'test-media'], spec.name, { type: spec.type }))
+    }
+    const event = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'clipboardData', { value: transfer })
+    document.dispatchEvent(event)
+  }, files)
+}
+
 test('workspace persistence ignores server JSON key ordering', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Persistence only needs one browser run')
   const workspacePuts = []
@@ -154,17 +182,19 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '视频', exact: true }).click()
   await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥4.97')
   await page.getByLabel('视频模型').selectOption('seedance-2.5')
-  await expect(page.getByText('Seedance 2.5', { exact: true }).first()).toBeVisible()
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥5.96~¥44.71')
+  await expect(page.getByLabel('视频模型')).toHaveValue('seedance-2.5')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥6.08~¥45.56')
   await expect(page.getByLabel('视频分辨率').locator('option')).toHaveText(['480p', '720p'])
   await expect(page.getByLabel('视频时长').locator('option[value="30"]')).toHaveText('30s')
   await expect(page.getByLabel('视频时长')).toHaveValue('-1')
   await expect(page.getByLabel('视频输出格式')).toBeVisible()
   await expect(page.getByRole('switch', { name: '快速模式' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '快速优化' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '提示词助手' })).toHaveCount(0)
 
   await page.getByLabel('视频画幅').selectOption('21:9')
   await page.getByLabel('视频时长').selectOption('30')
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥44.93')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥45.79')
   await page.getByLabel('视频输出格式').selectOption('mov')
   await page.getByLabel('视频提示词').fill('A continuous cinematic shot through a neon city')
   await page.getByRole('button', { name: '生成视频' }).click()
@@ -181,6 +211,63 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await expect(page.getByText('视频 · 10')).toBeVisible()
   await expect(page.getByText('音频 · 10')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('desktop-seedance-2.5.png') })
+})
+
+test('Cupsy endpoint reuses active Assets from the solid asset manager', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Cupsy asset manager is desktop focused')
+  await page.route('**/api/video/provider', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      current: 'ark',
+      fast_available: true,
+      providers: {
+        ark: { available: true, models: ['seedance-2.0', 'seedance-2.5'] },
+        cupsy: { available: true, source_ready: true, models: ['seedance-2.5'] },
+      },
+    }),
+  }))
+  await page.route('**/api/cupsy/assets', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      configured: true,
+      source_ready: true,
+      assets: [{
+        id: 17,
+        provider: 'cupsy',
+        external_asset_id: 'asset_remote_17',
+        asset_uri: 'asset://asset_remote_17',
+        kind: 'image',
+        status: 'active',
+        name: 'reference.png',
+        mime_type: 'image/png',
+        size_bytes: 1234,
+        content_url: '/api/cupsy/assets/17/content',
+      }],
+    }),
+  }))
+  await page.route('**/api/cupsy/assets/17/content', route => route.fulfill({
+    status: 200,
+    contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  }))
+  await login(page, { initialWorkspaceState: { appMode: 'video' } })
+
+  await page.getByLabel('视频端点').selectOption('cupsy')
+  await expect(page.getByLabel('视频模型')).toHaveValue('seedance-2.5')
+  await expect(page.getByLabel('视频模型')).toBeDisabled()
+  await expect(page.getByLabel('视频时长').locator('option[value="-1"]')).toHaveCount(0)
+  await page.getByLabel('视频生成模式').selectOption('reference')
+  await page.getByRole('button', { name: '素材库' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Cupsy 素材库' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toHaveCSS('background-color', 'rgb(12, 16, 20)')
+  await dialog.getByRole('button', { name: '引用' }).click()
+  await expect(page.getByRole('button', { name: '打开视频参考图片 1' })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('desktop-cupsy-assets.png') })
 })
 
 test('Seedance 2.5 reference video preserves explicit ratio and duration', async ({ page }, testInfo) => {
@@ -245,6 +332,15 @@ test('workspace adapts without horizontal overflow', async ({ page }, testInfo) 
   await login(page)
   await expect(page.locator('.inspector-pane')).toBeVisible()
 
+  const alignedSelects = await page.locator('.inspector-field-row > .field-select').evaluateAll(elements => (
+    elements.map(element => {
+      const bounds = element.getBoundingClientRect()
+      return { width: Math.round(bounds.width), right: Math.round(bounds.right) }
+    })
+  ))
+  expect(new Set(alignedSelects.map(select => select.width)).size).toBe(1)
+  expect(new Set(alignedSelects.map(select => select.right)).size).toBe(1)
+
   if (testInfo.project.name === 'desktop') {
     const materials = await page.evaluate(() => {
       const sidebarStyle = getComputedStyle(document.querySelector('.prompt-pane'))
@@ -259,7 +355,8 @@ test('workspace adapts without horizontal overflow', async ({ page }, testInfo) 
     })
     expect(materials.header).toContain('blur')
     expect(materials.sidebar).toContain('blur')
-    expect(materials.sidebarAlpha).toBeLessThan(0.3)
+    expect(materials.sidebarAlpha).toBeGreaterThan(0.25)
+    expect(materials.sidebarAlpha).toBeLessThan(0.6)
     expect(materials.ambientTracks).toBeGreaterThanOrEqual(2)
     expect(materials.canvas).toContain('blur')
 
@@ -297,11 +394,11 @@ test('workspace adapts without horizontal overflow', async ({ page }, testInfo) 
   await expect(page.getByLabel('搜索任务画廊')).toBeVisible()
   await expect(page.getByTestId('new-draft-card')).toHaveCount(0)
   await expect(page.getByTestId('task-gallery-card')).toHaveCount(0)
-  await expect(page.getByText('没有符合条件的任务')).toBeVisible()
+  await expect(page.getByText('还没有图片任务')).toBeVisible()
   await expect(page.getByRole('button', { name: '生成图片' })).toBeEnabled()
 
   await page.getByRole('group', { name: '任务视图' }).getByRole('button', { name: '进行中' }).click()
-  await expect(page.getByText('没有符合条件的任务')).toBeVisible()
+  await expect(page.getByText('没有正在生成的任务')).toBeVisible()
   await expect(page.getByRole('button', { name: /加载更多/ })).toHaveCount(0)
   await page.getByRole('group', { name: '任务视图' }).getByRole('button', { name: '全部' }).click()
 
@@ -364,10 +461,10 @@ test('PNG Info applies reusable parameters without changing provider or model', 
   }))
   await login(page)
 
-  await expect(page.locator('.header-provider-label')).toHaveText('Ark')
-  await expect(page.locator('.header-model-label')).toHaveText('Seedream 5.0 Pro')
-  const modelBefore = await page.locator('.header-model-label').textContent()
-  const providerBefore = await page.locator('.header-provider-label').textContent()
+  await expect(page.getByLabel('图片端点')).toHaveValue('ark')
+  await expect(page.getByLabel('图片模型')).toHaveValue('seedream-5-0-pro')
+  const modelBefore = await page.getByLabel('图片模型').inputValue()
+  const providerBefore = await page.getByLabel('图片端点').inputValue()
   await page.getByRole('button', { name: 'PNG Info' }).click()
   const dialog = page.getByRole('dialog', { name: 'PNG Info' })
   await expect(dialog).toBeVisible()
@@ -385,8 +482,74 @@ test('PNG Info applies reusable parameters without changing provider or model', 
   await expect(page.getByLabel('图片提示词')).toHaveValue('Imported PNG prompt')
   await expect(page.locator('.inspector-header')).toContainText('9:16 · 2K')
   await expect(page.getByRole('switch', { name: '添加水印' })).toHaveAttribute('aria-checked', 'true')
-  await expect(page.locator('.header-model-label')).toHaveText(modelBefore)
-  await expect(page.locator('.header-provider-label')).toHaveText(providerBefore)
+  await expect(page.getByLabel('图片模型')).toHaveValue(modelBefore)
+  await expect(page.getByLabel('图片端点')).toHaveValue(providerBefore)
+})
+
+test('image endpoint and model selectors live in the parameter inspector', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Image parameter controls only need one desktop run')
+  let provider = 'ark'
+  let model = 'gemini-3.1-flash-image-preview'
+  const providerChanges = []
+  const modelChanges = []
+  const providers = {
+    ark: { name: 'BytePlus Ark', model: 'seedream-5-0-pro', available: true },
+    vertex: { name: 'Vertex AI', model: 'gemini-3.1-flash-image-preview', available: true },
+  }
+  const models = [
+    { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash' },
+    { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro' },
+  ]
+
+  await page.route('**/api/provider', async route => {
+    if (route.request().method() === 'POST') {
+      provider = route.request().postDataJSON().provider
+      providerChanges.push(provider)
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, provider, model: providers[provider].model }),
+      })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, current_provider: provider, current_model: providers[provider].model, providers }),
+    })
+  })
+  await page.route('**/api/model', async route => {
+    if (route.request().method() === 'POST') {
+      model = route.request().postDataJSON().model
+      modelChanges.push(model)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, model }) })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, current_model: model, available_models: models }),
+    })
+  })
+
+  await login(page)
+  await expect(page.locator('.header-model-label, .header-provider-label')).toHaveCount(0)
+  await expect(page.getByLabel('图片端点')).toHaveValue('ark')
+  await expect(page.getByLabel('图片模型')).toBeDisabled()
+  await expect(page.getByLabel('图片模型').locator('option')).toHaveText(['Seedream 5.0 Pro'])
+
+  await page.getByLabel('图片端点').selectOption('vertex')
+  await expect.poll(() => providerChanges).toEqual(['vertex'])
+  await expect(page.getByLabel('图片模型')).toBeEnabled()
+  await expect(page.getByLabel('图片模型').locator('option')).toHaveText(['Gemini 3.1 Flash', 'Gemini 3 Pro'])
+  await page.getByLabel('图片模型').selectOption('gemini-3-pro-image-preview')
+  await expect.poll(() => modelChanges).toEqual(['gemini-3-pro-image-preview'])
+  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-3-pro-image-preview')
+
+  await page.getByLabel('图片端点').selectOption('ark')
+  await expect.poll(() => providerChanges).toEqual(['vertex', 'ark'])
+  await expect(page.getByLabel('图片模型')).toBeDisabled()
+  await expect(page.getByLabel('图片模型')).toHaveValue('seedream-5-0-pro')
 })
 
 test('Seedream supports validated custom dimensions and automatic sizing', async ({ page }, testInfo) => {
@@ -555,7 +718,7 @@ test('task navigation retries a transient network failure without UI noise', asy
 
 test('task gallery favorites persist and details open in a large modal', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Gallery interaction only needs one desktop run')
-  test.setTimeout(90_000)
+  test.setTimeout(120_000)
   const preview = `data:image/svg+xml,${encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200" viewBox="0 0 800 1200">
       <rect width="800" height="1200" fill="#07110d"/>
@@ -577,7 +740,11 @@ test('task gallery favorites persist and details open in a large modal', async (
     favorite_groups: [],
     progress: 100,
     created_at: '2026-07-12T08:30:00+00:00',
-    result: { local_images: [outputPreview], local_refs: [preview] },
+    result: {
+      local_images: [outputPreview],
+      local_refs: [preview],
+      source_urls: ['https://media.invalid/generated-image-42.png?token=endpoint-result'],
+    },
   }
   const nextTask = {
     ...task,
@@ -597,7 +764,11 @@ test('task gallery favorites persist and details open in a large modal', async (
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true, tasks: visible ? [task] : [], total: visible ? 3 : 0 }),
+      body: JSON.stringify({
+        success: true,
+        tasks: visible ? [task] : [],
+        total: visible ? (wantsTrash ? 1 : 3) : 0,
+      }),
     })
   })
   await page.route('**/api/tasks/selection?*', route => {
@@ -695,6 +866,10 @@ test('task gallery favorites persist and details open in a large modal', async (
     'src',
     '/api/tasks/42/file/image_0.png?png_info=1',
   )
+  const sourceUrl = modal.getByRole('link', { name: 'https://media.invalid/generated-image-42.png?token=endpoint-result' })
+  await expect(modal.getByText('端点图像 URL')).toBeVisible()
+  await expect(sourceUrl).toHaveAttribute('href', 'https://media.invalid/generated-image-42.png?token=endpoint-result')
+  await expect(sourceUrl).toHaveAttribute('target', '_blank')
   await expect.poll(async () => (await modal.boundingBox()).width).toBeGreaterThan(1340)
   const modalBeforeDrag = await modal.boundingBox()
   const dragHandle = modal.getByTestId('task-detail-drag-handle')
@@ -714,14 +889,27 @@ test('task gallery favorites persist and details open in a large modal', async (
   await expect(modal).toBeVisible()
   await modal.getByRole('checkbox', { name: '角色设计' }).click()
   await expect(modal.getByRole('checkbox', { name: '角色设计' })).toHaveAttribute('aria-checked', 'true')
-  await expect(modal.getByRole('link', { name: '下载任务结果' })).toHaveAttribute(
+  await modal.getByRole('button', { name: '下载任务结果' }).click()
+  const downloadMenu = modal.getByRole('menu', { name: '图片下载选项' })
+  await expect(downloadMenu).toBeVisible()
+  await expect(downloadMenu.getByRole('menuitem', { name: '带生成参数' })).toHaveAttribute(
     'download',
     'ink-traces-image-task-42-20260712083000-output-01.png',
   )
-  await expect(modal.getByRole('link', { name: '下载任务结果' })).toHaveAttribute(
+  await expect(downloadMenu.getByRole('menuitem', { name: '带生成参数' })).toHaveAttribute(
     'href',
     '/api/tasks/42/download/image_0.png',
   )
+  await expect(downloadMenu.getByRole('menuitem', { name: '原始生成图' })).toHaveAttribute(
+    'download',
+    'ink-traces-image-task-42-20260712083000-output-01-original.png',
+  )
+  await expect(downloadMenu.getByRole('menuitem', { name: '原始生成图' })).toHaveAttribute(
+    'href',
+    '/api/tasks/42/download/image_0.png?raw=1',
+  )
+  await modal.getByRole('button', { name: '下载任务结果' }).click()
+  await expect(downloadMenu).toBeHidden()
   await modal.getByRole('button', { name: '下一个任务' }).click()
   await expect(modal.getByText(nextTask.prompt)).toBeVisible()
   await expect(modal.getByText('2 / 3')).toBeVisible()
@@ -740,8 +928,8 @@ test('task gallery favorites persist and details open in a large modal', async (
   await page.getByRole('button', { name: '任务卡片布局' }).click()
   const layoutMenu = page.getByRole('menu', { name: '任务卡片布局设置' })
   await expect(layoutMenu).toBeVisible()
-  await layoutMenu.getByRole('menuitemradio', { name: 'Compact' }).click()
-  await layoutMenu.getByRole('menuitemradio', { name: 'Clean' }).click()
+  await layoutMenu.getByRole('menuitemradio', { name: '紧凑' }).click()
+  await layoutMenu.getByRole('menuitemradio', { name: '纯预览' }).click()
   await expect(page.locator('.task-gallery')).toHaveAttribute('data-card-size', 'compact')
   await expect(page.locator('.task-gallery')).toHaveAttribute('data-card-details', 'clean')
   await expect(page.locator('.task-card-details')).toHaveCount(0)
@@ -772,6 +960,83 @@ test('task gallery favorites persist and details open in a large modal', async (
   await page.getByTestId('task-gallery-card').click()
   await page.getByRole('dialog', { name: '任务详情' }).getByRole('button', { name: '恢复任务' }).click()
   await expect(page.getByTestId('task-gallery-card')).toHaveCount(0)
+})
+
+test('task gallery filters and compares selected results', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Desktop gallery workflow')
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  const sourceTasks = [
+    {
+      id: 301, type: 'image', status: 'succeeded', prompt: 'Neon editorial portrait', provider: 'ark',
+      params: { model: 'seedream-a', resolution: '1K', aspect_ratio: '1:1', output_format: 'png' },
+      result: { local_images: [pixel], local_thumbnails: [pixel] }, created_at: '2026-08-14T08:00:00Z',
+    },
+    {
+      id: 302, type: 'image', status: 'succeeded', prompt: 'Glass product study', provider: 'ark',
+      params: { model: 'seedream-b', resolution: '2K', aspect_ratio: '16:9', output_format: 'png' },
+      result: { local_images: [pixel], local_thumbnails: [pixel] }, created_at: '2026-08-13T08:00:00Z',
+    },
+    {
+      id: 303, type: 'image', status: 'failed', prompt: 'Failed Cupsy study', provider: 'cupsy',
+      params: { model: 'seedream-c', resolution: '1K' }, result: {}, error: 'provider failed',
+      created_at: '2026-08-12T08:00:00Z',
+    },
+  ]
+  const listRequests = []
+  await page.route('**/api/tasks/filter-options?*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, providers: ['ark', 'cupsy'], models: ['seedream-a', 'seedream-b', 'seedream-c'] }),
+  }))
+  await page.route('**/api/tasks/selection?*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, ids: [301, 302], total: 2 }),
+  }))
+  await page.route(/\/api\/tasks\/\d+$/, route => {
+    const id = Number(new URL(route.request().url()).pathname.split('/').pop())
+    const task = sourceTasks.find(item => item.id === id)
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, task }) })
+  })
+  await page.route('**/api/tasks?*', route => {
+    const url = new URL(route.request().url())
+    listRequests.push(Object.fromEntries(url.searchParams.entries()))
+    const tasks = sourceTasks.filter(task => (
+      (!url.searchParams.get('provider') || task.provider === url.searchParams.get('provider')) &&
+      (!url.searchParams.get('status') || task.status === url.searchParams.get('status'))
+    ))
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, tasks, total: tasks.length }),
+    })
+  })
+
+  await login(page, { mockTasks: false, initialWorkspaceState: { appMode: 'image' } })
+  await expect(page.getByTestId('task-gallery-card')).toHaveCount(3)
+  await expect(page.getByText('完成', { exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '筛选任务' }).click()
+  await page.getByLabel('按任务端点筛选').selectOption('ark')
+  await page.getByLabel('按任务状态筛选').selectOption('succeeded')
+  await expect(page.getByTestId('task-gallery-card')).toHaveCount(2)
+  await expect.poll(() => listRequests.at(-1)?.provider).toBe('ark')
+  await expect.poll(() => listRequests.at(-1)?.status).toBe('succeeded')
+  await expect(page.getByLabel('已应用筛选')).toContainText('BytePlus Ark')
+  await expect(page.getByLabel('已应用筛选')).toContainText('已完成')
+
+  await page.getByRole('button', { name: '批量选择任务' }).click()
+  const cards = page.getByTestId('task-gallery-card')
+  await cards.nth(0).click()
+  await cards.nth(1).click()
+  await page.getByRole('button', { name: '对比已选任务' }).click()
+  const compare = page.getByRole('dialog', { name: '任务对比' })
+  await expect(compare).toBeVisible()
+  await expect(compare.getByText('TASK #301')).toBeVisible()
+  await expect(compare.getByText('TASK #302')).toBeVisible()
+  await compare.getByLabel('同步缩放').fill('1.5')
+  await expect(compare.getByText('150%')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('desktop-task-compare.png') })
 })
 
 test('code rain loading canvas renders active pixels', async ({ page }, testInfo) => {
@@ -974,6 +1239,52 @@ test('video parameter references open image, video, and audio previews', async (
   await expect(audioDialog.getByTestId('reference-audio-player')).toHaveAttribute('src', audioUrl)
   await audioDialog.screenshot({ path: testInfo.outputPath('desktop-reference-audio-player.png') })
   await page.keyboard.press('Escape')
+})
+
+test('all video reference types accept dropped and pasted files', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Video reference ingestion targets the desktop workspace')
+  await page.route('**/api/upload_video', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        url: `/api/upload_video/${Date.now()}.mp4`,
+        filepath: `/tmp/${Date.now()}.mp4`,
+      }),
+    })
+  })
+  await login(page, { initialWorkspaceState: { appMode: 'video' } })
+
+  await dropFiles(page.getByTestId('video-first-frame-drop-zone'), [
+    { name: 'dropped-first.png', type: 'image/png' },
+  ])
+  await expect(page.getByAltText('首帧')).toBeVisible()
+  await pasteFiles(page, [{ name: 'pasted-last.png', type: 'image/png' }])
+  await expect(page.getByAltText('尾帧')).toBeVisible()
+
+  await page.getByLabel('视频生成模式').selectOption('reference')
+  await dropFiles(page.getByTestId('video-reference-images-drop-zone'), [
+    { name: 'dropped-image.png', type: 'image/png' },
+  ])
+  await dropFiles(page.getByTestId('video-reference-videos-drop-zone'), [
+    { name: 'dropped-video.mp4', type: 'video/mp4' },
+  ])
+  await dropFiles(page.getByTestId('video-reference-audios-drop-zone'), [
+    { name: 'dropped-audio.mp3', type: 'audio/mpeg' },
+  ])
+  await expect(page.getByTestId('video-reference-image-item-0')).toBeVisible()
+  await expect(page.getByTestId('video-reference-video-item-0')).toBeVisible()
+  await expect(page.getByTestId('video-reference-audio-item-0')).toBeVisible()
+
+  await pasteFiles(page, [
+    { name: 'pasted-image.png', type: 'image/png' },
+    { name: 'pasted-video.mov', type: 'video/quicktime' },
+    { name: 'pasted-audio.wav', type: 'audio/wav' },
+  ])
+  await expect(page.getByTestId('video-reference-image-item-1')).toBeVisible()
+  await expect(page.getByTestId('video-reference-video-item-1')).toBeVisible()
+  await expect(page.getByTestId('video-reference-audio-item-1')).toBeVisible()
 })
 
 test('reference materials can be reordered and generation preserves that order', async ({ page }, testInfo) => {

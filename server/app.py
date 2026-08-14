@@ -12,8 +12,12 @@ import re
 import time
 import tempfile
 import zipfile
+import hashlib
+import mimetypes
+import shutil
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from PIL import Image, UnidentifiedImageError
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import uuid
 from datetime import datetime, timezone
 import tasks as task_db
@@ -107,15 +111,13 @@ BUILTIN_DEFAULT_CONFIG = {
             'model': '',
             'seedance_2_5_model': 'ep-20260807145632-xprc6',
         },
-    },
-    'openai': {
-        'api_key': '',
-        'endpoint': 'https://api.openai.com',
-        'model': 'gpt-5',
-        'rewriter_prompt_file': 'video_prompt_rewriter.md',
-        'agent_prompt_file': 'video_prompt_optimizer.md',
-        'prompt_file': 'video_prompt_optimizer.md',
-        'max_output_tokens': 1600,
+        'cupsy': {
+            'api_key': '',
+            'endpoint': 'https://cupsy.io',
+            'model': 'seedance-2.5',
+            'source_base_url': '',
+            'asset_token_ttl_seconds': 3600,
+        },
     },
 }
 
@@ -257,7 +259,7 @@ def require_login():
         return  # 未配置 auth 则不启用认证
     if request.path in open_paths:
         return
-    if request.path.startswith('/api/upload_video/'):
+    if request.path.startswith('/api/upload_video/') or request.path.startswith('/api/cupsy/source/'):
         return
     if not request.path.startswith('/api'):
         return
@@ -269,12 +271,15 @@ def log_request(response):
     started_at = getattr(g, 'request_started_at', None)
     duration_ms = round((time.perf_counter() - started_at) * 1000, 2) if started_at else None
     response.headers['X-Request-ID'] = getattr(g, 'request_id', '')
+    logged_path = request.path
+    if logged_path.startswith('/api/cupsy/source/'):
+        logged_path = '/api/cupsy/source/<redacted>'
     app.logger.info(
         'request_completed',
         extra={
             'request_id': getattr(g, 'request_id', None),
             'method': request.method,
-            'path': request.path,
+            'path': logged_path,
             'status': response.status_code,
             'duration_ms': duration_ms,
         },
@@ -481,13 +486,10 @@ def redact_sensitive(value):
 # Chat会话存储 (内存中存储，重启后会丢失)
 # 格式: {session_id: {'history': [contents], 'created_at': timestamp, 'last_used': timestamp}}
 chat_sessions = {}
-video_prompt_agent_sessions = {}
 
 # Prompt收藏存储文件路径
 PROMPTS_FILE = os.path.join(os.path.dirname(__file__), 'prompts.json')
 PROMPTS_EXAMPLE_FILE = os.path.join(os.path.dirname(__file__), 'prompts.json.example')
-SYSTEM_PROMPTS_DIR = os.path.join(PROJECT_ROOT, 'prompts')
-OPENAI_CONFIG = config.get('openai', {})
 
 # 错误日志目录
 ERROR_LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'error_logs')
@@ -546,138 +548,6 @@ def load_prompts():
     except Exception as e:
         print(f"Error importing prompts: {e}")
         return []
-
-def load_system_prompt(filename):
-    """Load a versioned system prompt from the repository prompt directory."""
-    safe_name = os.path.basename(filename or '')
-    if not safe_name:
-        raise ValueError('System prompt file is not configured')
-    path = os.path.abspath(os.path.join(SYSTEM_PROMPTS_DIR, safe_name))
-    prompt_dir = os.path.abspath(SYSTEM_PROMPTS_DIR)
-    if os.path.commonpath([prompt_dir, path]) != prompt_dir or not os.path.isfile(path):
-        raise FileNotFoundError('System prompt file not found')
-    with open(path, 'r', encoding='utf-8') as f:
-        return f.read().strip()
-
-
-def extract_response_text(response_data):
-    """Extract plain text from the OpenAI Responses API payload."""
-    if isinstance(response_data, dict):
-        text = response_data.get('output_text')
-        if isinstance(text, str) and text.strip():
-            return text.strip()
-
-        chunks = []
-        for item in response_data.get('output', []) or []:
-            for content in item.get('content', []) or []:
-                if content.get('type') in ('output_text', 'text') and isinstance(content.get('text'), str):
-                    chunks.append(content['text'])
-        if chunks:
-            return ''.join(chunks).strip()
-    return ''
-
-
-def openai_config_values():
-    """Return OpenAI client settings without exposing secrets in logs."""
-    api_key = OPENAI_CONFIG.get('api_key') or os.environ.get('OPENAI_API_KEY', '')
-    model = OPENAI_CONFIG.get('model') or 'gpt-5'
-    endpoint = (OPENAI_CONFIG.get('endpoint') or 'https://api.openai.com').rstrip('/')
-    max_output_tokens = int(OPENAI_CONFIG.get('max_output_tokens', 1600) or 1600)
-    return api_key, model, endpoint, max_output_tokens
-
-
-def call_openai_response(system_prompt, input_payload, error_context):
-    """Call the configured OpenAI Responses API and return extracted text."""
-    api_key, model, endpoint, max_output_tokens = openai_config_values()
-    if not api_key:
-        return None, jsonify({'success': False, 'error': 'OpenAI API Key 未配置'}), 400
-
-    body = {
-        'model': model,
-        'instructions': system_prompt,
-        'input': input_payload,
-        'max_output_tokens': max_output_tokens,
-        'store': False,
-    }
-    response = HTTP.post(
-        f'{endpoint}/v1/responses',
-        headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
-        json=body,
-        timeout=(10, REQUEST_TIMEOUT),
-    )
-    response_data = response.json() if response.text else {}
-    if response.status_code >= 400:
-        err = response_data.get('error', {}) if isinstance(response_data, dict) else {}
-        err_msg = err.get('message') if isinstance(err, dict) else ''
-        save_error_log(
-            error_context.get('error_type', 'openai_response_error'),
-            {'model': model, **error_context.get('request', {})},
-            response_data,
-            err_msg or f'OpenAI API 错误 {response.status_code}',
-        )
-        return None, jsonify({'success': False, 'error': err_msg or f'OpenAI API 错误 {response.status_code}'}), response.status_code
-
-    text = extract_response_text(response_data)
-    if not text:
-        save_error_log(
-            error_context.get('empty_type', 'openai_response_empty'),
-            {'model': model, **error_context.get('request', {})},
-            response_data,
-            'Empty OpenAI response',
-        )
-        return None, jsonify({'success': False, 'error': 'OpenAI 未返回有效文本'}), 500
-    return text, None, None
-
-
-def build_video_prompt_context(data, prompt=None):
-    """Build shared context for video prompt rewriter and prompt agent."""
-    return {
-        'current_prompt': (prompt if prompt is not None else data.get('prompt', '')) or '',
-        'video_mode': data.get('mode', ''),
-        'ratio': data.get('ratio', ''),
-        'duration': data.get('duration', ''),
-        'resolution': data.get('resolution', ''),
-        'fast': bool(data.get('fast', False)),
-        'generate_audio': bool(data.get('generate_audio', True)),
-        'return_last_frame': bool(data.get('return_last_frame', False)),
-        'has_first_frame': bool(data.get('has_first_frame', False)),
-        'has_last_frame': bool(data.get('has_last_frame', False)),
-        'ref_image_count': int(data.get('ref_image_count', 0) or 0),
-        'ref_video_count': int(data.get('ref_video_count', 0) or 0),
-        'ref_audio_count': int(data.get('ref_audio_count', 0) or 0),
-    }
-
-
-def get_or_create_video_prompt_agent_session(session_id=None):
-    if session_id and session_id in video_prompt_agent_sessions:
-        video_prompt_agent_sessions[session_id]['last_used'] = datetime.now().isoformat()
-        return session_id, video_prompt_agent_sessions[session_id]
-
-    new_session_id = str(uuid.uuid4())
-    video_prompt_agent_sessions[new_session_id] = {
-        'history': [],
-        'created_at': datetime.now().isoformat(),
-        'last_used': datetime.now().isoformat(),
-    }
-    return new_session_id, video_prompt_agent_sessions[new_session_id]
-
-
-def extract_optimized_video_prompt(agent_text):
-    """Extract the final prompt section from the skill-style agent output."""
-    if not agent_text:
-        return ''
-
-    patterns = [
-        r'####\s*优化后提示词\s*\n(?P<prompt>.*?)(?:\n####\s*(?:优化问题|相关原则)|\Z)',
-        r'###\s*优化后提示词\s*\n(?P<prompt>.*?)(?:\n###\s*(?:优化问题|相关原则)|\Z)',
-        r'优化后提示词[:：]\s*(?P<prompt>.*?)(?:\n(?:优化问题|相关原则)[:：]|\Z)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, agent_text, re.S)
-        if match:
-            prompt = match.group('prompt').strip()
-            return prompt.strip('`').strip()
-    return ''
 
 def image_to_base64(image):
     """将PIL Image转换为base64字符串"""
@@ -1052,120 +922,6 @@ def delete_prompt(prompt_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
-@app.route('/api/video/optimize-prompt', methods=['POST'])
-def optimize_video_prompt():
-    """One-click rewrite for the current video prompt."""
-    try:
-        data = request.get_json(silent=True) or {}
-        prompt = (data.get('prompt') or '').strip()
-        if not prompt:
-            return jsonify({'success': False, 'error': '请先输入视频 prompt'}), 400
-
-        prompt_file = OPENAI_CONFIG.get('rewriter_prompt_file') or 'video_prompt_rewriter.md'
-        system_prompt = load_system_prompt(prompt_file)
-        context = build_video_prompt_context(data, prompt)
-        input_payload = json.dumps(context, ensure_ascii=False, indent=2)
-        optimized, error_response, status_code = call_openai_response(
-            system_prompt,
-            input_payload,
-            {
-                'error_type': 'video_prompt_optimize_error',
-                'empty_type': 'video_prompt_optimize_empty',
-                'request': {'prompt': prompt},
-            },
-        )
-        if error_response:
-            return error_response, status_code
-
-        return jsonify({'success': True, 'prompt': optimized})
-
-    except requests.RequestException as e:
-        save_error_log('video_prompt_optimize_request_error', {'prompt': (request.get_json(silent=True) or {}).get('prompt', '')}, {}, str(e))
-        return jsonify({'success': False, 'error': f'OpenAI 请求失败: {e}'}), 500
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/video/prompt-agent/session', methods=['POST'])
-def create_video_prompt_agent_session():
-    """Create an interactive video prompt optimization session."""
-    session_id, agent_session = get_or_create_video_prompt_agent_session()
-    return jsonify({
-        'success': True,
-        'session_id': session_id,
-        'history': agent_session['history'],
-    })
-
-
-@app.route('/api/video/prompt-agent/session/<session_id>', methods=['DELETE'])
-def delete_video_prompt_agent_session(session_id):
-    """Delete an interactive video prompt optimization session."""
-    if session_id in video_prompt_agent_sessions:
-        del video_prompt_agent_sessions[session_id]
-        return jsonify({'success': True})
-    return jsonify({'success': False, 'error': '会话不存在'}), 404
-
-
-@app.route('/api/video/prompt-agent/message', methods=['POST'])
-def video_prompt_agent_message():
-    """Run one turn of the skill-backed video prompt agent."""
-    try:
-        data = request.get_json(silent=True) or {}
-        message = (data.get('message') or '').strip()
-        prompt = (data.get('prompt') or '').strip()
-        session_id, agent_session = get_or_create_video_prompt_agent_session(data.get('session_id'))
-
-        if not message and not prompt and not agent_session['history']:
-            return jsonify({'success': False, 'error': '请先输入视频 prompt 或发送消息'}), 400
-
-        system_prompt = load_system_prompt(OPENAI_CONFIG.get('agent_prompt_file') or OPENAI_CONFIG.get('prompt_file') or 'video_prompt_optimizer.md')
-        context = build_video_prompt_context(data, prompt)
-
-        user_turn = {
-            'role': 'user',
-            'content': message or '请根据当前视频 prompt 和参数开始优化。',
-        }
-        agent_session['history'].append(user_turn)
-        agent_session['last_used'] = datetime.now().isoformat()
-
-        input_payload = json.dumps({
-            'video_context': context,
-            'conversation': agent_session['history'],
-            'instruction': 'Continue this prompt optimization session. Ask clarifying questions when required by the skill, or produce the final optimized prompt when enough information is available.',
-        }, ensure_ascii=False, indent=2)
-
-        reply, error_response, status_code = call_openai_response(
-            system_prompt,
-            input_payload,
-            {
-                'error_type': 'video_prompt_agent_error',
-                'empty_type': 'video_prompt_agent_empty',
-                'request': {'prompt': prompt, 'session_id': session_id},
-            },
-        )
-        if error_response:
-            agent_session['history'].pop()
-            return error_response, status_code
-
-        assistant_turn = {'role': 'assistant', 'content': reply}
-        agent_session['history'].append(assistant_turn)
-        agent_session['last_used'] = datetime.now().isoformat()
-        optimized_prompt = extract_optimized_video_prompt(reply)
-
-        return jsonify({
-            'success': True,
-            'session_id': session_id,
-            'message': reply,
-            'optimized_prompt': optimized_prompt,
-            'history': agent_session['history'],
-        })
-
-    except requests.RequestException as e:
-        save_error_log('video_prompt_agent_request_error', {'session_id': (request.get_json(silent=True) or {}).get('session_id', '')}, {}, str(e))
-        return jsonify({'success': False, 'error': f'OpenAI 请求失败: {e}'}), 500
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 # ==================== Chat Session API ====================
 
@@ -1544,6 +1300,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
 
     # 解析返回的图片
     images = []
+    source_urls = []
     for item in resp_data.get('data', []):
         if 'error' in item:
             continue
@@ -1554,11 +1311,14 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         elif item.get('url'):
             # 下载 url 转 base64
             try:
-                img_resp = HTTP.get(item['url'], timeout=(10, DOWNLOAD_TIMEOUT))
+                source_url = str(item['url'])
+                img_resp = HTTP.get(source_url, timeout=(10, DOWNLOAD_TIMEOUT))
                 if img_resp.status_code == 200:
                     b64 = base64.b64encode(img_resp.content).decode('utf-8')
                     response_mime = img_resp.headers.get('Content-Type', '').split(';', 1)[0]
                     images.append(f"data:{response_mime or mime_type};base64,{b64}")
+                    if source_url.startswith(('https://', 'http://')):
+                        source_urls.append(source_url)
             except Exception:
                 pass
 
@@ -1566,7 +1326,13 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         save_error_log('ark_generation_failed', req_info, resp_data, '未能生成图片')
         return jsonify({'success': False, 'error': '未能生成图片', 'error_type': 'generation_failed'}), 500
 
-    return {'success': True, 'images': images, 'thinking': '', 'output_format': output_format}, 200
+    return {
+        'success': True,
+        'images': images,
+        'source_urls': source_urls,
+        'thinking': '',
+        'output_format': output_format,
+    }, 200
 
 
 def _response_payload(response):
@@ -1687,6 +1453,10 @@ def execute_image_task(task_id):
         'local_images': local_images,
         'local_thumbnails': local_thumbnails,
         'local_refs': local_refs,
+        'source_urls': [
+            url for url in (response_data.get('source_urls') or [])
+            if isinstance(url, str) and url.startswith(('https://', 'http://'))
+        ],
         'thinking': response_data.get('thinking', ''),
         'output_format': response_data.get('output_format', params.get('output_format', 'png')),
     }
@@ -1868,6 +1638,7 @@ def generate():
 
 VIDEO_CONFIG = config.get('video', {})
 ARK_VIDEO_CONFIG = VIDEO_CONFIG.get('ark', {})
+CUPSY_VIDEO_CONFIG = VIDEO_CONFIG.get('cupsy', {})
 SEEDANCE_20 = 'seedance-2.0'
 SEEDANCE_25 = 'seedance-2.5'
 SEEDANCE_25_DEFAULT_MODEL = 'ep-20260807145632-xprc6'
@@ -1936,6 +1707,268 @@ def _video_fast_available(provider_config):
     return bool(provider_config.get('fast_model')) or model == 'dreamina-seedance-2-0-260128'
 
 
+def _cupsy_settings():
+    return {
+        **CUPSY_VIDEO_CONFIG,
+        'api_key': os.environ.get('CUPSY_API_KEY') or CUPSY_VIDEO_CONFIG.get('api_key', ''),
+        'source_base_url': (
+            os.environ.get('CUPSY_SOURCE_BASE_URL')
+            or CUPSY_VIDEO_CONFIG.get('source_base_url', '')
+        ).rstrip('/'),
+    }
+
+
+def _cupsy_headers(idempotency_key=None):
+    settings = _cupsy_settings()
+    headers = {
+        'Authorization': f'Bearer {settings["api_key"]}',
+        'Content-Type': 'application/json',
+    }
+    if idempotency_key:
+        headers['Idempotency-Key'] = idempotency_key
+    return headers
+
+
+def _cupsy_error(response, fallback):
+    try:
+        payload = response.json() if response.text else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        return fallback
+    error = payload.get('error')
+    return str(
+        payload.get('message')
+        or (error.get('message') if isinstance(error, dict) else error)
+        or fallback
+    )
+
+
+def _cupsy_asset_json(asset):
+    return {
+        'id': asset['id'],
+        'provider': asset['provider'],
+        'external_asset_id': asset.get('external_asset_id'),
+        'asset_uri': asset.get('asset_uri'),
+        'kind': asset['kind'],
+        'status': asset['status'],
+        'name': asset.get('original_name'),
+        'mime_type': asset.get('mime_type'),
+        'size_bytes': asset.get('size_bytes') or 0,
+        'error': asset.get('error'),
+        'created_at': asset.get('created_at'),
+        'updated_at': asset.get('updated_at'),
+        'last_used_at': asset.get('last_used_at'),
+        'content_url': f'/api/cupsy/assets/{asset["id"]}/content',
+    }
+
+
+def _cupsy_source_ready(settings=None):
+    base_url = (settings or _cupsy_settings()).get('source_base_url', '')
+    return base_url.startswith(('http://', 'https://'))
+
+
+def _cupsy_source_url(asset):
+    settings = _cupsy_settings()
+    base_url = settings['source_base_url']
+    if not _cupsy_source_ready(settings):
+        raise ValueError('Cupsy 素材导入需要配置 CUPSY_SOURCE_BASE_URL 公网 HTTP(S) 地址')
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='cupsy-asset-source')
+    token = serializer.dumps({'asset_id': asset['id'], 'sha256': asset['sha256']})
+    return f'{base_url}/api/cupsy/source/{token}'
+
+
+def create_cupsy_asset_from_upload(file_storage, kind=None):
+    mime_type = file_storage.mimetype or 'application/octet-stream'
+    inferred_kind = mime_type.split('/', 1)[0]
+    kind = kind or inferred_kind
+    if kind not in {'image', 'video', 'audio'}:
+        raise ValueError('Cupsy 素材仅支持图片、视频或音频')
+    if inferred_kind != kind:
+        raise ValueError('素材类型与文件 MIME 类型不一致')
+    _cupsy_source_url({'id': 0, 'sha256': 'configuration-check'})
+    persisted = storage.persist_workspace_upload('cupsy_assets', file_storage)
+    local_path = storage.resolve_workspace_asset_url('cupsy_assets', persisted['url'])
+    if not local_path:
+        raise ValueError('保存 Cupsy 素材失败')
+    sha256 = os.path.basename(local_path).split('.', 1)[0]
+    return task_db.create_provider_asset(
+        'cupsy', kind, sha256, persisted['name'], persisted['mime_type'],
+        persisted['size_bytes'], local_path,
+    )
+
+
+def create_cupsy_asset_from_path(path, kind, original_name=None):
+    if kind not in {'image', 'video', 'audio'} or not os.path.isfile(path):
+        raise ValueError('Cupsy 本地素材无效')
+    digest = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    mime_type = mimetypes.guess_type(original_name or path)[0] or f'{kind}/octet-stream'
+    directory = os.path.join(storage.WORKSPACE_ASSET_DIR, 'cupsy_assets')
+    os.makedirs(directory, exist_ok=True)
+    extension = os.path.splitext(original_name or path)[1].lower() or mimetypes.guess_extension(mime_type) or '.bin'
+    local_path = os.path.join(directory, f'{digest.hexdigest()}{extension}')
+    if not os.path.isfile(local_path):
+        temp_path = f'{local_path}.{uuid.uuid4().hex}.tmp'
+        try:
+            shutil.copyfile(path, temp_path)
+            os.replace(temp_path, local_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    return task_db.create_provider_asset(
+        'cupsy', kind, digest.hexdigest(), original_name or os.path.basename(path),
+        mime_type, os.path.getsize(local_path), local_path,
+    )
+
+
+def process_cupsy_asset_once(asset_id):
+    """Create or poll one Cupsy Asset without exposing its signed source URL."""
+    asset = task_db.get_provider_asset(asset_id)
+    if not asset or asset.get('deleted_at'):
+        return {'state': 'deleted'}
+    settings = _cupsy_settings()
+    if not settings['api_key']:
+        reason = 'Cupsy 未配置 API Key'
+        task_db.update_provider_asset(asset_id, status='failed', error=reason,
+                                      next_run_at=None, lease_owner=None, lease_until=None)
+        return {'state': 'failed', 'error': reason}
+    endpoint = settings.get('endpoint', 'https://cupsy.io').rstrip('/')
+    try:
+        if not asset.get('external_asset_id'):
+            response = HTTP.post(
+                f'{endpoint}/v1/assets',
+                headers=_cupsy_headers(f'nanobanana-asset-{asset_id}-{asset["sha256"][:16]}'),
+                json={'type': asset['kind'], 'source_url': _cupsy_source_url(asset)},
+                timeout=(10, 60),
+            )
+            if response.status_code not in {200, 201, 202}:
+                reason = _cupsy_error(response, f'Cupsy 素材创建失败 {response.status_code}')
+                if response.status_code == 429 or response.status_code >= 500:
+                    return {'state': 'retry', 'error': reason}
+                task_db.update_provider_asset(asset_id, status='failed', error=reason,
+                                              next_run_at=None, lease_owner=None, lease_until=None)
+                return {'state': 'failed', 'error': reason}
+            payload = response.json()
+            external_id = payload.get('id') or payload.get('asset_id')
+            if not external_id:
+                return {'state': 'retry', 'error': 'Cupsy 未返回素材 ID'}
+            asset_uri = payload.get('asset_uri') or f'asset://{external_id}'
+            task_db.update_provider_asset(
+                asset_id, external_asset_id=external_id, asset_uri=asset_uri,
+                status='processing', error=None, lease_owner=None, lease_until=None,
+            )
+            return {'state': 'pending'}
+
+        response = HTTP.get(
+            f'{endpoint}/v1/assets/{asset["external_asset_id"]}',
+            headers=_cupsy_headers(), timeout=(10, 30),
+        )
+        if response.status_code >= 400:
+            reason = _cupsy_error(response, f'Cupsy 素材查询失败 {response.status_code}')
+            if response.status_code == 429 or response.status_code >= 500:
+                return {'state': 'retry', 'error': reason}
+            task_db.update_provider_asset(asset_id, status='failed', error=reason,
+                                          next_run_at=None, lease_owner=None, lease_until=None)
+            return {'state': 'failed', 'error': reason}
+        payload = response.json()
+        status = str(payload.get('status') or '').lower()
+        if status in {'active', 'succeeded', 'ready'} and payload.get('usable', True):
+            task_db.update_provider_asset(
+                asset_id, status='active', asset_uri=payload.get('asset_uri') or asset.get('asset_uri'),
+                mime_type=payload.get('mime_type') or asset.get('mime_type'),
+                size_bytes=payload.get('size_bytes') or asset.get('size_bytes'), error=None,
+                next_run_at=None, lease_owner=None, lease_until=None,
+            )
+            return {'state': 'active'}
+        if status in {'failed', 'error', 'deleted', 'expired'}:
+            reason = payload.get('error') or payload.get('message') or f'Cupsy 素材状态: {status}'
+            task_db.update_provider_asset(asset_id, status='failed', error=str(reason),
+                                          next_run_at=None, lease_owner=None, lease_until=None)
+            return {'state': 'failed', 'error': str(reason)}
+        return {'state': 'pending'}
+    except (requests.RequestException, ValueError) as error:
+        return {'state': 'retry', 'error': str(error)}
+
+
+@app.route('/api/cupsy/assets', methods=['GET', 'POST'])
+def cupsy_assets():
+    if request.method == 'GET':
+        return jsonify({
+            'success': True,
+            'configured': bool(_cupsy_settings()['api_key']),
+            'source_ready': _cupsy_source_ready(),
+            'assets': [_cupsy_asset_json(asset) for asset in task_db.list_provider_assets('cupsy')],
+        })
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': '请选择素材文件'}), 400
+    try:
+        asset = create_cupsy_asset_from_upload(upload, request.form.get('kind') or None)
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    return jsonify({'success': True, 'asset': _cupsy_asset_json(asset)}), 202
+
+
+@app.route('/api/cupsy/assets/<int:asset_id>/content', methods=['GET', 'HEAD'])
+def cupsy_asset_content(asset_id):
+    asset = task_db.get_provider_asset(asset_id)
+    if not asset or asset.get('deleted_at') or not os.path.isfile(asset['local_path']):
+        return jsonify({'success': False, 'error': '素材不存在'}), 404
+    return send_file(asset['local_path'], mimetype=asset.get('mime_type'), conditional=True)
+
+
+@app.route('/api/cupsy/source/<token>', methods=['GET', 'HEAD'])
+def cupsy_asset_source(token):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='cupsy-asset-source')
+    ttl = max(60, int(_cupsy_settings().get('asset_token_ttl_seconds', 3600) or 3600))
+    try:
+        payload = serializer.loads(token, max_age=ttl)
+    except SignatureExpired:
+        return jsonify({'success': False, 'error': '素材地址已过期'}), 410
+    except BadSignature:
+        return jsonify({'success': False, 'error': '素材地址无效'}), 404
+    asset = task_db.get_provider_asset(payload.get('asset_id'))
+    if (
+        not asset or asset.get('deleted_at') or asset.get('sha256') != payload.get('sha256')
+        or not os.path.isfile(asset['local_path'])
+    ):
+        return jsonify({'success': False, 'error': '素材不存在'}), 404
+    return send_file(asset['local_path'], mimetype=asset.get('mime_type'), conditional=True)
+
+
+@app.route('/api/cupsy/assets/<int:asset_id>', methods=['DELETE'])
+def delete_cupsy_asset(asset_id):
+    asset = task_db.get_provider_asset(asset_id)
+    if not asset or asset.get('deleted_at'):
+        return jsonify({'success': False, 'error': '素材不存在'}), 404
+    if task_db.provider_asset_has_active_tasks(asset_id):
+        return jsonify({'success': False, 'error': '素材正被进行中的任务使用'}), 409
+    settings = _cupsy_settings()
+    if asset.get('external_asset_id') and settings['api_key']:
+        try:
+            response = HTTP.delete(
+                f'{settings.get("endpoint", "https://cupsy.io").rstrip("/")}/v1/assets/{asset["external_asset_id"]}',
+                headers=_cupsy_headers(), timeout=(10, 30),
+            )
+        except requests.RequestException as error:
+            return jsonify({'success': False, 'error': f'Cupsy 素材删除失败: {error}'}), 502
+        if response.status_code not in {200, 204, 404}:
+            return jsonify({'success': False, 'error': _cupsy_error(response, 'Cupsy 素材删除失败')}), 502
+    now = task_db.utcnow()
+    task_db.update_provider_asset(
+        asset_id, status='deleted', deleted_at=now, next_run_at=None,
+        lease_owner=None, lease_until=None, error=None,
+    )
+    try:
+        os.remove(asset['local_path'])
+    except FileNotFoundError:
+        pass
+    return jsonify({'success': True})
+
+
 def _validate_video_settings(model_key, spec, ratio, duration, resolution, output_format, video_mode, fast, files_data):
     if duration != -1 and not spec['duration_min'] <= duration <= spec['duration_max']:
         return f'{model_key} 不支持的视频时长: {duration}'
@@ -1971,10 +2004,19 @@ def _validate_video_settings(model_key, spec, ratio, duration, resolution, outpu
 
 @app.route('/api/video/provider', methods=['GET'])
 def get_video_provider_info():
+    cupsy = _cupsy_settings()
     return jsonify({
         'success': True,
         'current': 'ark',
         'fast_available': _video_fast_available(ARK_VIDEO_CONFIG),
+        'providers': {
+            'ark': {'available': bool(ARK_VIDEO_CONFIG.get('api_key')), 'models': [SEEDANCE_20, SEEDANCE_25]},
+            'cupsy': {
+                'available': bool(cupsy['api_key']),
+                'source_ready': _cupsy_source_ready(cupsy),
+                'models': [SEEDANCE_25],
+            },
+        },
     })
 
 
@@ -2101,6 +2143,136 @@ def _parse_files(has_files, video_mode, model_spec=None):
     return files_data
 
 
+def _queue_cupsy_video(
+    has_files, data, prompt, ratio, duration, resolution, fast, generate_audio,
+    video_mode, requested_model,
+):
+    settings = _cupsy_settings()
+    if not settings['api_key']:
+        return jsonify({'success': False, 'error': 'Cupsy 未配置 API Key'}), 400
+    if str(requested_model or SEEDANCE_25).lower() not in {
+        SEEDANCE_25, 'dreamina-seedance-2.5', str(settings.get('model', SEEDANCE_25)).lower()
+    }:
+        return jsonify({'success': False, 'error': 'Cupsy 端点仅支持 Seedance 2.5'}), 400
+    try:
+        duration = int(duration)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'duration 必须是整数'}), 400
+    if duration < 4 or duration > 30:
+        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 时长必须为 4 到 30 秒'}), 400
+    if ratio not in {'adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'}:
+        return jsonify({'success': False, 'error': f'不支持的视频比例: {ratio}'}), 400
+    if resolution not in {'480p', '720p'}:
+        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 仅支持 480p 或 720p'}), 400
+    if video_mode not in {'keyframe', 'reference'}:
+        return jsonify({'success': False, 'error': f'不支持的视频模式: {video_mode}'}), 400
+    if fast:
+        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 不支持快速模式'}), 400
+
+    raw_existing = request.form.get('cupsy_assets') if has_files else data.get('cupsy_assets', [])
+    if isinstance(raw_existing, str):
+        try:
+            raw_existing = json.loads(raw_existing)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'cupsy_assets 必须是数组'}), 400
+    if raw_existing is None:
+        raw_existing = []
+    if not isinstance(raw_existing, list):
+        return jsonify({'success': False, 'error': 'cupsy_assets 必须是数组'}), 400
+
+    pending_links = []
+    position = 0
+    allowed_roles = {
+        'first_frame': 'image', 'last_frame': 'image', 'reference_image': 'image',
+        'reference_video': 'video', 'reference_audio': 'audio',
+    }
+    for item in raw_existing:
+        if not isinstance(item, dict):
+            return jsonify({'success': False, 'error': 'Cupsy 素材引用无效'}), 400
+        role = item.get('role')
+        try:
+            asset = task_db.get_provider_asset(item.get('id'))
+        except (TypeError, ValueError):
+            asset = None
+        if (
+            role not in allowed_roles or not asset or asset.get('deleted_at')
+            or asset.get('provider') != 'cupsy' or asset.get('kind') != allowed_roles[role]
+        ):
+            return jsonify({'success': False, 'error': 'Cupsy 素材引用或角色无效'}), 400
+        pending_links.append((asset, role, position))
+        position += 1
+
+    if has_files:
+        upload_groups = []
+        if video_mode == 'keyframe':
+            images = request.files.getlist('image')
+            last_images = request.files.getlist('last_image')
+            if last_images and not images and not any(link[1] == 'first_frame' for link in pending_links):
+                return jsonify({'success': False, 'error': '设置尾帧时必须同时提供首帧'}), 400
+            upload_groups.extend((upload, 'image', 'first_frame') for upload in images[:1])
+            upload_groups.extend((upload, 'image', 'last_frame') for upload in last_images[:1])
+        else:
+            upload_groups.extend((upload, 'image', 'reference_image') for upload in request.files.getlist('ref_images'))
+            upload_groups.extend((upload, 'video', 'reference_video') for upload in request.files.getlist('ref_videos'))
+            upload_groups.extend((upload, 'audio', 'reference_audio') for upload in request.files.getlist('ref_audios'))
+        try:
+            for upload, kind, role in upload_groups:
+                asset = create_cupsy_asset_from_upload(upload, kind)
+                pending_links.append((asset, role, position))
+                position += 1
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 400
+
+    ref_video_urls = request.form.get('ref_video_urls') if has_files else data.get('ref_video_urls', [])
+    if isinstance(ref_video_urls, str):
+        try:
+            ref_video_urls = json.loads(ref_video_urls)
+        except ValueError:
+            return jsonify({'success': False, 'error': 'ref_video_urls 必须是数组'}), 400
+    for url in ref_video_urls or []:
+        if not isinstance(url, str) or '/api/upload_video/' not in url:
+            return jsonify({'success': False, 'error': 'Cupsy 参考视频必须是本项目上传的文件或 Assets 素材'}), 400
+        filename = os.path.basename(url.rsplit('/api/upload_video/', 1)[-1])
+        path = os.path.join(UPLOAD_VIDEO_DIR, filename)
+        try:
+            asset = create_cupsy_asset_from_path(path, 'video', filename)
+            _cupsy_source_url(asset)
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 400
+        pending_links.append((asset, 'reference_video', position))
+        position += 1
+
+    role_counts = {}
+    for _asset, role, _position in pending_links:
+        role_counts[role] = role_counts.get(role, 0) + 1
+    if role_counts.get('reference_image', 0) > 30 or role_counts.get('reference_video', 0) > 10 or role_counts.get('reference_audio', 0) > 10:
+        return jsonify({'success': False, 'error': '参考素材数量超过 Cupsy Seedance 2.5 上限'}), 400
+    if not prompt.strip() and not pending_links:
+        return jsonify({'success': False, 'error': '请提供 prompt 或参考素材'}), 400
+
+    params = {
+        'model': SEEDANCE_25,
+        'ratio': ratio,
+        'duration': duration,
+        'resolution': resolution,
+        'output_format': 'mp4',
+        'fast': False,
+        'generate_audio': bool(generate_audio),
+        'return_last_frame': False,
+        'video_mode': video_mode,
+    }
+    task_id = task_db.create_task('video', prompt, params, provider='cupsy', status='pending')
+    output_dir = storage.task_output_dir('video', task_id)
+    task_db.update_task(task_id, output_dir=output_dir)
+    for asset, role, link_position in pending_links:
+        task_db.link_task_provider_asset(task_id, asset['id'], role, link_position)
+        task_db.link_asset(asset['local_path'], task_id, expires_at=None)
+    return jsonify({
+        'success': True, 'queued': True, 'db_task_id': task_id,
+        'provider': 'cupsy', 'status': 'pending',
+    }), 202
+
+
 @app.route('/api/video/generate', methods=['POST'])
 def video_generate():
     """提交视频生成任务，返回 task_id"""
@@ -2137,9 +2309,14 @@ def video_generate():
             requested_model = data.get('model', SEEDANCE_20)
             output_format = str(data.get('output_format', 'mp4')).lower()
 
-        if requested_provider and requested_provider != 'ark':
-            return jsonify({'success': False, 'error': '视频生成仅支持 provider: ark'}), 400
-        provider = 'ark'
+        provider = requested_provider or 'ark'
+        if provider not in {'ark', 'cupsy'}:
+            return jsonify({'success': False, 'error': f'不支持的视频 provider: {provider}'}), 400
+        if provider == 'cupsy':
+            return _queue_cupsy_video(
+                has_files, data, prompt, ratio, duration, resolution, fast,
+                generate_audio, video_mode, requested_model,
+            )
         prov = ARK_VIDEO_CONFIG
         try:
             model_key, model_id, model_spec = _resolve_video_model(requested_model, prov, fast)
@@ -2360,10 +2537,14 @@ WORKSPACE_STATE_KEYS = {
 
 TASK_VIEWS = {'all', 'favorite', 'active', 'trash'}
 TASK_SORTS = {'newest', 'oldest', 'updated'}
+TASK_FILTER_STATUSES = {
+    'submitting', 'preparing', 'pending', 'processing', 'cancel_requested',
+    'succeeded', 'failed', 'cancelled',
+}
 FAVORITE_GROUP_COLORS = {'green', 'cyan', 'blue', 'violet', 'rose', 'amber'}
 
 
-def _task_download_name(task, filename):
+def _task_download_name(task, filename, original=False):
     extension = os.path.splitext(filename)[1].lower().lstrip('.') or 'bin'
     if extension == 'jpeg':
         extension = 'jpg'
@@ -2374,10 +2555,11 @@ def _task_download_name(task, filename):
     except ValueError:
         created_at = datetime.now(timezone.utc)
     timestamp = created_at.strftime('%Y%m%d%H%M%S')
-    return (
+    name = (
         f'ink-traces-{task.get("type") or "media"}-task-{task["id"]}-'
-        f'{timestamp}-output-{output_index:02d}.{extension}'
+        f'{timestamp}-output-{output_index:02d}'
     )
+    return f'{name}{"-original" if original else ""}.{extension}'
 
 
 def _task_png_text_entries(task):
@@ -2393,9 +2575,10 @@ def _task_output_asset(task_id, filename):
     return None
 
 
-def _task_asset_response(task, asset, filename, as_attachment):
-    download_name = _task_download_name(task, filename)
-    if filename.lower().endswith('.png'):
+def _task_asset_response(task, asset, filename, as_attachment, raw=False):
+    original = raw and asset.get('kind') == 'output_image'
+    download_name = _task_download_name(task, filename, original=original)
+    if filename.lower().endswith('.png') and not raw:
         response = Response(
             storage.iter_png_with_text(
                 asset['path'], _task_png_text_entries(task),
@@ -2444,6 +2627,12 @@ def _attach_task_input_references(tasks):
         refs_by_task.setdefault(asset['task_id'], []).append(
             f'/api/tasks/{asset["task_id"]}/file/{os.path.basename(asset["path"])}'
         )
+    for asset in task_db.list_task_provider_assets_for_tasks(task_ids, ('image',)):
+        if asset.get('deleted_at') or not os.path.isfile(asset['local_path']):
+            continue
+        refs_by_task.setdefault(asset['task_id'], []).append(
+            f'/api/cupsy/assets/{asset["id"]}/content'
+        )
     for task in missing_ref_tasks:
         local_refs = refs_by_task.get(task['id'])
         if not local_refs:
@@ -2465,6 +2654,33 @@ def _task_group_filter():
     if group_id <= 0:
         return None, (jsonify({'success': False, 'error': 'favorite_group 必须是正整数'}), 400)
     return group_id, None
+
+
+def _task_advanced_filters():
+    status = request.args.get('status', '').strip().lower()
+    provider = request.args.get('provider', '').strip()
+    model = request.args.get('model', '').strip()
+    created_after = request.args.get('created_after', '').strip()
+    if status and status not in TASK_FILTER_STATUSES:
+        return None, (jsonify({'success': False, 'error': '未知任务状态'}), 400)
+    if len(provider) > 80:
+        return None, (jsonify({'success': False, 'error': 'provider 过滤值过长'}), 400)
+    if len(model) > 160:
+        return None, (jsonify({'success': False, 'error': 'model 过滤值过长'}), 400)
+    if created_after:
+        try:
+            parsed = datetime.fromisoformat(created_after.replace('Z', '+00:00'))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            created_after = parsed.astimezone(timezone.utc).isoformat()
+        except ValueError:
+            return None, (jsonify({'success': False, 'error': 'created_after 必须是 ISO 日期时间'}), 400)
+    return {
+        'status': status or None,
+        'provider': provider or None,
+        'model': model or None,
+        'created_after': created_after or None,
+    }, None
 
 
 def _parse_task_ids(data, maximum=500):
@@ -2490,7 +2706,9 @@ def _parse_task_ids(data, maximum=500):
 @app.route('/api/tasks', methods=['GET'])
 def api_list_tasks():
     task_type = request.args.get('type')
-    status = request.args.get('status')
+    advanced_filters, advanced_error = _task_advanced_filters()
+    if advanced_error:
+        return advanced_error
     favorite_arg = request.args.get('favorite')
     favorite = None if favorite_arg is None else favorite_arg.lower() in ('1', 'true', 'yes')
     active = request.args.get('active', '').lower() in ('1', 'true', 'yes')
@@ -2509,9 +2727,10 @@ def api_list_tasks():
     except ValueError:
         return jsonify({'success': False, 'error': 'limit 和 offset 必须是整数'}), 400
     tasks, total = task_db.list_tasks(
-        task_type, status, limit, offset, summary=True, favorite=favorite, active=active,
+        task_type, advanced_filters['status'], limit, offset, summary=True, favorite=favorite, active=active,
         search=search, deleted=deleted, favorite_group=favorite_group,
-        ungrouped=ungrouped, sort=sort,
+        ungrouped=ungrouped, sort=sort, provider=advanced_filters['provider'],
+        model=advanced_filters['model'], created_after=advanced_filters['created_after'],
     )
     _attach_task_input_references(tasks)
     # 列表接口剥离大字段，只保留缩略图路径
@@ -2522,12 +2741,23 @@ def api_list_tasks():
                 'local_images': r.get('local_images', []),
                 'local_thumbnails': r.get('local_thumbnails', []),
                 'local_refs': r.get('local_refs', []),
+                'source_urls': r.get('source_urls', []),
                 'local_video': r.get('local_video'),
                 'local_last_frame': r.get('local_last_frame'),
                 'local_thumbnail': r.get('local_thumbnail'),
                 'thinking': r.get('thinking', '')[:100]
             }
     return jsonify({'success': True, 'tasks': tasks, 'total': total})
+
+
+@app.route('/api/tasks/filter-options', methods=['GET'])
+def api_task_filter_options():
+    task_type = request.args.get('type')
+    deleted = request.args.get('deleted', '').lower() in ('1', 'true', 'yes')
+    return jsonify({
+        'success': True,
+        **task_db.get_task_filter_options(task_type=task_type, deleted=deleted),
+    })
 
 
 @app.route('/api/tasks/status', methods=['GET'])
@@ -2571,6 +2801,9 @@ def api_task_navigation(task_id):
     if group_error:
         return group_error
     ungrouped = request.args.get('ungrouped', '').lower() in ('1', 'true', 'yes')
+    advanced_filters, advanced_error = _task_advanced_filters()
+    if advanced_error:
+        return advanced_error
     navigation = task_db.get_task_navigation(
         task_id=task_id,
         task_type=task_type,
@@ -2581,6 +2814,8 @@ def api_task_navigation(task_id):
         favorite_group=favorite_group if view == 'favorite' else None,
         ungrouped=ungrouped if view == 'favorite' else False,
         sort=sort,
+        status=advanced_filters['status'], provider=advanced_filters['provider'],
+        model=advanced_filters['model'], created_after=advanced_filters['created_after'],
     )
     return jsonify({'success': True, 'navigation': navigation})
 
@@ -2599,6 +2834,9 @@ def api_task_selection():
     if group_error:
         return group_error
     ungrouped = request.args.get('ungrouped', '').lower() in ('1', 'true', 'yes')
+    advanced_filters, advanced_error = _task_advanced_filters()
+    if advanced_error:
+        return advanced_error
     task_ids = task_db.list_task_ids(
         task_type=task_type,
         favorite=True if view == 'favorite' else None,
@@ -2608,6 +2846,8 @@ def api_task_selection():
         favorite_group=favorite_group if view == 'favorite' else None,
         ungrouped=ungrouped if view == 'favorite' else False,
         sort=sort,
+        status=advanced_filters['status'], provider=advanced_filters['provider'],
+        model=advanced_filters['model'], created_after=advanced_filters['created_after'],
     )
     return jsonify({'success': True, 'ids': task_ids, 'total': len(task_ids)})
 
@@ -2804,6 +3044,21 @@ def api_delete_task(task_id):
 
 @app.route('/api/tasks/<int:task_id>/cancel', methods=['POST'])
 def api_cancel_task(task_id):
+    task = task_db.get_task(task_id)
+    if task and task.get('provider') == 'cupsy' and task.get('external_task_id'):
+        settings = _cupsy_settings()
+        if settings['api_key']:
+            try:
+                response = HTTP.delete(
+                    f'{settings.get("endpoint", "https://cupsy.io").rstrip("/")}/v1/videos/{task["external_task_id"]}',
+                    headers=_cupsy_headers(), timeout=(10, 30),
+                )
+                if response.status_code not in {200, 202, 204, 404, 409}:
+                    app.logger.warning(
+                        'cupsy_video_cancel_failed task_id=%s status=%s', task_id, response.status_code
+                    )
+            except requests.RequestException:
+                app.logger.warning('cupsy_video_cancel_request_failed task_id=%s', task_id)
     status = task_db.request_task_cancel(task_id)
     if status is None:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
@@ -2874,6 +3129,7 @@ def api_bulk_download_tasks():
     if id_error:
         return id_error
 
+    raw = as_bool(data.get('raw', False))
     archive = tempfile.NamedTemporaryFile(prefix='ink-traces-', suffix='.zip', delete=False)
     archive_path = archive.name
     archive.close()
@@ -2893,9 +3149,10 @@ def api_bulk_download_tasks():
                     if not task:
                         continue
                     filename = os.path.basename(asset['path'])
-                    download_name = _task_download_name(task, filename)
+                    original = raw and asset.get('kind') == 'output_image'
+                    download_name = _task_download_name(task, filename, original=original)
                     archive_name = f'{asset["task_type"]}-task-{task_id}/{download_name}'
-                    if filename.lower().endswith('.png'):
+                    if filename.lower().endswith('.png') and not raw:
                         with bundle.open(archive_name, 'w') as target:
                             for chunk in storage.iter_png_with_text(
                                 asset['path'], _task_png_text_entries(task),
@@ -3014,7 +3271,13 @@ def api_download_task_file(task_id, filename):
     asset = _task_output_asset(task_id, filename) if task else None
     if not task or not asset:
         return jsonify({'success': False, 'error': '下载文件不存在'}), 404
-    return _task_asset_response(task, asset, filename, as_attachment=True)
+    return _task_asset_response(
+        task,
+        asset,
+        filename,
+        as_attachment=True,
+        raw=as_bool(request.args.get('raw', False)),
+    )
 
 
 @app.route('/api/png-info', methods=['POST'])
@@ -3098,6 +3361,139 @@ def api_upload_video_file(filename):
 # Worker-facing video polling
 # ============================================================
 
+def _cupsy_video_content(task, assets):
+    content = []
+    if task.get('prompt'):
+        content.append({'type': 'text', 'text': task['prompt']})
+    type_for_role = {
+        'first_frame': 'image_url', 'last_frame': 'image_url',
+        'reference_image': 'image_url', 'reference_video': 'video_url',
+        'reference_audio': 'audio_url',
+    }
+    field_for_type = {
+        'image_url': 'image_url', 'video_url': 'video_url', 'audio_url': 'audio_url',
+    }
+    for asset in assets:
+        content_type = type_for_role[asset['role']]
+        content.append({
+            'type': content_type,
+            field_for_type[content_type]: {'url': asset['asset_uri']},
+            'role': asset['role'],
+        })
+    return content
+
+
+def _poll_cupsy_video_task(task):
+    task_id = task['id']
+    settings = _cupsy_settings()
+    if not settings['api_key']:
+        reason = 'Cupsy 未配置 API Key'
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
+    endpoint = settings.get('endpoint', 'https://cupsy.io').rstrip('/')
+    params = task.get('params') or {}
+    external_id = task.get('external_task_id')
+
+    if not external_id:
+        assets = task_db.list_task_provider_assets(task_id)
+        failed = next((asset for asset in assets if asset['status'] == 'failed'), None)
+        if failed:
+            reason = f'参考素材导入失败: {failed.get("error") or failed.get("original_name")}'
+            task_db.fail_task(task_id, reason)
+            return {'state': 'failed', 'error': reason}
+        if any(asset['status'] != 'active' or not asset.get('asset_uri') for asset in assets):
+            return {'state': 'preparing', 'progress': 0}
+        body = {
+            'model': settings.get('model') or SEEDANCE_25,
+            'content': _cupsy_video_content(task, assets),
+            'ratio': params.get('ratio', 'adaptive'),
+            'duration': int(params.get('duration', 5)),
+            'resolution': params.get('resolution', '720p'),
+            'generate_audio': bool(params.get('generate_audio', True)),
+            'watermark': False,
+        }
+        try:
+            response = HTTP.post(
+                f'{endpoint}/v1/videos',
+                headers=_cupsy_headers(f'nanobanana-video-{task_id}'),
+                json=body, timeout=(10, 120),
+            )
+        except requests.RequestException as error:
+            return {'state': 'retry', 'error': str(error)}
+        if response.status_code not in {200, 201, 202}:
+            reason = _cupsy_error(response, f'Cupsy 视频提交失败 {response.status_code}')
+            if response.status_code == 429 or response.status_code >= 500:
+                return {'state': 'retry', 'error': reason}
+            task_db.fail_task(task_id, reason)
+            return {'state': 'failed', 'error': reason}
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        external_id = payload.get('id') or payload.get('video_id') or payload.get('task_id')
+        if not external_id:
+            return {'state': 'retry', 'error': 'Cupsy 未返回视频任务 ID'}
+        if not task_db.activate_video_task(task_id, external_id):
+            task_db.finalize_task_cancel(task_id)
+            return {'state': 'cancelled'}
+        return {'state': 'pending', 'progress': 0}
+
+    try:
+        response = HTTP.get(
+            f'{endpoint}/v1/videos/{external_id}', headers=_cupsy_headers(), timeout=(10, POLL_TIMEOUT)
+        )
+    except requests.RequestException as error:
+        return {'state': 'retry', 'error': str(error)}
+    if response.status_code >= 400:
+        reason = _cupsy_error(response, f'Cupsy 视频查询失败 {response.status_code}')
+        if response.status_code == 429 or response.status_code >= 500:
+            return {'state': 'retry', 'error': reason}
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    status = str(payload.get('status') or '').lower()
+    if status in {'failed', 'error', 'expired', 'cancelled', 'canceled'}:
+        reason = payload.get('message') or payload.get('error') or f'Cupsy 视频状态: {status}'
+        if isinstance(reason, dict):
+            reason = reason.get('message') or json.dumps(reason, ensure_ascii=False)
+        task_db.fail_task(task_id, str(reason))
+        return {'state': 'failed', 'error': str(reason)}
+    if status not in {'succeeded', 'completed', 'ready'}:
+        progress = payload.get('progress')
+        return {'state': 'pending', 'progress': int(progress) if isinstance(progress, (int, float)) else 0}
+
+    output_dir = task.get('output_dir') or storage.task_output_dir('video', task_id)
+    filename = 'video.mp4'
+    path = os.path.join(output_dir, filename)
+    try:
+        with HTTP.get(
+            f'{endpoint}/v1/videos/{external_id}/content', headers=_cupsy_headers(),
+            timeout=(10, DOWNLOAD_TIMEOUT), stream=True,
+        ) as download:
+            if download.status_code >= 400:
+                return {'state': 'retry', 'error': f'Cupsy 视频下载失败 {download.status_code}'}
+            storage.stream_response_to_file(download, path)
+    except requests.RequestException as error:
+        return {'state': 'retry', 'error': str(error)}
+    storage.register_file(task_id, 'output_video', path, 'video/mp4')
+    result = {
+        'videos': [],
+        'images': [],
+        'local_videos': [f'/api/tasks/{task_id}/file/{filename}'],
+        'local_images': [],
+        'local_thumbnails': [],
+        'local_video': f'/api/tasks/{task_id}/file/{filename}',
+        'provider_video_id': external_id,
+    }
+    if not task_db.complete_task(task_id, result, output_dir):
+        storage.remove_task_output_files(task_id)
+        task_db.finalize_task_cancel(task_id)
+        return {'state': 'cancelled'}
+    return {'state': 'succeeded', 'result': result}
+
 def poll_video_task_once(task_id):
     """Poll one provider task once and persist terminal results."""
     task = task_db.get_task(task_id)
@@ -3109,6 +3505,8 @@ def poll_video_task_once(task_id):
 
     external_task_id = task.get('external_task_id')
     provider = task.get('provider') or 'ark'
+    if provider == 'cupsy':
+        return _poll_cupsy_video_task(task)
     if provider != 'ark':
         reason = f'已停止支持视频 Provider: {provider}'
         task_db.fail_task(task_id, reason)
