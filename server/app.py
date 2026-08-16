@@ -119,6 +119,14 @@ BUILTIN_DEFAULT_CONFIG = {
             'asset_token_ttl_seconds': 3600,
         },
     },
+    'audio': {
+        'poll_interval_seconds': 4,
+        'poll_max_attempts': 1800,
+        'cupsy': {
+            'endpoint': 'https://cupsy.io',
+            'model': 'seed-audio-1.0',
+        },
+    },
 }
 
 
@@ -1183,7 +1191,11 @@ def resolve_seedream_pro_size(aspect_ratio, resolution, custom_width=None, custo
     return f'{width}x{height}'
 
 
-def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='png', watermark=False, provider_config=None, model_id=None, custom_width=None, custom_height=None):
+def _generate_ark_image(
+    prompt, aspect_ratio, resolution, parts, output_format='png', watermark=False,
+    provider_config=None, model_id=None, custom_width=None, custom_height=None,
+    background=None, layer_decomposition=False,
+):
     """调用 BytePlus Ark Seedream 5.0 Pro API 生成单张图片。"""
     ark_cfg = provider_config or API_PROVIDERS.get('ark', {})
     api_key = ark_cfg.get('api_key', '')
@@ -1193,10 +1205,19 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     resolution = str(resolution or '1K').upper()
     output_format = str(output_format or 'png').lower()
 
-    try:
-        size = resolve_seedream_pro_size(aspect_ratio, resolution, custom_width, custom_height)
-    except ValueError as error:
-        return jsonify({'success': False, 'error': str(error), 'error_type': 'invalid_size'}), 400
+    if layer_decomposition:
+        size = str(resolution or 'auto')
+        if size.lower() == 'auto':
+            size = 'auto'
+        else:
+            size = size.upper()
+        if size not in {'auto', '1K', '1.5K', '2K'}:
+            return jsonify({'success': False, 'error': '图层分解分辨率仅支持 Auto、1K、1.5K 或 2K', 'error_type': 'invalid_size'}), 400
+    else:
+        try:
+            size = resolve_seedream_pro_size(aspect_ratio, resolution, custom_width, custom_height)
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error), 'error_type': 'invalid_size'}), 400
     if output_format not in ARK_SEEDREAM_OUTPUT_MIMES:
         return jsonify({'success': False, 'error': '输出格式仅支持 png 或 jpeg', 'error_type': 'invalid_output_format'}), 400
 
@@ -1210,15 +1231,24 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         'watermark': bool(watermark),
         'output_format': output_format,
     }
+    if layer_decomposition:
+        body['layer_decomposition'] = True
+    if background in {'transparent', 'opaque'}:
+        body['background'] = background
 
     # 参考图（取 parts 中的 inlineData）
-    ref_images = [p['inlineData']['data'] for p in parts if 'inlineData' in p]
+    ref_images = [
+        (p['inlineData'].get('mimeType') or 'image/png', p['inlineData']['data'])
+        for p in parts if 'inlineData' in p
+    ]
     if len(ref_images) > ARK_SEEDREAM_PRO_MAX_REFERENCES:
         return jsonify({'success': False, 'error': 'Seedream 5.0 Pro 最多支持10张参考图', 'error_type': 'too_many_images'}), 400
+    if layer_decomposition and len(ref_images) != 1:
+        return jsonify({'success': False, 'error': '图层分解必须且只能使用一张源图片', 'error_type': 'invalid_image_count'}), 400
     if len(ref_images) == 1:
-        body['image'] = f"data:image/png;base64,{ref_images[0]}"
+        body['image'] = f"data:{ref_images[0][0]};base64,{ref_images[0][1]}"
     elif len(ref_images) > 1:
-        body['image'] = [f"data:image/png;base64,{d}" for d in ref_images]
+        body['image'] = [f"data:{mime};base64,{data}" for mime, data in ref_images]
 
     url = f'{endpoint}/api/v3/images/generations'
     headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'}
@@ -1230,7 +1260,9 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         'size': size, 'output_format': output_format, 'watermark': bool(watermark),
         'response_format': body['response_format'],
         'reference_count': len(ref_images),
-        'reference_base64_bytes': sum(len(image) for image in ref_images),
+        'reference_base64_bytes': sum(len(data) for _mime, data in ref_images),
+        'background': background,
+        'layer_decomposition': bool(layer_decomposition),
     }
 
     try:
@@ -1300,6 +1332,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
 
     # 解析返回的图片
     images = []
+    items = []
     source_urls = []
     for item in resp_data.get('data', []):
         if 'error' in item:
@@ -1307,7 +1340,9 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
         item_format = str(item.get('output_format') or output_format).lower()
         mime_type = ARK_SEEDREAM_OUTPUT_MIMES.get(item_format, ARK_SEEDREAM_OUTPUT_MIMES[output_format])
         if item.get('b64_json'):
-            images.append(f"data:{mime_type};base64,{item['b64_json']}")
+            data_url = f"data:{mime_type};base64,{item['b64_json']}"
+            images.append(data_url)
+            items.append({**item, 'data_url': data_url, 'source_url': None})
         elif item.get('url'):
             # 下载 url 转 base64
             try:
@@ -1316,7 +1351,9 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
                 if img_resp.status_code == 200:
                     b64 = base64.b64encode(img_resp.content).decode('utf-8')
                     response_mime = img_resp.headers.get('Content-Type', '').split(';', 1)[0]
-                    images.append(f"data:{response_mime or mime_type};base64,{b64}")
+                    data_url = f"data:{response_mime or mime_type};base64,{b64}"
+                    images.append(data_url)
+                    items.append({**item, 'data_url': data_url, 'source_url': source_url})
                     if source_url.startswith(('https://', 'http://')):
                         source_urls.append(source_url)
             except Exception:
@@ -1329,6 +1366,7 @@ def _generate_ark_image(prompt, aspect_ratio, resolution, parts, output_format='
     return {
         'success': True,
         'images': images,
+        'items': items,
         'source_urls': source_urls,
         'thinking': '',
         'output_format': output_format,
@@ -1386,6 +1424,7 @@ def execute_image_task(task_id):
                 model_id,
                 params.get('custom_width'),
                 params.get('custom_height'),
+                params.get('background'),
             )
         else:
             response = _parse_and_respond(
@@ -1478,6 +1517,152 @@ def execute_image_task(task_id):
     return payload, 200
 
 
+def execute_layer_task(task_id):
+    """Run one Seedream layer-decomposition task and initialize its studio document."""
+    task = task_db.get_task(task_id)
+    if not task:
+        return {'success': False, 'error': '图层任务不存在'}, 404
+    params = task.get('params') or {}
+    project_id = params.get('project_id')
+    assets = [asset for asset in task_db.list_assets(task_id) if asset['kind'] == 'input_image']
+    if len(assets) != 1 or not os.path.isfile(assets[0]['path']):
+        task_db.fail_task(task_id, '图层分解源图片不存在')
+        return {'success': False, 'error': '图层分解源图片不存在'}, 400
+
+    with open(assets[0]['path'], 'rb') as handle:
+        encoded = base64.b64encode(handle.read()).decode('utf-8')
+    parts = [{'inlineData': {'mimeType': assets[0].get('mime_type') or 'image/png', 'data': encoded}}]
+    _provider, provider_config = get_image_provider_config('ark')
+    response = _generate_ark_image(
+        task.get('prompt') or '', 'auto', params.get('size', 'auto'), parts,
+        params.get('output_format', 'png'), False, provider_config,
+        params.get('model'), layer_decomposition=True,
+    )
+    response_data, status_code = _response_payload(response)
+    if not response_data.get('success'):
+        task_db.fail_task(task_id, response_data.get('error', '图层分解失败'))
+        response_data['task_id'] = task_id
+        return response_data, status_code
+
+    output_dir = task.get('output_dir') or storage.task_output_dir('layer', task_id)
+    provider_items = response_data.get('items') or [
+        {'data_url': data_url, 'z_index': index}
+        for index, data_url in enumerate(response_data.get('images') or [])
+    ]
+    saved = []
+    provider_items = sorted(provider_items, key=lambda value: int(value.get('z_index') or 0))
+    for index, item in enumerate(provider_items):
+        data_url = item.get('data_url')
+        if not isinstance(data_url, str) or not data_url.startswith('data:'):
+            continue
+        z_index = int(item.get('z_index', index) or 0)
+        is_base = z_index == 0
+        item_format = str(item.get('output_format') or ('png' if not is_base else params.get('output_format', 'png'))).lower()
+        extension = 'jpg' if item_format in {'jpg', 'jpeg'} else 'png'
+        mime_type = 'image/jpeg' if extension == 'jpg' else 'image/png'
+        filename = f'base.{extension}' if is_base else f'layer_{z_index:02d}.png'
+        path = os.path.join(output_dir, filename)
+        storage.save_data_url(data_url, path)
+        storage.register_file(task_id, 'output_image', path, mime_type)
+        metadata = storage.inspect_image(path)
+        thumbnail_name = 'base_thumb.webp' if is_base else f'layer_{z_index:02d}_thumb.webp'
+        thumbnail_path = os.path.join(output_dir, thumbnail_name)
+        storage.create_image_thumbnail(path, thumbnail_path, max_size=320)
+        storage.register_file(task_id, 'output_thumbnail', thumbnail_path, 'image/webp')
+        saved.append({
+            'z_index': z_index,
+            'name': item.get('name') or ('基础图' if is_base else f'图层 {z_index}'),
+            'description': item.get('description') or '',
+            'bounding_box': item.get('bounding_box'),
+            'size': item.get('size') or f'{metadata["width"]}x{metadata["height"]}',
+            'output_format': item_format,
+            'local_url': f'/api/tasks/{task_id}/file/{filename}',
+            'thumbnail_url': f'/api/tasks/{task_id}/file/{thumbnail_name}',
+            'source_url': item.get('source_url'),
+            'width': metadata['width'],
+            'height': metadata['height'],
+        })
+    if not saved or not any(item['z_index'] == 0 for item in saved):
+        task_db.fail_task(task_id, 'Ark 未返回有效的基础图')
+        return {'success': False, 'error': 'Ark 未返回有效的基础图'}, 500
+
+    saved.sort(key=lambda item: item['z_index'])
+    base_item = next(item for item in saved if item['z_index'] == 0)
+    canvas_width, canvas_height = base_item['width'], base_item['height']
+    document_layers = []
+    for item in saved:
+        bounds = (item.get('bounding_box') or {}).get('absolute')
+        if not isinstance(bounds, list) or len(bounds) != 4:
+            bounds = [0, 0, canvas_width, canvas_height]
+        left, top, right, bottom = [int(value) for value in bounds]
+        document_layers.append({
+            'id': f'{task_id}:{item["z_index"]}', **item,
+            'x': left, 'y': top,
+            'display_width': max(1, right - left),
+            'display_height': max(1, bottom - top),
+            'rotation': 0, 'opacity': 1, 'visible': True,
+            'locked': item['z_index'] == 0,
+        })
+    result = {
+        'project_id': project_id,
+        'base_image': base_item['local_url'],
+        'local_images': [base_item['local_url']],
+        'local_thumbnails': [base_item['thumbnail_url']],
+        'layers': [item for item in saved if item['z_index'] != 0],
+        'source_urls': response_data.get('source_urls') or [],
+    }
+    document = {
+        'canvas': {'width': canvas_width, 'height': canvas_height, 'background': 'transparent'},
+        'layers': document_layers,
+        'selected_layer_id': document_layers[-1]['id'] if document_layers else None,
+        'task_id': task_id,
+    }
+    if not task_db.complete_task(task_id, result, output_dir):
+        storage.remove_task_output_files(task_id)
+        task_db.finalize_task_cancel(task_id)
+        return {'success': False, 'cancelled': True, 'error': '任务已取消'}, 409
+    task_db.add_layer_revision(
+        int(project_id), task_id, task.get('prompt') or '', params.get('size', 'auto'), result, document,
+    )
+    return {'success': True, 'task_id': task_id, 'project_id': project_id, 'result': result}, 200
+
+
+def _validate_layer_source(metadata, size_bytes):
+    if metadata.get('format') not in {'png', 'jpeg'}:
+        raise ValueError('图层分解源图片仅支持 PNG 或 JPEG')
+    if size_bytes > 30 * 1024 * 1024:
+        raise ValueError('图层分解源图片不能超过 30 MB')
+    if not 512 * 512 <= int(metadata.get('pixels') or 0) <= 6000 * 6000:
+        raise ValueError('图层分解源图片总像素必须在 512×512 到 6000×6000 之间')
+    ratio = metadata['width'] / metadata['height']
+    if not 1 / 16 <= ratio <= 16:
+        raise ValueError('图层分解源图片宽高比必须在 1:16 到 16:1 之间')
+
+
+def _queue_layer_task(project, prompt, size):
+    normalized_size = 'auto' if str(size).lower() == 'auto' else str(size).upper()
+    if normalized_size not in {'auto', '1K', '1.5K', '2K'}:
+        raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
+    provider, provider_config = get_image_provider_config('ark')
+    if not get_provider_key(provider, provider_config):
+        raise ValueError('Ark 未配置 API Key')
+    task_id = task_db.create_task(
+        'layer', prompt or '', {
+            'project_id': project['id'], 'size': normalized_size,
+            'output_format': 'png', 'provider': 'ark',
+            'model': get_provider_default_model(provider, provider_config),
+            'layer_decomposition': True,
+        }, provider='ark', status='preparing',
+    )
+    output_dir = storage.task_output_dir('layer', task_id)
+    source_path = os.path.join(output_dir, 'source.png')
+    storage.clone_workspace_image(project['source_path'], source_path)
+    storage.register_file(task_id, 'input_image', source_path, 'image/png')
+    task_db.update_task(task_id, output_dir=output_dir, status='pending', next_run_at=task_db.utcnow())
+    task_db.update_layer_project(project['id'], current_task_id=task_id)
+    return task_id
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Queue normal image jobs; keep chat generations synchronous for compatibility."""
@@ -1492,6 +1677,7 @@ def generate():
             custom_width = request.form.get('custom_width')
             custom_height = request.form.get('custom_height')
             output_format = request.form.get('output_format', 'png').lower()
+            background = request.form.get('background', 'default').lower()
             watermark = request.form.get('watermark', 'false').lower() == 'true'
             use_search = request.form.get('use_search', 'false').lower() == 'true'
             enable_chat = request.form.get('enable_chat', 'false').lower() == 'true'
@@ -1512,6 +1698,7 @@ def generate():
             custom_width = data.get('custom_width')
             custom_height = data.get('custom_height')
             output_format = str(data.get('output_format', 'png')).lower()
+            background = str(data.get('background', 'default')).lower()
             watermark = as_bool(data.get('watermark', False))
             use_search = as_bool(data.get('use_search', False))
             enable_chat = as_bool(data.get('enable_chat', False))
@@ -1570,6 +1757,18 @@ def generate():
             max_reference_images = ARK_SEEDREAM_PRO_MAX_REFERENCES if provider == 'ark' else 14
             if len(images_files) + len(workspace_image_paths) > max_reference_images:
                 return jsonify({'success': False, 'error': f'当前 Provider 最多只能上传{max_reference_images}张图片'}), 400
+        if background not in {'default', 'transparent', 'opaque'}:
+            return jsonify({'success': False, 'error': '背景参数仅支持默认、透明或不透明'}), 400
+        if background != 'default':
+            if provider != 'ark':
+                return jsonify({'success': False, 'error': '背景控制仅支持 Seedream 5.0 Pro'}), 400
+            if len(images_files) + len(workspace_image_paths) != 1:
+                return jsonify({'success': False, 'error': '背景控制需要且只能使用一张带 Alpha 通道的参考图'}), 400
+            source_metadata = storage.inspect_uploaded_image(images_files[0]) if images_files else storage.inspect_image(workspace_image_paths[0])
+            if not source_metadata.get('has_alpha'):
+                return jsonify({'success': False, 'error': '参考图片不包含 Alpha 通道，无法控制透明背景'}), 400
+            if background == 'transparent' and output_format == 'jpeg':
+                return jsonify({'success': False, 'error': '透明背景必须使用 PNG 输出格式'}), 400
 
         params = {
             'aspect_ratio': aspect_ratio,
@@ -1584,6 +1783,8 @@ def generate():
             params['output_format'] = output_format
             params['watermark'] = watermark
             params['size'] = resolved_size
+            if background != 'default':
+                params['background'] = background
             if aspect_ratio == 'custom':
                 params['custom_width'] = custom_width
                 params['custom_height'] = custom_height
@@ -1639,8 +1840,16 @@ def generate():
 VIDEO_CONFIG = config.get('video', {})
 ARK_VIDEO_CONFIG = VIDEO_CONFIG.get('ark', {})
 CUPSY_VIDEO_CONFIG = VIDEO_CONFIG.get('cupsy', {})
+AUDIO_CONFIG = config.get('audio', {})
+CUPSY_AUDIO_CONFIG = AUDIO_CONFIG.get('cupsy', {})
 SEEDANCE_20 = 'seedance-2.0'
 SEEDANCE_25 = 'seedance-2.5'
+SEEDANCE_25_MODERATED = 'seedance-2.5-moderated'
+CUPSY_SEEDANCE_MODELS = {SEEDANCE_25, SEEDANCE_25_MODERATED}
+CUPSY_AUDIO_MODEL = 'seed-audio-1.0'
+CUPSY_AUDIO_FORMATS = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg_opus': 'audio/ogg'}
+CUPSY_AUDIO_SAMPLE_RATES = {8000, 16000, 24000, 32000, 44100, 48000}
+CUPSY_AUDIO_SPEAKERS = {'vivi', 'mindy', 'kian', 'jess', 'opal'}
 SEEDANCE_25_DEFAULT_MODEL = 'ep-20260807145632-xprc6'
 VIDEO_MODEL_SPECS = {
     SEEDANCE_20: {
@@ -1715,6 +1924,17 @@ def _cupsy_settings():
             os.environ.get('CUPSY_SOURCE_BASE_URL')
             or CUPSY_VIDEO_CONFIG.get('source_base_url', '')
         ).rstrip('/'),
+    }
+
+
+def _cupsy_audio_settings():
+    shared = _cupsy_settings()
+    return {
+        **shared,
+        **CUPSY_AUDIO_CONFIG,
+        'api_key': shared['api_key'],
+        'endpoint': CUPSY_AUDIO_CONFIG.get('endpoint') or shared.get('endpoint', 'https://cupsy.io'),
+        'model': CUPSY_AUDIO_CONFIG.get('model') or CUPSY_AUDIO_MODEL,
     }
 
 
@@ -2014,10 +2234,148 @@ def get_video_provider_info():
             'cupsy': {
                 'available': bool(cupsy['api_key']),
                 'source_ready': _cupsy_source_ready(cupsy),
-                'models': [SEEDANCE_25],
+                'models': [SEEDANCE_25, SEEDANCE_25_MODERATED],
             },
         },
     })
+
+
+@app.route('/api/audio/provider', methods=['GET'])
+def get_audio_provider_info():
+    settings = _cupsy_audio_settings()
+    return jsonify({
+        'success': True,
+        'current': 'cupsy',
+        'providers': {
+            'cupsy': {
+                'available': bool(settings['api_key']),
+                'source_ready': _cupsy_source_ready(settings),
+                'models': [CUPSY_AUDIO_MODEL],
+            },
+        },
+        'capabilities': {
+            'formats': list(CUPSY_AUDIO_FORMATS),
+            'sample_rates': sorted(CUPSY_AUDIO_SAMPLE_RATES),
+            'speaker_aliases': sorted(CUPSY_AUDIO_SPEAKERS),
+            'max_duration_seconds': 120,
+            'max_audio_references': 3,
+            'max_image_references': 1,
+            'max_prompt_code_points': 3000,
+        },
+    })
+
+
+def _parse_audio_list(value, field_name):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError as error:
+            raise ValueError(f'{field_name} 必须是数组') from error
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f'{field_name} 必须是数组')
+    return value
+
+
+@app.route('/api/audio/generate', methods=['POST'])
+def generate_audio():
+    settings = _cupsy_audio_settings()
+    if not settings['api_key']:
+        return jsonify({'success': False, 'error': 'Cupsy 未配置 API Key'}), 400
+
+    has_files = bool(request.files)
+    data = request.form if has_files else (request.get_json(silent=True) or {})
+    prompt = str(data.get('prompt') or data.get('text_prompt') or '').strip()
+    if not prompt:
+        return jsonify({'success': False, 'error': '请填写音频提示词'}), 400
+    if len(prompt) > 3000:
+        return jsonify({'success': False, 'error': '音频提示词不能超过 3000 个字符'}), 400
+
+    model = str(data.get('model') or settings.get('model') or CUPSY_AUDIO_MODEL).strip().lower()
+    if model != CUPSY_AUDIO_MODEL:
+        return jsonify({'success': False, 'error': 'Cupsy 音频端点仅支持 Seed Audio 1.0'}), 400
+    output_format = str(data.get('output_format') or 'mp3').strip().lower()
+    if output_format not in CUPSY_AUDIO_FORMATS:
+        return jsonify({'success': False, 'error': '音频格式仅支持 MP3、WAV 或 OGG Opus'}), 400
+    try:
+        sample_rate = int(data.get('sample_rate') or 44100)
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'sample_rate 必须是整数'}), 400
+    if sample_rate not in CUPSY_AUDIO_SAMPLE_RATES:
+        return jsonify({'success': False, 'error': '不支持的音频采样率'}), 400
+
+    reference_mode = str(data.get('reference_mode') or 'none').strip().lower()
+    if reference_mode not in {'none', 'audio', 'image'}:
+        return jsonify({'success': False, 'error': '参考模式仅支持 none、audio 或 image'}), 400
+    speaker = str(data.get('speaker') or '').strip().lower()
+    if speaker and speaker not in CUPSY_AUDIO_SPEAKERS:
+        return jsonify({'success': False, 'error': '不支持的预设声线'}), 400
+    if speaker and reference_mode == 'image':
+        return jsonify({'success': False, 'error': '预设声线不能与图片参考同时使用'}), 400
+    if speaker and reference_mode == 'none':
+        reference_mode = 'audio'
+
+    try:
+        raw_assets = _parse_audio_list(data.get('cupsy_assets', []), 'cupsy_assets')
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+
+    pending_links = []
+    expected_kind = 'image' if reference_mode == 'image' else 'audio'
+    for position, raw_asset in enumerate(raw_assets):
+        raw_id = raw_asset.get('id') if isinstance(raw_asset, dict) else raw_asset
+        try:
+            asset = task_db.get_provider_asset(raw_id)
+        except (TypeError, ValueError):
+            asset = None
+        if (
+            reference_mode == 'none' or not asset or asset.get('deleted_at')
+            or asset.get('provider') != 'cupsy' or asset.get('kind') != expected_kind
+        ):
+            return jsonify({'success': False, 'error': 'Cupsy 音频参考素材无效或类型不匹配'}), 400
+        pending_links.append((asset, f'reference_{expected_kind}', position))
+
+    uploads = request.files.getlist('references') if has_files else []
+    try:
+        for upload in uploads:
+            if reference_mode == 'none':
+                raise ValueError('添加参考文件前请选择音频或图片参考模式')
+            asset = create_cupsy_asset_from_upload(upload, expected_kind)
+            pending_links.append((asset, f'reference_{expected_kind}', len(pending_links)))
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+
+    reference_count = len(pending_links) + (1 if speaker else 0)
+    if reference_mode == 'audio' and reference_count > 3:
+        return jsonify({'success': False, 'error': 'Seed Audio 1.0 最多支持 3 个音频或声线参考'}), 400
+    if reference_mode == 'image' and reference_count != 1:
+        return jsonify({'success': False, 'error': '图片参考模式必须且只能使用 1 张图片'}), 400
+    if reference_mode == 'none' and reference_count:
+        return jsonify({'success': False, 'error': '纯文本模式不能包含参考素材'}), 400
+
+    params = {
+        'model': CUPSY_AUDIO_MODEL,
+        'output_format': output_format,
+        'sample_rate': sample_rate,
+        'enable_subtitle': as_bool(data.get('enable_subtitle', True), default=True),
+        'watermark': as_bool(data.get('watermark', False)),
+        'reference_mode': reference_mode,
+        'speaker': speaker or None,
+    }
+    task_id = task_db.create_task('audio', prompt, params, provider='cupsy', status='pending')
+    output_dir = storage.task_output_dir('audio', task_id)
+    task_db.update_task(task_id, output_dir=output_dir)
+    for asset, role, position in pending_links:
+        task_db.link_task_provider_asset(task_id, asset['id'], role, position)
+        task_db.link_asset(asset['local_path'], task_id, expires_at=None)
+    return jsonify({
+        'success': True,
+        'queued': True,
+        'task_id': task_id,
+        'provider': 'cupsy',
+        'status': 'pending',
+    }), 202
 
 
 def _build_ark_body(
@@ -2150,9 +2508,10 @@ def _queue_cupsy_video(
     settings = _cupsy_settings()
     if not settings['api_key']:
         return jsonify({'success': False, 'error': 'Cupsy 未配置 API Key'}), 400
-    if str(requested_model or SEEDANCE_25).lower() not in {
-        SEEDANCE_25, 'dreamina-seedance-2.5', str(settings.get('model', SEEDANCE_25)).lower()
-    }:
+    requested_model = str(requested_model or settings.get('model') or SEEDANCE_25).strip().lower()
+    if requested_model == 'dreamina-seedance-2.5':
+        requested_model = SEEDANCE_25
+    if requested_model not in CUPSY_SEEDANCE_MODELS:
         return jsonify({'success': False, 'error': 'Cupsy 端点仅支持 Seedance 2.5'}), 400
     try:
         duration = int(duration)
@@ -2251,7 +2610,7 @@ def _queue_cupsy_video(
         return jsonify({'success': False, 'error': '请提供 prompt 或参考素材'}), 400
 
     params = {
-        'model': SEEDANCE_25,
+        'model': requested_model,
         'ratio': ratio,
         'duration': duration,
         'resolution': resolution,
@@ -2532,6 +2891,7 @@ ARK_STATUS_MAP = {
 WORKSPACE_STATE_KEYS = {
     'img_tabs', 'img_activeTab', 'appMode',
     'vid_tabs', 'vid_activeTab',
+    'audio_form',
     'gallery_preferences',
 }
 
@@ -2568,7 +2928,7 @@ def _task_png_text_entries(task):
 
 def _task_output_asset(task_id, filename):
     for asset in task_db.list_assets(task_id):
-        if asset['kind'] not in ('output_image', 'output_video'):
+        if asset['kind'] not in ('output_image', 'output_video', 'output_audio'):
             continue
         if os.path.basename(asset['path']) == filename and os.path.isfile(asset['path']):
             return asset
@@ -2614,31 +2974,37 @@ def _attach_task_input_references(tasks):
     missing_ref_tasks = []
     for task in tasks:
         result = task.get('result') if isinstance(task.get('result'), dict) else {}
-        if not result.get('local_refs'):
+        if not result.get('local_refs') or len(result.get('local_ref_types') or []) != len(result.get('local_refs') or []):
             missing_ref_tasks.append(task)
     if not missing_ref_tasks:
         return tasks
 
     refs_by_task = {}
+    ref_types_by_task = {}
     task_ids = [task['id'] for task in missing_ref_tasks]
-    for asset in task_db.list_assets_for_tasks(task_ids, ('input_image',)):
+    for asset in task_db.list_assets_for_tasks(task_ids, ('input_image', 'input_audio')):
         if not os.path.isfile(asset['path']):
             continue
         refs_by_task.setdefault(asset['task_id'], []).append(
             f'/api/tasks/{asset["task_id"]}/file/{os.path.basename(asset["path"])}'
         )
-    for asset in task_db.list_task_provider_assets_for_tasks(task_ids, ('image',)):
+        ref_types_by_task.setdefault(asset['task_id'], []).append(
+            'audio' if asset['kind'] == 'input_audio' else 'image'
+        )
+    for asset in task_db.list_task_provider_assets_for_tasks(task_ids, ('image', 'audio', 'video')):
         if asset.get('deleted_at') or not os.path.isfile(asset['local_path']):
             continue
         refs_by_task.setdefault(asset['task_id'], []).append(
             f'/api/cupsy/assets/{asset["id"]}/content'
         )
+        ref_types_by_task.setdefault(asset['task_id'], []).append(asset['kind'])
     for task in missing_ref_tasks:
         local_refs = refs_by_task.get(task['id'])
         if not local_refs:
             continue
         result = dict(task['result']) if isinstance(task.get('result'), dict) else {}
         result['local_refs'] = local_refs
+        result['local_ref_types'] = ref_types_by_task.get(task['id'], [])
         task['result'] = result
     return tasks
 
@@ -2743,8 +3109,10 @@ def api_list_tasks():
                 'local_refs': r.get('local_refs', []),
                 'source_urls': r.get('source_urls', []),
                 'local_video': r.get('local_video'),
+                'local_audio': r.get('local_audio'),
                 'local_last_frame': r.get('local_last_frame'),
                 'local_thumbnail': r.get('local_thumbnail'),
+                'local_ref_types': r.get('local_ref_types', []),
                 'thinking': r.get('thinking', '')[:100]
             }
     return jsonify({'success': True, 'tasks': tasks, 'total': total})
@@ -3046,11 +3414,16 @@ def api_delete_task(task_id):
 def api_cancel_task(task_id):
     task = task_db.get_task(task_id)
     if task and task.get('provider') == 'cupsy' and task.get('external_task_id'):
-        settings = _cupsy_settings()
+        settings = _cupsy_audio_settings() if task.get('type') == 'audio' else _cupsy_settings()
+        resource_path = (
+            f'/v1/audio/generations/{task["external_task_id"]}'
+            if task.get('type') == 'audio'
+            else f'/v1/videos/{task["external_task_id"]}'
+        )
         if settings['api_key']:
             try:
                 response = HTTP.delete(
-                    f'{settings.get("endpoint", "https://cupsy.io").rstrip("/")}/v1/videos/{task["external_task_id"]}',
+                    f'{settings.get("endpoint", "https://cupsy.io").rstrip("/")}{resource_path}',
                     headers=_cupsy_headers(), timeout=(10, 30),
                 )
                 if response.status_code not in {200, 202, 204, 404, 409}:
@@ -3137,7 +3510,7 @@ def api_bulk_download_tasks():
     try:
         tasks_by_id = {task['id']: task for task in task_db.get_tasks_by_ids(task_ids)}
         assets_by_task = {}
-        for asset in task_db.list_assets_for_tasks(task_ids, ('output_image', 'output_video')):
+        for asset in task_db.list_assets_for_tasks(task_ids, ('output_image', 'output_video', 'output_audio')):
             assets_by_task.setdefault(asset['task_id'], []).append(asset)
         # Generated media is already compressed; deflating it again wastes CPU.
         with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
@@ -3194,6 +3567,156 @@ def api_clear_tasks():
     tasks, _ = task_db.list_tasks(limit=None)
     moved = task_db.move_tasks_to_trash([task['id'] for task in tasks])
     return jsonify({'success': True, 'deleted': len(moved), 'trashed': len(moved)})
+
+
+@app.route('/api/images/inspect', methods=['POST'])
+def api_inspect_image():
+    upload = request.files.get('file')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': '缺少图片文件'}), 400
+    try:
+        metadata = storage.inspect_uploaded_image(upload)
+        return jsonify({'success': True, 'image': metadata})
+    except (OSError, ValueError, UnidentifiedImageError):
+        return jsonify({'success': False, 'error': '图片格式无效或文件已损坏'}), 400
+
+
+@app.route('/api/layer/projects', methods=['GET', 'POST'])
+def api_layer_projects():
+    if request.method == 'GET':
+        return jsonify({'success': True, 'projects': task_db.list_layer_projects()})
+    upload = request.files.get('image')
+    if not upload or not upload.filename:
+        return jsonify({'success': False, 'error': '请选择需要分解的 PNG 或 JPEG 图片'}), 400
+    try:
+        requested_size = 'auto' if request.form.get('size', 'auto').lower() == 'auto' else request.form.get('size', 'auto').upper()
+        if requested_size not in {'auto', '1K', '1.5K', '2K'}:
+            raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
+        provider, provider_config = get_image_provider_config('ark')
+        if not get_provider_key(provider, provider_config):
+            raise ValueError('Ark 未配置 API Key')
+        upload.stream.seek(0, os.SEEK_END)
+        size_bytes = upload.stream.tell()
+        upload.stream.seek(0)
+        metadata = storage.inspect_uploaded_image(upload)
+        _validate_layer_source(metadata, size_bytes)
+        name = (request.form.get('name') or os.path.splitext(upload.filename)[0] or '未命名项目').strip()[:120]
+        project_id = task_db.create_layer_project(name, upload.filename, None, metadata)
+        project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
+        source_path = os.path.join(project_dir, 'source.png')
+        storage.save_uploaded_image(upload, source_path)
+        stored_metadata = storage.inspect_image(source_path)
+        stored_metadata['original_format'] = metadata['format']
+        stored_metadata['size_bytes'] = size_bytes
+        task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
+        project = task_db.get_layer_project(project_id)
+        task_id = _queue_layer_task(project, request.form.get('prompt', ''), requested_size)
+        return jsonify({
+            'success': True, 'project_id': project_id, 'task_id': task_id,
+            'project': task_db.get_layer_project(project_id),
+        }), 202
+    except (OSError, ValueError, UnidentifiedImageError) as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+
+
+@app.route('/api/layer/projects/<int:project_id>', methods=['GET', 'PUT', 'DELETE'])
+def api_layer_project(project_id):
+    project = task_db.get_layer_project(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '图层项目不存在'}), 404
+    if request.method == 'GET':
+        return jsonify({'success': True, 'project': project})
+    if request.method == 'DELETE':
+        current = project.get('current_task') or {}
+        if current.get('status') in task_db.ACTIVE_TASK_STATUSES:
+            return jsonify({'success': False, 'error': '项目仍在分解中，请等待任务结束后删除'}), 409
+        task_ids = {revision['task_id'] for revision in project.get('revisions', [])}
+        if project.get('current_task_id'):
+            task_ids.add(project['current_task_id'])
+        task_db.update_layer_project(project_id, deleted_at=task_db.utcnow())
+        for task_id in task_ids:
+            task = task_db.get_task(task_id)
+            if task:
+                storage.remove_task_files(task)
+                task_db.delete_task(task_id)
+        source_dir = os.path.dirname(project.get('source_path') or '')
+        expected_root = os.path.abspath(os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects'))
+        if source_dir and os.path.commonpath([expected_root, os.path.abspath(source_dir)]) == expected_root:
+            shutil.rmtree(source_dir, ignore_errors=True)
+        return jsonify({'success': True})
+    data = request.get_json(silent=True) or {}
+    document = data.get('document')
+    if not isinstance(document, dict) or not isinstance(document.get('layers', []), list):
+        return jsonify({'success': False, 'error': '图层文档格式无效'}), 400
+    updated = task_db.save_layer_document(project_id, document, data.get('revision'))
+    if not updated:
+        return jsonify({'success': False, 'error': '项目已在其他页面更新，请刷新后重试'}), 409
+    return jsonify({'success': True, 'project': updated})
+
+
+@app.route('/api/layer/projects/<int:project_id>/source', methods=['GET'])
+def api_layer_project_source(project_id):
+    project = task_db.get_layer_project(project_id)
+    if not project or not project.get('source_path') or not os.path.isfile(project['source_path']):
+        return jsonify({'success': False, 'error': '源图片不存在'}), 404
+    return send_file(project['source_path'], conditional=True, max_age=3600)
+
+
+@app.route('/api/layer/projects/<int:project_id>/decompose', methods=['POST'])
+def api_decompose_layer_project(project_id):
+    project = task_db.get_layer_project(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '图层项目不存在'}), 404
+    current = project.get('current_task') or {}
+    if current.get('status') in task_db.ACTIVE_TASK_STATUSES:
+        return jsonify({'success': False, 'error': '当前项目已有分解任务正在执行'}), 409
+    data = request.get_json(silent=True) or {}
+    try:
+        task_id = _queue_layer_task(project, data.get('prompt', ''), data.get('size', 'auto'))
+        return jsonify({'success': True, 'task_id': task_id, 'project_id': project_id}), 202
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+
+
+@app.route('/api/layer/projects/<int:project_id>/revisions/<int:revision_id>/restore', methods=['POST'])
+def api_restore_layer_revision(project_id, revision_id):
+    project = task_db.get_layer_project(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '图层项目不存在'}), 404
+    revision = next((item for item in project.get('revisions', []) if item['id'] == revision_id), None)
+    if not revision or not revision.get('document'):
+        return jsonify({'success': False, 'error': '图层版本不存在或无法恢复'}), 404
+    updated = task_db.save_layer_document(project_id, revision['document'])
+    return jsonify({'success': True, 'project': updated})
+
+
+@app.route('/api/layer/projects/<int:project_id>/layers.zip', methods=['GET'])
+def api_download_layer_project(project_id):
+    project = task_db.get_layer_project(project_id)
+    document = (project or {}).get('document') or {}
+    layers = document.get('layers') or []
+    if not project or not layers:
+        return jsonify({'success': False, 'error': '项目还没有可下载的图层'}), 404
+    archive = io.BytesIO()
+    manifest = {'project': project['name'], 'canvas': document.get('canvas'), 'layers': []}
+    with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
+        for index, layer in enumerate(layers):
+            local_url = layer.get('local_url') or ''
+            match = re.match(r'^/api/tasks/(\d+)/file/([^/]+)$', local_url)
+            task = task_db.get_task(int(match.group(1))) if match else None
+            path = os.path.join(task['output_dir'], match.group(2)) if task and task.get('output_dir') else None
+            if not path or not os.path.isfile(path):
+                continue
+            extension = os.path.splitext(path)[1].lower() or '.png'
+            archive_name = f'{index:02d}_{re.sub(r"[^a-zA-Z0-9_-]+", "_", layer.get("name") or "layer")}{extension}'
+            bundle.write(path, archive_name)
+            manifest['layers'].append({**{key: value for key, value in layer.items() if key not in {'local_url', 'thumbnail_url'}}, 'file': archive_name})
+        bundle.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+    archive.seek(0)
+    return send_file(
+        archive, mimetype='application/zip', as_attachment=True,
+        download_name=f'ink-traces-layer-project-{project_id}.zip', max_age=0,
+    )
 
 
 @app.route('/api/workspace/state/<key>', methods=['GET'])
@@ -3403,8 +3926,11 @@ def _poll_cupsy_video_task(task):
             return {'state': 'failed', 'error': reason}
         if any(asset['status'] != 'active' or not asset.get('asset_uri') for asset in assets):
             return {'state': 'preparing', 'progress': 0}
+        cupsy_model = str(params.get('model') or settings.get('model') or SEEDANCE_25).strip().lower()
+        if cupsy_model not in CUPSY_SEEDANCE_MODELS:
+            cupsy_model = SEEDANCE_25
         body = {
-            'model': settings.get('model') or SEEDANCE_25,
+            'model': cupsy_model,
             'content': _cupsy_video_content(task, assets),
             'ratio': params.get('ratio', 'adaptive'),
             'duration': int(params.get('duration', 5)),
@@ -3493,6 +4019,148 @@ def _poll_cupsy_video_task(task):
         task_db.finalize_task_cancel(task_id)
         return {'state': 'cancelled'}
     return {'state': 'succeeded', 'result': result}
+
+def _poll_cupsy_audio_task(task):
+    task_id = task['id']
+    settings = _cupsy_audio_settings()
+    if not settings['api_key']:
+        reason = 'Cupsy 未配置 API Key'
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
+
+    endpoint = settings.get('endpoint', 'https://cupsy.io').rstrip('/')
+    params = task.get('params') or {}
+    external_id = task.get('external_task_id')
+    if not external_id:
+        assets = task_db.list_task_provider_assets(task_id)
+        failed = next((asset for asset in assets if asset['status'] == 'failed'), None)
+        if failed:
+            reason = f'参考素材导入失败: {failed.get("error") or failed.get("original_name")}'
+            task_db.fail_task(task_id, reason)
+            return {'state': 'failed', 'error': reason}
+        if any(asset['status'] != 'active' or not asset.get('asset_uri') for asset in assets):
+            return {'state': 'preparing', 'progress': 0}
+
+        references = []
+        speaker = params.get('speaker')
+        if speaker:
+            references.append({'speaker': speaker})
+        for asset in assets:
+            if asset['role'] == 'reference_image':
+                references.append({'image_url': {'url': asset['asset_uri']}})
+            elif asset['role'] == 'reference_audio':
+                references.append({'audio_url': {'url': asset['asset_uri']}})
+
+        body = {
+            'model': CUPSY_AUDIO_MODEL,
+            'text_prompt': task.get('prompt') or '',
+            'audio_config': {
+                'format': params.get('output_format', 'mp3'),
+                'sample_rate': int(params.get('sample_rate', 44100)),
+                'enable_subtitle': bool(params.get('enable_subtitle', True)),
+            },
+            'watermark': bool(params.get('watermark', False)),
+        }
+        if references:
+            body['references'] = references
+        try:
+            response = HTTP.post(
+                f'{endpoint}/v1/audio/generations',
+                headers=_cupsy_headers(f'nanobanana-audio-{task_id}'),
+                json=body, timeout=(10, 120),
+            )
+        except requests.RequestException as error:
+            return {'state': 'retry', 'error': str(error)}
+        if response.status_code not in {200, 201, 202}:
+            reason = _cupsy_error(response, f'Cupsy 音频提交失败 {response.status_code}')
+            if response.status_code == 429 or response.status_code >= 500:
+                return {'state': 'retry', 'error': reason}
+            task_db.fail_task(task_id, reason)
+            return {'state': 'failed', 'error': reason}
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+        external_id = payload.get('id') or payload.get('audio_id') or payload.get('task_id')
+        if not external_id:
+            return {'state': 'retry', 'error': 'Cupsy 未返回音频任务 ID'}
+        if not task_db.activate_video_task(task_id, external_id):
+            task_db.finalize_task_cancel(task_id)
+            return {'state': 'cancelled'}
+        return {'state': 'pending', 'progress': 0}
+
+    try:
+        response = HTTP.get(
+            f'{endpoint}/v1/audio/generations/{external_id}',
+            headers=_cupsy_headers(), timeout=(10, POLL_TIMEOUT),
+        )
+    except requests.RequestException as error:
+        return {'state': 'retry', 'error': str(error)}
+    if response.status_code >= 400:
+        reason = _cupsy_error(response, f'Cupsy 音频查询失败 {response.status_code}')
+        if response.status_code == 429 or response.status_code >= 500:
+            return {'state': 'retry', 'error': reason}
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    status = str(payload.get('status') or '').lower()
+    if status in {'failed', 'error', 'expired', 'cancelled', 'canceled'}:
+        reason = payload.get('message') or payload.get('error') or f'Cupsy 音频状态: {status}'
+        if isinstance(reason, dict):
+            reason = reason.get('message') or json.dumps(reason, ensure_ascii=False)
+        task_db.fail_task(task_id, str(reason))
+        return {'state': 'failed', 'error': str(reason)}
+    if status not in {'succeeded', 'completed', 'ready'}:
+        progress = payload.get('progress')
+        return {'state': 'pending', 'progress': int(progress) if isinstance(progress, (int, float)) else 0}
+
+    output_format = str(params.get('output_format') or 'mp3').lower()
+    if output_format not in CUPSY_AUDIO_FORMATS:
+        output_format = 'mp3'
+    filename = f'audio.{"ogg" if output_format == "ogg_opus" else output_format}'
+    output_dir = task.get('output_dir') or storage.task_output_dir('audio', task_id)
+    path = os.path.join(output_dir, filename)
+    try:
+        with HTTP.get(
+            f'{endpoint}/v1/audio/generations/{external_id}/content',
+            headers=_cupsy_headers(), timeout=(10, DOWNLOAD_TIMEOUT), stream=True,
+        ) as download:
+            if download.status_code >= 400:
+                return {'state': 'retry', 'error': f'Cupsy 音频下载失败 {download.status_code}'}
+            storage.stream_response_to_file(download, path)
+    except requests.RequestException as error:
+        return {'state': 'retry', 'error': str(error)}
+    storage.register_file(task_id, 'output_audio', path, CUPSY_AUDIO_FORMATS[output_format])
+    result = {
+        'local_audio': f'/api/tasks/{task_id}/file/{filename}',
+        'provider_audio_id': external_id,
+        'duration_seconds': payload.get('duration_seconds') or payload.get('duration'),
+        'subtitles': payload.get('subtitles'),
+        'artifacts': payload.get('artifacts') or [],
+    }
+    if not task_db.complete_task(task_id, result, output_dir):
+        storage.remove_task_output_files(task_id)
+        task_db.finalize_task_cancel(task_id)
+        return {'state': 'cancelled'}
+    return {'state': 'succeeded', 'result': result}
+
+
+def poll_audio_task_once(task_id):
+    task = task_db.get_task(task_id)
+    if not task:
+        return {'state': 'failed', 'error': '任务不存在'}
+    if task_db.cancellation_requested(task_id):
+        task_db.finalize_task_cancel(task_id)
+        return {'state': 'cancelled'}
+    if task.get('provider') != 'cupsy':
+        reason = f'不支持的音频 Provider: {task.get("provider")}'
+        task_db.fail_task(task_id, reason)
+        return {'state': 'failed', 'error': reason}
+    return _poll_cupsy_audio_task(task)
+
 
 def poll_video_task_once(task_id):
     """Poll one provider task once and persist terminal results."""

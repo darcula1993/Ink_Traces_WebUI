@@ -78,5 +78,13 @@
       "source_base_url": "",
       "asset_token_ttl_seconds": 3600
     }
+  },
+  "audio": {
+    "poll_interval_seconds": 4,
+    "poll_max_attempts": 1800,
+    "cupsy": {
+      "endpoint": "https://cupsy.io",
+      "model": "seed-audio-1.0"
+    }
   }
 }

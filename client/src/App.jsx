@@ -15,16 +15,30 @@ import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Settings, Cpu, HardDrive, Grid3X3, Grid2X2Check, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, Lock, LockOpen, ArrowLeftRight, AudioLines, CircleAlert, FileSearch } from 'lucide-react'
+import { Play, Settings, Cpu, HardDrive, Grid3X3, Grid2X2Check, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, Lock, LockOpen, ArrowLeftRight, AudioLines, CircleAlert, FileSearch, Layers3 } from 'lucide-react'
 import { estimateBytePlusVideoCost, formatCnyEstimate, formatWanTokens } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceState } from './lib/useWorkspaceState'
 
 axios.defaults.withCredentials = true
 
+const LayerStudio = React.lazy(() => import('./components/LayerStudio'))
+
 const SEEDREAM_MIN_PIXELS = 1280 * 720
 const SEEDREAM_MAX_PIXELS = 4_624_220
 const SEEDANCE_20 = 'seedance-2.0'
 const SEEDANCE_25 = 'seedance-2.5'
+const SEEDANCE_25_MODERATED = 'seedance-2.5-moderated'
+const CUPSY_VIDEO_MODELS = [SEEDANCE_25, SEEDANCE_25_MODERATED]
+const CUPSY_AUDIO_MODEL = 'seed-audio-1.0'
+const AUDIO_SAMPLE_RATES = [8000, 16000, 24000, 32000, 44100, 48000]
+const AUDIO_SPEAKERS = [
+  { value: '', label: '模型自动' },
+  { value: 'vivi', label: 'Vivi' },
+  { value: 'mindy', label: 'Mindy' },
+  { value: 'kian', label: 'Kian' },
+  { value: 'jess', label: 'Jess' },
+  { value: 'opal', label: 'Opal' },
+]
 const VIDEO_REFERENCE_EXTENSIONS = new Set(['mp4', 'mov'])
 const AUDIO_REFERENCE_EXTENSIONS = new Set(['wav', 'mp3'])
 const VIDEO_MODEL_CAPABILITIES = {
@@ -203,7 +217,7 @@ function makeImgTab(id) {
   return {
     id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
     customWidth: 1024, customHeight: 1024, customAspectLocked: false, customAspectRatio: 1,
-    chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', watermark: false,
+    chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', background: 'default', watermark: false,
     loading: false, taskId: null, dbTaskId: null, taskStatus: null, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null,
   }
 }
@@ -216,6 +230,11 @@ function makeVideoTab(id) {
     loading: false, videoUrl: null, lastFrameUrl: null, progress: 0, eta: 0, error: null,
     taskId: null, dbTaskId: null, taskProvider: null, taskStatus: null,
   }
+}
+
+const DEFAULT_AUDIO_FORM = {
+  prompt: '', model: CUPSY_AUDIO_MODEL, outputFormat: 'mp3', sampleRate: 44100,
+  enableSubtitle: true, watermark: false, referenceMode: 'none', speaker: '', references: [],
 }
 
 function selectPersistedImageTabs(tabs) {
@@ -428,7 +447,7 @@ function App({ onLogout }) {
     }))
   }, [setImgTabs])
 
-  // 顶部模式切换：image / video
+  // 顶部模式切换：image / video / audio
   const [appMode, setAppMode] = useWorkspaceState('appMode', 'image')
 
   const [videoFastAvailable, setVideoFastAvailable] = useState(false)
@@ -448,10 +467,24 @@ function App({ onLogout }) {
     }))
   }, [setVideoTabs])
 
+  const [storedAudioForm, setStoredAudioForm] = useWorkspaceState('audio_form', DEFAULT_AUDIO_FORM)
+  const audioForm = { ...DEFAULT_AUDIO_FORM, ...(storedAudioForm || {}) }
+  const updateAudioForm = useCallback((updates) => {
+    setStoredAudioForm(previous => {
+      const current = { ...DEFAULT_AUDIO_FORM, ...(previous || {}) }
+      const resolved = typeof updates === 'function' ? updates(current) : updates
+      return { ...current, ...resolved }
+    })
+  }, [setStoredAudioForm])
+  const [audioProvider, setAudioProvider] = useState({ available: false, sourceReady: false })
+  const [audioUploading, setAudioUploading] = useState(false)
+
   const activeVideoProvider = activeTab.provider === 'cupsy' ? 'cupsy' : 'ark'
-  const effectiveVideoModel = activeVideoProvider === 'cupsy' || activeTab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
-  const isSeedance25 = effectiveVideoModel === SEEDANCE_25
-  const videoCapabilities = VIDEO_MODEL_CAPABILITIES[effectiveVideoModel]
+  const effectiveVideoModel = activeVideoProvider === 'cupsy'
+    ? (CUPSY_VIDEO_MODELS.includes(activeTab.model) ? activeTab.model : SEEDANCE_25)
+    : activeTab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+  const isSeedance25 = CUPSY_VIDEO_MODELS.includes(effectiveVideoModel)
+  const videoCapabilities = VIDEO_MODEL_CAPABILITIES[isSeedance25 ? SEEDANCE_25 : effectiveVideoModel]
   const videoDurationOptions = Array.from(
     { length: videoCapabilities.maxDuration - videoCapabilities.minDuration + 1 },
     (_, index) => videoCapabilities.minDuration + index,
@@ -464,16 +497,22 @@ function App({ onLogout }) {
   const effectiveVideoDuration = activeTab.duration
 
   const handleVideoModelChange = useCallback((model) => {
-    const nextModel = model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+    const nextModel = activeVideoProvider === 'cupsy'
+      ? (model === SEEDANCE_25_MODERATED ? SEEDANCE_25_MODERATED : SEEDANCE_25)
+      : model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
     updateTab(activeTab.id, tab => {
-      const capabilities = VIDEO_MODEL_CAPABILITIES[nextModel]
-      const duration = nextModel === SEEDANCE_25
-        ? -1
+      const capabilities = VIDEO_MODEL_CAPABILITIES[
+        nextModel === SEEDANCE_25_MODERATED ? SEEDANCE_25 : nextModel
+      ]
+      const nextIsSeedance25 = CUPSY_VIDEO_MODELS.includes(nextModel)
+      const duration = activeVideoProvider === 'cupsy'
+        ? tab.duration === -1 ? 5 : Math.min(capabilities.maxDuration, tab.duration)
+        : nextIsSeedance25 ? -1
         : tab.duration !== -1 && tab.duration > capabilities.maxDuration
           ? capabilities.maxDuration
           : tab.duration
       const resolution = capabilities.resolutions.includes(tab.resolution) ? tab.resolution : '720p'
-      const ratio = nextModel === SEEDANCE_25
+      const ratio = nextIsSeedance25
         && tab.mode === 'keyframe'
         && (tab.firstFrame || tab.lastFrame)
         ? 'adaptive'
@@ -483,18 +522,23 @@ function App({ onLogout }) {
         duration,
         resolution,
         ratio,
-        fast: nextModel === SEEDANCE_25 ? false : tab.fast,
-        outputFormat: nextModel === SEEDANCE_25 && tab.outputFormat === 'mov' ? 'mov' : 'mp4',
+        fast: nextIsSeedance25 ? false : tab.fast,
+        outputFormat: activeVideoProvider === 'ark' && nextIsSeedance25 && tab.outputFormat === 'mov' ? 'mov' : 'mp4',
       }
     })
-  }, [activeTab.id, updateTab])
+  }, [activeTab.id, activeVideoProvider, updateTab])
 
   const handleVideoProviderChange = useCallback((provider) => {
     updateTab(activeTab.id, tab => provider === 'cupsy' ? {
-      provider: 'cupsy', model: SEEDANCE_25, duration: tab.duration === -1 ? 5 : tab.duration,
+      provider: 'cupsy',
+      model: CUPSY_VIDEO_MODELS.includes(tab.model) ? tab.model : SEEDANCE_25,
+      duration: tab.duration === -1 ? 5 : tab.duration,
       resolution: ['480p', '720p'].includes(tab.resolution) ? tab.resolution : '720p',
       fast: false, outputFormat: 'mp4', returnLastFrame: false,
-    } : { provider: 'ark' })
+    } : {
+      provider: 'ark',
+      model: tab.model === SEEDANCE_20 ? SEEDANCE_20 : SEEDANCE_25,
+    })
   }, [activeTab.id, updateTab])
 
   const moveVideoReference = useCallback((tabId, field, fromIndex, toIndex) => {
@@ -505,6 +549,35 @@ function App({ onLogout }) {
   }, [setVideoTabs])
 
   const useCupsyAsset = useCallback((asset, role) => {
+    if (appMode === 'audio') {
+      if (!['audio', 'image'].includes(asset.kind)) {
+        notify('音频生成仅支持音频或图片参考', 'error')
+        return
+      }
+      const nextMode = asset.kind
+      if (audioForm.referenceMode !== 'none' && audioForm.referenceMode !== nextMode) {
+        notify('音频参考与图片参考不能混用', 'error')
+        return
+      }
+      const limit = nextMode === 'image' ? 1 : Math.max(0, 3 - (audioForm.speaker ? 1 : 0))
+      if (audioForm.references.some(item => item.cupsyAssetId === asset.id)) return
+      if (audioForm.references.length >= limit) {
+        notify(nextMode === 'image' ? '图片参考只能添加 1 张' : '最多使用 3 个音频或声线参考', 'error')
+        return
+      }
+      updateAudioForm(form => ({
+        referenceMode: nextMode,
+        references: [...form.references, {
+          cupsyAssetId: asset.id,
+          kind: asset.kind,
+          name: asset.name || `Asset ${asset.id}`,
+          preview: asset.content_url,
+          status: asset.status,
+        }],
+      }))
+      notify('素材已引用')
+      return
+    }
     const common = {
       cupsyAssetId: asset.id,
       name: asset.name || `Asset ${asset.id}`,
@@ -528,7 +601,7 @@ function App({ onLogout }) {
       return {}
     })
     notify('素材已引用')
-  }, [activeTab.id, notify, updateTab])
+  }, [activeTab.id, appMode, audioForm.referenceMode, audioForm.references, audioForm.speaker, notify, updateAudioForm, updateTab])
 
   const setVideoKeyframeFile = useCallback((tabId, field, files) => {
     const file = Array.from(files || []).find(isImageFile)
@@ -540,7 +613,7 @@ function App({ onLogout }) {
       setVideoTabs(previous => previous.map(tab => tab.id === tabId ? {
         ...tab,
         [field]: { file, preview, name: file.name },
-        ...(tab.model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}),
+        ...(CUPSY_VIDEO_MODELS.includes(tab.model) ? { ratio: 'adaptive' } : {}),
       } : tab))
     }).catch(() => notify('关键帧图片读取失败', 'error'))
   }, [notify, setVideoTabs])
@@ -560,7 +633,7 @@ function App({ onLogout }) {
             ...tab,
             firstFrame,
             lastFrame,
-            ...(tab.model === SEEDANCE_25 ? { ratio: 'adaptive' } : {}),
+            ...(CUPSY_VIDEO_MODELS.includes(tab.model) ? { ratio: 'adaptive' } : {}),
           }
         }))
       })
@@ -577,7 +650,7 @@ function App({ onLogout }) {
       .then(items => {
         setVideoTabs(previous => previous.map(tab => {
           if (tab.id !== tabId) return tab
-          const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+          const model = CUPSY_VIDEO_MODELS.includes(tab.model) ? SEEDANCE_25 : SEEDANCE_20
           const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefImages - tab.refImages.length
           if (remaining <= 0) return tab
           return { ...tab, refImages: [...tab.refImages, ...items.slice(0, remaining)] }
@@ -648,7 +721,7 @@ function App({ onLogout }) {
     }
     const tab = videoTabs.find(item => item.id === tabId)
     if (!tab) return
-    const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+    const model = CUPSY_VIDEO_MODELS.includes(tab.model) ? SEEDANCE_25 : SEEDANCE_20
     const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefVideos - tab.refVideos.length
     const selected = accepted.slice(0, Math.max(0, remaining))
     if (!selected.length) return
@@ -676,7 +749,7 @@ function App({ onLogout }) {
     }
     setVideoTabs(previous => previous.map(tab => {
       if (tab.id !== tabId) return tab
-      const model = tab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
+      const model = CUPSY_VIDEO_MODELS.includes(tab.model) ? SEEDANCE_25 : SEEDANCE_20
       const remaining = VIDEO_MODEL_CAPABILITIES[model].maxRefAudios - tab.refAudios.length
       if (remaining <= 0) return tab
       return {
@@ -688,6 +761,59 @@ function App({ onLogout }) {
       }
     }))
   }, [notify, setVideoTabs])
+
+  const addAudioReferences = useCallback(async (files) => {
+    const selected = Array.from(files || [])
+    const imageFiles = selected.filter(isImageFile)
+    const audioFiles = selected.filter(isAudioFile)
+    if (!imageFiles.length && !audioFiles.length) {
+      notify('仅支持图片、WAV 或 MP3 参考素材', 'error')
+      return
+    }
+    if (imageFiles.length && audioFiles.length) {
+      notify('音频参考与图片参考不能混用', 'error')
+      return
+    }
+    const kind = imageFiles.length ? 'image' : 'audio'
+    if (audioForm.referenceMode !== 'none' && audioForm.referenceMode !== kind) {
+      notify('请先清空另一种参考素材', 'error')
+      return
+    }
+    const candidates = kind === 'image' ? imageFiles.slice(0, 1) : audioFiles
+    const limit = kind === 'image' ? 1 : Math.max(0, 3 - (audioForm.speaker ? 1 : 0))
+    const remaining = limit - audioForm.references.length
+    if (remaining <= 0) {
+      notify(kind === 'image' ? '图片参考只能添加 1 张' : '最多使用 3 个音频或声线参考', 'error')
+      return
+    }
+    setAudioUploading(true)
+    try {
+      const uploaded = []
+      for (const file of candidates.slice(0, remaining)) {
+        const body = new FormData()
+        body.append('file', file)
+        body.append('kind', kind)
+        const response = await axios.post('/api/cupsy/assets', body, { timeout: 300000 })
+        const asset = response.data.asset
+        uploaded.push({
+          cupsyAssetId: asset.id,
+          kind,
+          name: asset.name || file.name,
+          preview: asset.content_url,
+          status: asset.status,
+        })
+      }
+      updateAudioForm(form => ({
+        referenceMode: kind,
+        references: [...form.references, ...uploaded],
+      }))
+      notify(`${uploaded.length} 个参考素材已加入 Cupsy Assets`)
+    } catch (error) {
+      notify(error.response?.data?.error || '参考素材上传失败', 'error')
+    } finally {
+      setAudioUploading(false)
+    }
+  }, [audioForm.referenceMode, audioForm.references.length, audioForm.speaker, notify, updateAudioForm])
   const [taskGalleryRevision, setTaskGalleryRevision] = useState(0)
 
   useEffect(() => {
@@ -735,6 +861,9 @@ function App({ onLogout }) {
   const imageSizeSummary = isCustomSeedreamSize
     ? `${activeImgTab.customWidth}×${activeImgTab.customHeight}`
     : `${activeImgTab.aspectRatio === 'auto' ? 'Auto' : activeImgTab.aspectRatio} · ${activeImgTab.resolution}`
+  const transparentBackgroundEligible = isArk
+    && activeImgTab.uploadedImages?.length === 1
+    && activeImgTab.uploadedImages[0]?.hasAlpha === true
   const customSizeStatus = !isArk
     ? '仅 Seedream 支持自定义尺寸'
     : customSizeError
@@ -774,6 +903,11 @@ function App({ onLogout }) {
     if (!referenceSizeIndex || referenceSizeOptions.some(option => String(option.index) === referenceSizeIndex)) return
     setReferenceSizeIndex('')
   }, [referenceSizeIndex, referenceSizeOptionsKey])
+
+  useEffect(() => {
+    if (transparentBackgroundEligible || (activeImgTab.background || 'default') === 'default') return
+    updateImgTab(activeImgTab.id, { background: 'default' })
+  }, [activeImgTab.background, activeImgTab.id, transparentBackgroundEligible, updateImgTab])
 
   const handleCustomDimensionChange = useCallback((dimension, rawValue) => {
     const value = rawValue === '' ? '' : Number(rawValue)
@@ -911,6 +1045,7 @@ function App({ onLogout }) {
     fetchProviderInfo()
     fetchModelInfo()
     fetchVideoProviderInfo()
+    fetchAudioProviderInfo()
   }, [])
 
   useEffect(() => {
@@ -961,6 +1096,20 @@ function App({ onLogout }) {
     }
   }
 
+  const fetchAudioProviderInfo = async () => {
+    try {
+      const response = await axios.get('/api/audio/provider')
+      if (response.data.success) {
+        setAudioProvider({
+          available: Boolean(response.data.providers?.cupsy?.available),
+          sourceReady: response.data.providers?.cupsy?.source_ready !== false,
+        })
+      }
+    } catch (error) {
+      console.error('Failed to fetch audio provider info:', error)
+    }
+  }
+
   const handleImageModelChange = async (newModel) => {
     if (apiProvider === 'ark' || newModel === currentModel) return
     try {
@@ -983,7 +1132,7 @@ function App({ onLogout }) {
   }
   
   const handleSavePrompt = async () => {
-    const p = appMode === 'video' ? activeTab.prompt : activeImgTab.prompt
+    const p = appMode === 'video' ? activeTab.prompt : appMode === 'audio' ? audioForm.prompt : activeImgTab.prompt
     if (!p || !p.trim()) return notify('请先输入提示词', 'error')
     try {
       const response = await axios.post('/api/prompts', { text: p.trim() })
@@ -1008,6 +1157,7 @@ function App({ onLogout }) {
     const requestModel = apiProvider === 'ark' ? undefined : currentModel
     const arkRequestOptions = apiProvider === 'ark' ? {
       output_format: tab.outputFormat || 'png',
+      background: tab.background || 'default',
       watermark: Boolean(tab.watermark),
       ...(tab.aspectRatio === 'custom' ? {
         custom_width: Number(tab.customWidth),
@@ -1112,6 +1262,21 @@ function App({ onLogout }) {
     addVideoReferenceVideos,
     appMode,
   ])
+
+  useEffect(() => {
+    if (appMode !== 'audio') return undefined
+    const handlePaste = event => {
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter(item => item.kind === 'file')
+        .map(item => item.getAsFile())
+        .filter(Boolean)
+      if (!files.some(file => isImageFile(file) || isAudioFile(file))) return
+      event.preventDefault()
+      addAudioReferences(files)
+    }
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [addAudioReferences, appMode])
 
   const handleVideoGenerate = async () => {
     const tab = activeTab
@@ -1235,6 +1400,45 @@ function App({ onLogout }) {
     }
   }
 
+  const handleAudioGenerate = async () => {
+    if (!audioForm.prompt.trim()) {
+      notify('请填写音频提示词', 'error')
+      return
+    }
+    if (!audioProvider.available) {
+      notify('Cupsy 音频端点未配置', 'error')
+      return
+    }
+    if (audioForm.referenceMode === 'image' && audioForm.references.length !== 1) {
+      notify('图片参考模式需要 1 张参考图片', 'error')
+      return
+    }
+    if (audioForm.referenceMode === 'audio' && audioForm.references.length + (audioForm.speaker ? 1 : 0) > 3) {
+      notify('最多使用 3 个音频或声线参考', 'error')
+      return
+    }
+    const revealTimer = window.setTimeout(() => setTaskGalleryRevision(revision => revision + 1), 500)
+    try {
+      const response = await axios.post('/api/audio/generate', {
+        prompt: audioForm.prompt,
+        model: CUPSY_AUDIO_MODEL,
+        output_format: audioForm.outputFormat,
+        sample_rate: Number(audioForm.sampleRate),
+        enable_subtitle: Boolean(audioForm.enableSubtitle),
+        watermark: Boolean(audioForm.watermark),
+        reference_mode: audioForm.referenceMode,
+        speaker: audioForm.referenceMode === 'audio' ? audioForm.speaker : '',
+        cupsy_assets: audioForm.references.map(reference => ({ id: reference.cupsyAssetId })),
+      })
+      notify(`音频任务 #${response.data.task_id} 已创建`)
+    } catch (error) {
+      notify(error.response?.data?.error || error.message || '音频任务创建失败', 'error')
+    } finally {
+      window.clearTimeout(revealTimer)
+      setTaskGalleryRevision(revision => revision + 1)
+    }
+  }
+
   // 左侧面板拖拽调整宽度
   const [panelWidth, setPanelWidth] = useState(400)
   const isDragging = useRef(false)
@@ -1269,7 +1473,7 @@ function App({ onLogout }) {
       setImgTabs([tab])
       setActiveImgTabId(id)
       setAppMode('image')
-    } else {
+    } else if (task.type === 'video') {
       const id = activeTab.id || 1
       const restoredVideos = (params.ref_video_urls || []).map((url, i) => ({
         uid: `restored_${i}_${Date.now()}`,
@@ -1280,6 +1484,7 @@ function App({ onLogout }) {
       const tab = {
         ...makeVideoTab(id),
         prompt: task.prompt || '',
+        provider: task.provider === 'cupsy' ? 'cupsy' : 'ark',
         model: params.model || SEEDANCE_20,
         ratio: params.ratio || 'adaptive',
         duration: params.duration || 5,
@@ -1295,6 +1500,29 @@ function App({ onLogout }) {
       setVideoTabs([tab])
       setActiveVideoTabId(id)
       setAppMode('video')
+    } else if (task.type === 'audio') {
+      const refs = (result.local_refs || []).map((url, index) => {
+        const id = Number(String(url).match(/\/api\/cupsy\/assets\/(\d+)\/content/)?.[1])
+        return {
+          cupsyAssetId: Number.isInteger(id) ? id : null,
+          kind: result.local_ref_types?.[index] || params.reference_mode || 'audio',
+          name: `reference_${index + 1}`,
+          preview: url,
+          status: 'active',
+        }
+      }).filter(reference => reference.cupsyAssetId)
+      updateAudioForm({
+        ...DEFAULT_AUDIO_FORM,
+        prompt: task.prompt || '',
+        outputFormat: params.output_format || 'mp3',
+        sampleRate: Number(params.sample_rate) || 44100,
+        enableSubtitle: params.enable_subtitle !== false,
+        watermark: Boolean(params.watermark),
+        referenceMode: params.reference_mode || (refs[0]?.kind || 'none'),
+        speaker: params.speaker || '',
+        references: refs,
+      })
+      setAppMode('audio')
     }
   }
 
@@ -1327,12 +1555,21 @@ function App({ onLogout }) {
 
   const handleSelectSavedPrompt = (prompt) => {
     if (appMode === 'video') updateTab(activeTab.id, { prompt })
+    else if (appMode === 'audio') updateAudioForm({ prompt })
     else updateImgTab(activeImgTab.id, { prompt })
     setShowPromptCollection(false)
   }
   const imageModelValue = isArk
     ? (imageProviders.ark?.model || 'seedream-5-0-pro')
     : currentModel
+  const currentEditorPrompt = appMode === 'video'
+    ? activeTab.prompt
+    : appMode === 'audio' ? audioForm.prompt : activeImgTab.prompt
+  const setCurrentEditorPrompt = prompt => {
+    if (appMode === 'video') updateTab(activeTab.id, { prompt })
+    else if (appMode === 'audio') updateAudioForm({ prompt })
+    else updateImgTab(activeImgTab.id, { prompt })
+  }
 
   return (
     <div ref={appShellRef} className="app-shell bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative">
@@ -1356,7 +1593,9 @@ function App({ onLogout }) {
             onChange={setAppMode}
             options={[
               { value: 'image', label: '图片', icon: ImageIcon },
+              { value: 'layer', label: '图层', icon: Layers3 },
               { value: 'video', label: '视频', icon: Film },
+              { value: 'audio', label: '音频', icon: AudioLines },
             ]}
           />
         </div>
@@ -1615,11 +1854,33 @@ function App({ onLogout }) {
                    <span className="field-label">格式</span>
                    <select
                      value={activeImgTab.outputFormat || 'png'}
+                     disabled={activeImgTab.background === 'transparent'}
                      onChange={e => updateImgTab(activeImgTab.id, { outputFormat: e.target.value })}
+                     aria-label="图片输出格式"
                      className="field-select font-mono"
                    >
                      <option value="png" className="bg-nexus-bg">PNG</option>
                      <option value="jpeg" className="bg-nexus-bg">JPEG</option>
+                   </select>
+                 </div>
+                 <div className="inspector-field-row">
+                   <span className="field-label" title={transparentBackgroundEligible ? '' : '需要一张带 Alpha 通道的参考图'}>背景</span>
+                   <select
+                     value={activeImgTab.background || 'default'}
+                     disabled={!transparentBackgroundEligible}
+                     onChange={event => {
+                       const background = event.target.value
+                       updateImgTab(activeImgTab.id, {
+                         background,
+                         ...(background === 'transparent' ? { outputFormat: 'png' } : {}),
+                       })
+                     }}
+                     aria-label="图片背景"
+                     className="field-select"
+                   >
+                     <option value="default" className="bg-nexus-bg">默认</option>
+                     <option value="transparent" className="bg-nexus-bg">透明</option>
+                     <option value="opaque" className="bg-nexus-bg">不透明</option>
                    </select>
                  </div>
                  <div className="inspector-field-row">
@@ -1674,7 +1935,11 @@ function App({ onLogout }) {
 
         </aside>
 
-      </>) : (
+      </>) : appMode === 'layer' ? (
+        <React.Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-nexus-muted">正在加载 Layer Studio...</div>}>
+          <LayerStudio notify={notify} />
+        </React.Suspense>
+      ) : appMode === 'video' ? (
         /* ============ VIDEO MODE ============ */
         <>
           {/* 左侧：视频提示词 */}
@@ -1763,12 +2028,19 @@ function App({ onLogout }) {
                     <select
                       aria-label="视频模型"
                       value={effectiveVideoModel}
-                      disabled={activeVideoProvider === 'cupsy'}
+                      title={effectiveVideoModel === SEEDANCE_25_MODERATED
+                        ? 'Seedance 2.5 Enhanced Moderation'
+                        : effectiveVideoModel === SEEDANCE_25 ? 'Seedance 2.5' : 'Seedance 2.0'}
                       onChange={e => handleVideoModelChange(e.target.value)}
                       className="field-select min-w-0"
                     >
-                      {activeVideoProvider === 'ark' && <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>}
-                      <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
+                      {activeVideoProvider === 'ark' ? (<>
+                        <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>
+                        <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
+                      </>) : (<>
+                        <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
+                        <option value={SEEDANCE_25_MODERATED} className="bg-nexus-bg">2.5 · 加强审核</option>
+                      </>)}
                     </select>
                   </div>
                   <div className="inspector-field-row">
@@ -2150,7 +2422,7 @@ function App({ onLogout }) {
                     return (<>
                       <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatCnyEstimate(estimate)}</div>
                       <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
-                        <div>{isSeedance25 ? 'Seedance 2.5 · 官方费率' : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
+                        <div>{effectiveVideoModel === SEEDANCE_25_MODERATED ? 'Seedance 2.5 · 加强审核' : isSeedance25 ? 'Seedance 2.5 · 官方费率' : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
                         <div>{estimate.width}×{estimate.height} · {outputDuration} · {estimate.fps}fps</div>
                         <div>{inputVideo}</div>
                         <div className="mt-1 opacity-50">≈{formatWanTokens(estimate.minimumTokens, estimate.maximumTokens)}{estimate.ratioAssumed ? ' · Adaptive 按 16:9' : ''}</div>
@@ -2160,6 +2432,140 @@ function App({ onLogout }) {
                 </div>
               </div>
 
+          </aside>
+        </>
+      ) : (
+        /* ============ AUDIO MODE ============ */
+        <>
+          <section className="prompt-pane relative z-20">
+            <div className="flex min-h-0 flex-grow flex-col">
+              <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
+                <span className="text-xs font-medium text-nexus-text-light">音频场景提示词</span>
+                <span className={`font-mono text-[11px] ${audioForm.prompt.length > 3000 ? 'text-nexus-red' : 'text-nexus-muted'}`}>{audioForm.prompt.length} / 3000</span>
+              </div>
+              <textarea
+                aria-label="音频提示词"
+                value={audioForm.prompt}
+                maxLength={3000}
+                onChange={event => updateAudioForm({ prompt: event.target.value })}
+                className="min-h-0 flex-grow resize-none bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
+                placeholder="描述对白、音乐、环境声、音效及时间关系；使用 @Audio1 引用音频素材..."
+              />
+            </div>
+            <div className="prompt-actions z-10 border-t border-nexus-border p-3">
+              <button type="button" onClick={handleAudioGenerate} className="btn-base btn-primary min-h-11 w-full">
+                <Play size={14} fill="currentColor" /> <span>生成音频</span>
+              </button>
+            </div>
+          </section>
+
+          <div
+            onMouseDown={handleDragStart}
+            onKeyDown={handleResizeKeyDown}
+            className="workspace-resizer z-20"
+            role="separator"
+            tabIndex={0}
+            aria-orientation="vertical"
+            aria-valuemin={300}
+            aria-valuemax={560}
+            aria-valuenow={panelWidth}
+            aria-label="调整提示词面板宽度"
+          />
+
+          <section className="canvas-pane">
+            <div className="canvas-grid" />
+            <TaskGallery mode="audio" refreshToken={taskGalleryRevision} onReuseTask={handleLoadTask} />
+          </section>
+
+          <aside className="inspector-pane custom-scrollbar">
+            <div className="inspector-header">
+              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-cyan" />音频参数</div>
+              <span className="font-mono text-[11px] text-nexus-muted">{audioForm.outputFormat.toUpperCase()} · {(audioForm.sampleRate / 1000).toFixed(audioForm.sampleRate % 1000 ? 1 : 0)} kHz</span>
+            </div>
+
+            <div className="inspector-section">
+              <div className="inspector-title"><Cpu size={14} className="text-nexus-cyan" /> 生成设置</div>
+              <div className="inspector-fields">
+                <div className="inspector-field-row">
+                  <span className="field-label">端点</span>
+                  <select aria-label="音频端点" value="cupsy" disabled className="field-select"><option value="cupsy" className="bg-nexus-bg">Cupsy{audioProvider.available ? '' : ' · 未配置'}</option></select>
+                </div>
+                <div className="inspector-field-row">
+                  <span className="field-label">模型</span>
+                  <select aria-label="音频模型" value={CUPSY_AUDIO_MODEL} disabled className="field-select"><option value={CUPSY_AUDIO_MODEL} className="bg-nexus-bg">Seed Audio 1.0</option></select>
+                </div>
+                <div className="inspector-field-row">
+                  <span className="field-label">格式</span>
+                  <select aria-label="音频输出格式" value={audioForm.outputFormat} onChange={event => updateAudioForm({ outputFormat: event.target.value })} className="field-select font-mono">
+                    <option value="mp3" className="bg-nexus-bg">MP3</option>
+                    <option value="wav" className="bg-nexus-bg">WAV</option>
+                    <option value="ogg_opus" className="bg-nexus-bg">OGG Opus</option>
+                  </select>
+                </div>
+                <div className="inspector-field-row">
+                  <span className="field-label">采样率</span>
+                  <select aria-label="音频采样率" value={audioForm.sampleRate} onChange={event => updateAudioForm({ sampleRate: Number(event.target.value) })} className="field-select font-mono">
+                    {AUDIO_SAMPLE_RATES.map(rate => <option key={rate} value={rate} className="bg-nexus-bg">{rate === 44100 ? '44.1' : rate / 1000} kHz</option>)}
+                  </select>
+                </div>
+                <div className="inspector-field-row"><span className="field-label">生成字幕</span><ToggleSwitch label="生成字幕" checked={audioForm.enableSubtitle} onChange={enableSubtitle => updateAudioForm({ enableSubtitle })} /></div>
+                <div className="inspector-field-row"><span className="field-label">可听水印</span><ToggleSwitch label="可听水印" checked={audioForm.watermark} onChange={watermark => updateAudioForm({ watermark })} /></div>
+              </div>
+            </div>
+
+            <div className="inspector-section">
+              <div className="inspector-title justify-between">
+                <span className="flex items-center gap-2"><HardDrive size={14} className="text-nexus-violet" /> 参考素材</span>
+                <button type="button" className="cupsy-library-button" onClick={() => setShowCupsyAssets(true)}><Library size={13} /> 素材库</button>
+              </div>
+              <SegmentedControl
+                label="音频参考模式"
+                value={audioForm.referenceMode}
+                onChange={referenceMode => updateAudioForm({ referenceMode, references: [], ...(referenceMode !== 'audio' ? { speaker: '' } : {}) })}
+                options={[{ value: 'none', label: '纯文本' }, { value: 'audio', label: '音频' }, { value: 'image', label: '图片' }]}
+              />
+              {audioForm.referenceMode === 'audio' && (
+                <div className="inspector-field-row mt-3">
+                  <span className="field-label">预设声线</span>
+                  <select aria-label="音频预设声线" value={audioForm.speaker} onChange={event => {
+                    const speaker = event.target.value
+                    const maxAssets = speaker ? 2 : 3
+                    updateAudioForm(form => ({ speaker, references: form.references.slice(0, maxAssets) }))
+                  }} className="field-select">
+                    {AUDIO_SPEAKERS.map(item => <option key={item.value || 'auto'} value={item.value} className="bg-nexus-bg">{item.label}</option>)}
+                  </select>
+                </div>
+              )}
+              {audioForm.referenceMode !== 'none' && (
+                <div
+                  className="audio-reference-drop-zone mt-3"
+                  data-dragging="false"
+                  {...videoDropZoneHandlers(addAudioReferences)}
+                >
+                  <div className="grid grid-cols-3 gap-2">
+                    {audioForm.references.map((reference, index) => (
+                      <div key={`${reference.cupsyAssetId}-${index}`} className="audio-reference-card group relative">
+                        <button type="button" className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2" onClick={() => setReferenceMedia({ type: reference.kind, src: reference.preview, name: reference.name })}>
+                          {reference.kind === 'image' ? <img src={reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
+                          {reference.kind === 'audio' && <span className="w-full truncate text-center text-[9px] text-nexus-muted">@Audio{index + (audioForm.speaker ? 2 : 1)}</span>}
+                        </button>
+                        <button type="button" aria-label={`删除参考素材 ${index + 1}`} onClick={() => updateAudioForm(form => ({ references: form.references.filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white opacity-0 group-hover:opacity-100 hover:bg-nexus-red"><X size={10} /></button>
+                      </div>
+                    ))}
+                    {audioForm.references.length < (audioForm.referenceMode === 'image' ? 1 : 3 - (audioForm.speaker ? 1 : 0)) && (
+                      <label className="audio-reference-add">
+                        <Plus size={15} />
+                        <span>{audioUploading ? '上传中' : '添加'}</span>
+                        <input type="file" className="hidden" disabled={audioUploading} multiple={audioForm.referenceMode === 'audio'} accept={audioForm.referenceMode === 'image' ? 'image/*' : 'audio/wav,audio/mp3,audio/mpeg'} onChange={event => { addAudioReferences(event.target.files); event.target.value = '' }} />
+                      </label>
+                    )}
+                  </div>
+                  <div className="mt-2 font-mono text-[9px] text-nexus-muted">
+                    {audioForm.referenceMode === 'audio' ? '按顺序对应 @Audio1–@Audio3' : '图片用于引导完整音频场景'}
+                  </div>
+                </div>
+              )}
+            </div>
           </aside>
         </>
       )}
@@ -2197,7 +2603,8 @@ function App({ onLogout }) {
       <ReferenceMediaModal media={referenceMedia} onClose={() => setReferenceMedia(null)} />
       <CupsyAssetManager
         open={showCupsyAssets}
-        mode={activeTab.mode}
+        mode={appMode === 'audio' ? 'audio' : activeTab.mode}
+        allowedKinds={appMode === 'audio' ? ['image', 'audio'] : undefined}
         onClose={() => setShowCupsyAssets(false)}
         onUse={useCupsyAsset}
         onPreview={setReferenceMedia}
@@ -2220,11 +2627,11 @@ function App({ onLogout }) {
                 <div className="flex min-w-0 items-center gap-2 text-sm text-nexus-text-light">
                   <Maximize2 size={15} className="shrink-0 text-nexus-blue" />
                   <span className="font-semibold">提示词编辑器</span>
-                  <span className="truncate font-mono text-[11px] text-nexus-muted">{appMode === 'video' ? 'video_prompt' : 'image_prompt'}</span>
+                  <span className="truncate font-mono text-[11px] text-nexus-muted">{appMode === 'video' ? 'video_prompt' : appMode === 'audio' ? 'audio_prompt' : 'image_prompt'}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <IconButton label="提示词库" onClick={() => setShowEditorVault(!showEditorVault)} className={showEditorVault ? 'border-nexus-violet/35 bg-nexus-violet/10 text-nexus-violet' : ''}><Library size={16} /></IconButton>
-                  <IconButton label="保存提示词" onClick={handleSavePrompt} disabled={!(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).trim()}><Save size={16} /></IconButton>
+                  <IconButton label="保存提示词" onClick={handleSavePrompt} disabled={!currentEditorPrompt.trim()}><Save size={16} /></IconButton>
                   <IconButton label="关闭编辑器" onClick={() => { setShowFullEditor(false); setShowEditorVault(false) }}><X size={17} /></IconButton>
                 </div>
               </div>
@@ -2233,7 +2640,7 @@ function App({ onLogout }) {
               <div className="flex-grow flex min-h-0 relative">
                 {/* 行号 */}
                 <div className="editor-gutter w-14 shrink-0 select-none overflow-hidden border-r border-nexus-border bg-nexus-panel py-4 pr-3 text-right font-mono text-xs text-nexus-muted/60">
-                  {Array.from({ length: Math.max(50, (appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).split('\n').length) }, (_, i) => (
+                  {Array.from({ length: Math.max(50, currentEditorPrompt.split('\n').length) }, (_, i) => (
                     <div key={i} className="h-6 leading-6">{i + 1}</div>
                   ))}
                 </div>
@@ -2241,8 +2648,8 @@ function App({ onLogout }) {
                 <textarea
                   autoFocus
                   aria-label="编辑提示词"
-                  value={appMode === 'video' ? activeTab.prompt : activeImgTab.prompt}
-                  onChange={(e) => appMode === 'video' ? updateTab(activeTab.id, { prompt: e.target.value }) : updateImgTab(activeImgTab.id, { prompt: e.target.value })}
+                  value={currentEditorPrompt}
+                  onChange={(e) => setCurrentEditorPrompt(e.target.value)}
                   className="min-w-0 flex-grow resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent p-4 font-mono text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar"
                   spellCheck="true"
                   placeholder="输入提示词..."
@@ -2251,15 +2658,15 @@ function App({ onLogout }) {
                 {showEditorVault && (
                   <aside className="editor-vault liquid-glass-strong flex w-[360px] shrink-0 flex-col overflow-hidden">
                     <div className="flex h-10 shrink-0 items-center gap-2 border-b border-nexus-border px-3 text-xs font-semibold text-nexus-text-light"><Library size={14} className="text-nexus-violet" />提示词库</div>
-                    <PromptCollection onSelectPrompt={(p) => appMode === 'video' ? updateTab(activeTab.id, { prompt: p }) : updateImgTab(activeImgTab.id, { prompt: p })} />
+                    <PromptCollection onSelectPrompt={setCurrentEditorPrompt} />
                   </aside>
                 )}
               </div>
 
               {/* 底栏 */}
               <div className="flex h-8 shrink-0 items-center gap-4 border-t border-nexus-border bg-nexus-panel px-4 font-mono text-xs text-nexus-muted">
-                <span>行 {(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).split('\n').length}</span>
-                <span>字符 {(appMode === 'video' ? activeTab.prompt : activeImgTab.prompt).length}</span>
+                <span>行 {currentEditorPrompt.split('\n').length}</span>
+                <span>字符 {currentEditorPrompt.length}</span>
               </div>
             </motion.div>
           )}
@@ -2275,7 +2682,7 @@ function App({ onLogout }) {
             exit={{ opacity: 0, y: 8 }}
             role={notification.tone === 'error' ? 'alert' : 'status'}
             aria-live="polite"
-            className={`fixed bottom-4 right-4 z-[1200] flex max-w-[calc(100vw-32px)] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
+            className={`fixed ${appMode === 'layer' ? 'bottom-24 right-[308px]' : 'bottom-4 right-4'} z-[1200] flex max-w-[calc(100vw-32px)] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
           >
             {notification.tone === 'error' ? <CircleAlert size={15} /> : <Check size={15} className="text-nexus-green" />}
             {notification.message}

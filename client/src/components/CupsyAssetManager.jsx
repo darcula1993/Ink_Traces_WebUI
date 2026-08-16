@@ -9,7 +9,7 @@ const KIND_ICON = {
   audio: AudioLines,
 }
 
-function CupsyAssetManager({ open, mode, onClose, onUse, onPreview, notify }) {
+function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview, notify }) {
   const [assets, setAssets] = useState([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -92,6 +92,7 @@ function CupsyAssetManager({ open, mode, onClose, onUse, onPreview, notify }) {
           {assets.map(asset => {
             const KindIcon = KIND_ICON[asset.kind] || Library
             const ready = asset.status === 'active'
+            const allowed = !allowedKinds || allowedKinds.includes(asset.kind)
             return (
               <article className="cupsy-asset-card" key={asset.id}>
                 <button type="button" className="cupsy-asset-preview" onClick={() => onPreview({ type: asset.kind, src: asset.content_url, name: asset.name })}>
@@ -110,7 +111,7 @@ function CupsyAssetManager({ open, mode, onClose, onUse, onPreview, notify }) {
                     <button type="button" disabled={!ready} onClick={() => onUse(asset, 'first_frame')}>首帧</button>
                     <button type="button" disabled={!ready} onClick={() => onUse(asset, 'last_frame')}>尾帧</button>
                   </> : (
-                    <button type="button" disabled={!ready || mode === 'keyframe'} onClick={() => onUse(asset, `reference_${asset.kind}`)}>引用</button>
+                    <button type="button" disabled={!ready || mode === 'keyframe' || !allowed} title={allowed ? '引用素材' : '当前模式不支持此素材'} onClick={() => onUse(asset, `reference_${asset.kind}`)}>引用</button>
                   )}
                   <button type="button" className="danger" title="删除素材" aria-label={`删除素材 ${asset.name || asset.id}`} onClick={() => deleteAsset(asset)}><Trash2 size={13} /></button>
                 </div>

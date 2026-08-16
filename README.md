@@ -116,13 +116,22 @@ Dreamina Seedance 2.5 reuses `video.ark.api_key`. Configure its endpoint ID in `
 
 Cupsy is available as a separate Seedance 2.5 video endpoint. Keep its key out
 of the repository and provide it with `CUPSY_API_KEY` (or the ignored local
-`video.cupsy.api_key`). Reference media is imported through Cupsy Assets, so
+`video.cupsy.api_key`). Video and Seed Audio reference media is imported through Cupsy Assets, so
 `CUPSY_SOURCE_BASE_URL` or `video.cupsy.source_base_url` must be a public
 HTTP(S) origin that routes back to this application. HTTPS is recommended so
 signed source URLs are not sent in cleartext. The backend exposes only a
 short-lived signed source URL; generated videos are downloaded locally and are
 never imported into Assets. See `doc/cupsy_compatibility.md` for the verified
 provider contract.
+
+The desktop audio workspace uses Cupsy `seed-audio-1.0` by default. It supports
+MP3, WAV, and OGG Opus output, 8-48 kHz sample rates, optional subtitles and
+audible watermarking, up to three ordered audio/speaker references, or one
+image reference. Audio and image reference modes are mutually exclusive.
+
+The Cupsy endpoint exposes both `seedance-2.5` and
+`seedance-2.5-moderated`; the latter uses the same declared generation
+capabilities with enhanced content moderation.
 
 ### IP-only HTTPS for Cupsy sources
 
@@ -185,6 +194,8 @@ Ink_Traces_WebUI/
 | `POST /api/video/generate` | Submit video generation task |
 | `GET/POST /api/cupsy/assets` | List or import reusable Cupsy reference Assets |
 | `GET/DELETE /api/cupsy/assets/:id` | Preview or delete a Cupsy Asset |
+| `GET /api/audio/provider` | Read Cupsy Seed Audio availability and capabilities |
+| `POST /api/audio/generate` | Queue a Cupsy Seed Audio full-scene audio task |
 | `GET /api/tasks` | List local task history |
 | `GET/DELETE /api/tasks/:id` | Restore or delete local task |
 | `POST /api/upload_video` | Upload reference video for external provider access |

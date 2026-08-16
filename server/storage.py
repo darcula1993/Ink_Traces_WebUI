@@ -111,6 +111,7 @@ def _png_itxt_chunk(keyword, value):
 def ensure_storage_dirs():
     os.makedirs(os.path.join(OUTPUT_DIR, 'image'), exist_ok=True)
     os.makedirs(os.path.join(OUTPUT_DIR, 'video'), exist_ok=True)
+    os.makedirs(os.path.join(OUTPUT_DIR, 'audio'), exist_ok=True)
     os.makedirs(UPLOAD_VIDEO_DIR, exist_ok=True)
     os.makedirs(WORKSPACE_ASSET_DIR, exist_ok=True)
 
@@ -135,11 +136,40 @@ def atomic_write(path, data):
             os.remove(temp_path)
 
 
+def image_has_alpha(image):
+    """Return whether the source image carries an alpha/transparency channel."""
+    return 'A' in image.getbands() or 'transparency' in image.info
+
+
+def inspect_image(source):
+    """Return provider-relevant image metadata without changing the source."""
+    with Image.open(source) as image:
+        image.load()
+        return {
+            'format': str(image.format or '').lower(),
+            'width': int(image.width),
+            'height': int(image.height),
+            'pixels': int(image.width * image.height),
+            'has_alpha': bool(image_has_alpha(image)),
+        }
+
+
+def inspect_uploaded_image(file_storage):
+    file_storage.stream.seek(0)
+    try:
+        return inspect_image(file_storage.stream)
+    finally:
+        file_storage.stream.seek(0)
+
+
 def save_normalized_image(image, path, output_format='PNG'):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     temp_path = f'{path}.{uuid.uuid4().hex}.tmp'
+    normalized_format = str(output_format or 'PNG').upper()
     try:
-        image.convert('RGB').save(temp_path, format=output_format)
+        supports_alpha = normalized_format in {'PNG', 'WEBP', 'TIFF'}
+        target_mode = 'RGBA' if supports_alpha and image_has_alpha(image) else 'RGB'
+        image.convert(target_mode).save(temp_path, format=normalized_format)
         os.replace(temp_path, path)
     finally:
         if os.path.exists(temp_path):
@@ -227,12 +257,15 @@ def persist_workspace_upload(key, file_storage, chunk_size=1024 * 1024, normaliz
             os.remove(temp_path)
         else:
             os.replace(temp_path, path)
-        return {
+        asset = {
             'url': f'/api/workspace/assets/{key}/{filename}',
             'name': file_storage.filename or filename,
             'mime_type': mime_type,
             'size_bytes': size_bytes,
         }
+        if mime_type.startswith('image/'):
+            asset.update(inspect_image(path))
+        return asset
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -447,7 +480,7 @@ def cleanup_orphans(grace_seconds=24 * 60 * 60):
                 os.remove(path)
                 removed_files += 1
 
-    for task_type in ('image', 'video'):
+    for task_type in ('image', 'video', 'audio'):
         root = os.path.join(OUTPUT_DIR, task_type)
         if not os.path.isdir(root):
             continue

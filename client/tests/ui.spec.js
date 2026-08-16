@@ -117,6 +117,19 @@ async function pasteFiles(page, files) {
   }, files)
 }
 
+async function dragReference(source, target) {
+  const targetHandle = await target.elementHandle()
+  await source.evaluate((sourceElement, targetElement) => {
+    const transfer = new DataTransfer()
+    sourceElement.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    targetElement.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    targetElement.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    targetElement.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+    sourceElement.dispatchEvent(new DragEvent('dragend', { bubbles: true, cancelable: true, dataTransfer: transfer }))
+  }, targetHandle)
+  await targetHandle.dispose()
+}
+
 test('workspace persistence ignores server JSON key ordering', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Persistence only needs one browser run')
   const workspacePuts = []
@@ -125,6 +138,7 @@ test('workspace persistence ignores server JSON key ordering', async ({ page }, 
       img_tabs: [{
         watermark: false,
         outputFormat: 'png',
+        background: 'default',
         uploadedImages: [],
         sessionId: null,
         chatMode: false,
@@ -164,6 +178,133 @@ test('workspace persistence ignores server JSON key ordering', async ({ page }, 
   await page.waitForTimeout(1_600)
   expect(workspacePuts.filter(key => key === 'img_tabs')).toHaveLength(0)
   expect(workspacePuts.filter(key => key === 'vid_tabs')).toHaveLength(0)
+})
+
+test('transparent background controls and Layer Studio workspace', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Layer Studio is desktop-first')
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mNkYPj/n4GBgYGJAQoAHgQCAf2gKJYAAAAASUVORK5CYII=', 'base64')
+  let project = null
+  let savedLayerDocument = null
+
+  await page.route('**/api/images/inspect', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, image: { format: 'png', width: 2, height: 2, pixels: 4, has_alpha: true } }),
+  }))
+  await page.route('**/api/layer/projects/7', async route => {
+    if (route.request().method() === 'PUT') {
+      savedLayerDocument = route.request().postDataJSON().document
+      project = { ...project, document: savedLayerDocument, document_revision: project.document_revision + 1 }
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, project }),
+    })
+  })
+  await page.route('**/api/layer/projects', async route => {
+    if (route.request().method() === 'POST') {
+      project = {
+        id: 7,
+        name: 'studio-source',
+        document: {},
+        document_revision: 1,
+        revisions: [],
+        current_task: { id: 77, type: 'layer', status: 'pending', progress: 0, prompt: 'Separate subject and background', params: { size: 'auto' } },
+      }
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, project_id: 7, task_id: 77, project }),
+      })
+      return
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, projects: project ? [project] : [] }),
+    })
+  })
+  await page.route('**/api/layer/projects/7/source', route => route.fulfill({ status: 200, contentType: 'image/png', body: png }))
+  await page.route('**/api/tasks/77/file/*', route => route.fulfill({ status: 200, contentType: 'image/png', body: png }))
+
+  await login(page)
+  await page.getByLabel('选择参考图片').setInputFiles({ name: 'alpha.png', mimeType: 'image/png', buffer: png })
+  await expect(page.getByLabel('图片背景')).toBeEnabled()
+  await page.getByLabel('图片背景').selectOption('transparent')
+  await expect(page.getByLabel('图片输出格式')).toHaveValue('png')
+  await expect(page.getByLabel('图片输出格式')).toBeDisabled()
+
+  await page.getByRole('button', { name: '图层' }).click()
+  const studio = page.getByTestId('layer-studio')
+  await expect(studio).toBeVisible()
+  await page.locator('.layer-studio-empty input[type="file"]').setInputFiles({ name: 'studio-source.png', mimeType: 'image/png', buffer: png })
+  await page.getByLabel('图层分解提示词').fill('Separate subject and background')
+  await page.getByRole('button', { name: '分解图层' }).click()
+  await expect(page.getByText('正在构建图层')).toBeVisible()
+
+  const layout = await page.evaluate(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect()
+    const canvas = rect('.layer-studio-canvas')
+    const right = rect('.layer-studio-right')
+    const dock = rect('.layer-prompt-dock')
+    const command = rect('.layer-studio-commandbar')
+    return {
+      canvasRight: canvas.right,
+      rightLeft: right.left,
+      canvasBottom: canvas.bottom,
+      dockTop: dock.top,
+      commandBottom: command.bottom,
+      canvasTop: canvas.top,
+    }
+  })
+  expect(Math.abs(layout.canvasRight - layout.rightLeft)).toBeLessThanOrEqual(1)
+  expect(Math.abs(layout.canvasBottom - layout.dockTop)).toBeLessThanOrEqual(1)
+  expect(Math.abs(layout.commandBottom - layout.canvasTop)).toBeLessThanOrEqual(1)
+  await studio.screenshot({ path: testInfo.outputPath('layer-studio-processing.png') })
+
+  project = {
+    ...project,
+    current_task: { ...project.current_task, status: 'succeeded', progress: 100 },
+    document_revision: 2,
+    document: {
+      canvas: { width: 2, height: 2, background: 'transparent' },
+      selected_layer_id: '77:1',
+      task_id: 77,
+      layers: [{
+        id: '77:0', z_index: 0, name: 'Base', description: '',
+        local_url: '/api/tasks/77/file/base.png', thumbnail_url: '/api/tasks/77/file/base_thumb.png',
+        x: 0, y: 0, display_width: 2, display_height: 2, rotation: 0,
+        opacity: 1, visible: true, locked: true, size: '2x2',
+      }, {
+        id: '77:1', z_index: 1, name: 'Subject', description: 'movable layer',
+        local_url: '/api/tasks/77/file/layer_01.png', thumbnail_url: '/api/tasks/77/file/layer_01_thumb.png',
+        x: 0, y: 0, display_width: 1, display_height: 1, rotation: 0,
+        opacity: 1, visible: true, locked: false, size: '1x1',
+      }],
+    },
+    revisions: [{ id: 1, task_id: 77, prompt: project.current_task.prompt, size: 'auto', document: {} }],
+  }
+  await expect(page.getByText('Base', { exact: true })).toBeVisible({ timeout: 6_000 })
+  await expect(page.getByText('Subject', { exact: true })).toBeVisible()
+  await expect.poll(() => page.locator('.layer-studio-canvas canvas').first().evaluate(canvas => {
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+    return Array.from(pixels).some(value => value !== 0)
+  })).toBe(true)
+
+  const canvasBox = await page.locator('.layer-studio-canvas').boundingBox()
+  const startX = canvasBox.x + canvasBox.width / 2 - 120
+  const startY = canvasBox.y + canvasBox.height / 2 - 120
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.waitForTimeout(100)
+  await page.mouse.move(startX + 70, startY + 45, { steps: 8 })
+  await page.waitForTimeout(100)
+  await page.mouse.up()
+  await expect(page.locator('.layer-studio-canvas')).toHaveAttribute('data-pan-x', '0')
+  await expect.poll(() => Number(savedLayerDocument?.layers?.find(layer => layer.id === '77:1')?.x) || 0).toBeGreaterThan(0)
+  expect(savedLayerDocument.layers.find(layer => layer.id === '77:0').x).toBe(0)
+  await studio.screenshot({ path: testInfo.outputPath('layer-studio-editor.png') })
 })
 
 test('Seedance 2.5 exposes model capabilities and submits its stable alias', async ({ page }, testInfo) => {
@@ -213,8 +354,59 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await page.screenshot({ path: testInfo.outputPath('desktop-seedance-2.5.png') })
 })
 
+test('Seed Audio workspace submits Cupsy full-scene audio parameters', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Audio workspace is desktop focused')
+  let submitted = null
+  await page.route('**/api/audio/provider', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      current: 'cupsy',
+      providers: { cupsy: { available: true, source_ready: true, models: ['seed-audio-1.0'] } },
+      capabilities: {
+        formats: ['mp3', 'wav', 'ogg_opus'],
+        sample_rates: [8000, 16000, 24000, 32000, 44100, 48000],
+      },
+    }),
+  }))
+  await page.route('**/api/audio/generate', route => {
+    submitted = route.request().postDataJSON()
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, queued: true, task_id: 2800, provider: 'cupsy' }),
+    })
+  })
+  await login(page)
+
+  await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '音频', exact: true }).click()
+  await expect(page.getByText('音频参数')).toBeVisible()
+  await expect(page.getByLabel('音频端点')).toHaveValue('cupsy')
+  await expect(page.getByLabel('音频模型')).toHaveValue('seed-audio-1.0')
+  await page.getByLabel('音频输出格式').selectOption('wav')
+  await page.getByLabel('音频采样率').selectOption('48000')
+  await page.getByRole('group', { name: '音频参考模式' }).getByRole('button', { name: '音频', exact: true }).click()
+  await page.getByLabel('音频预设声线').selectOption('kian')
+  await page.getByLabel('音频提示词').fill('A calm host introduces a midnight technology program over a restrained ambient score.')
+  await page.getByRole('button', { name: '生成音频' }).click()
+
+  await expect.poll(() => submitted).not.toBeNull()
+  expect(submitted).toMatchObject({
+    model: 'seed-audio-1.0',
+    output_format: 'wav',
+    sample_rate: 48000,
+    reference_mode: 'audio',
+    speaker: 'kian',
+    enable_subtitle: true,
+    watermark: false,
+  })
+  await page.screenshot({ path: testInfo.outputPath('desktop-seed-audio.png') })
+})
+
 test('Cupsy endpoint reuses active Assets from the solid asset manager', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Cupsy asset manager is desktop focused')
+  let submitted = null
   await page.route('**/api/video/provider', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -224,10 +416,18 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
       fast_available: true,
       providers: {
         ark: { available: true, models: ['seedance-2.0', 'seedance-2.5'] },
-        cupsy: { available: true, source_ready: true, models: ['seedance-2.5'] },
+        cupsy: { available: true, source_ready: true, models: ['seedance-2.5', 'seedance-2.5-moderated'] },
       },
     }),
   }))
+  await page.route('**/api/video/generate', route => {
+    submitted = route.request().postDataJSON()
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, queued: true, db_task_id: 2600, provider: 'cupsy' }),
+    })
+  })
   await page.route('**/api/cupsy/assets', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -258,7 +458,16 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
 
   await page.getByLabel('视频端点').selectOption('cupsy')
   await expect(page.getByLabel('视频模型')).toHaveValue('seedance-2.5')
-  await expect(page.getByLabel('视频模型')).toBeDisabled()
+  await expect(page.getByLabel('视频模型')).toBeEnabled()
+  await expect(page.getByLabel('视频模型').locator('option')).toHaveText([
+    'Seedance 2.5',
+    '2.5 · 加强审核',
+  ])
+  await page.getByLabel('视频模型').selectOption('seedance-2.5-moderated')
+  await page.getByLabel('视频提示词').fill('A restrained cinematic product shot')
+  await page.getByRole('button', { name: '生成视频' }).click()
+  await expect.poll(() => submitted).not.toBeNull()
+  expect(submitted.model).toBe('seedance-2.5-moderated')
   await expect(page.getByLabel('视频时长').locator('option[value="-1"]')).toHaveCount(0)
   await page.getByLabel('视频生成模式').selectOption('reference')
   await page.getByRole('button', { name: '素材库' }).click()
@@ -852,6 +1061,8 @@ test('task gallery favorites persist and details open in a large modal', async (
   const workspaceState = await login(page, { mockTasks: false, mockGroups: false })
   const historyCard = page.getByTestId('task-gallery-card').filter({ hasText: task.prompt })
   await expect(historyCard).toBeVisible()
+  await historyCard.hover()
+  await expect(historyCard.getByRole('button', { name: '删除任务' })).toBeVisible()
   await historyCard.getByRole('button', { name: '收藏任务' }).click()
   await expect(historyCard.getByRole('button', { name: '取消收藏任务' })).toBeVisible()
 
@@ -1335,6 +1546,7 @@ test('reference materials can be reordered and generation preserves that order',
       img_tabs: [{
         id: 1,
         prompt: '',
+        background: 'default',
         uploadedImages: [
           { name: 'image-first.png', preview: assets.imageFirst },
           { name: 'image-second.png', preview: assets.imageSecond },
@@ -1361,18 +1573,18 @@ test('reference materials can be reordered and generation preserves that order',
     },
   })
 
-  await page.getByRole('button', { name: /调整参考图片 1 顺序/ }).dragTo(page.getByTestId('image-reference-item-1'))
+  await dragReference(page.getByRole('button', { name: /调整参考图片 1 顺序/ }), page.getByTestId('image-reference-item-1'))
   await expect(page.getByAltText('参考图片 1')).toHaveAttribute('src', assets.imageSecond)
   await page.getByLabel('图片提示词').fill('Reference order test')
   await page.getByRole('button', { name: '生成图片' }).click()
   await expect.poll(() => imageSubmission?.image_urls).toEqual([assets.imageSecond, assets.imageFirst])
 
   await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '视频', exact: true }).click()
-  await page.getByRole('button', { name: /调整视频参考图片 1 顺序/ }).dragTo(page.getByTestId('video-reference-image-item-1'))
-  await page.getByRole('button', { name: /调整参考视频 1 顺序/ }).dragTo(page.getByTestId('video-reference-video-item-1'))
+  await dragReference(page.getByRole('button', { name: /调整视频参考图片 1 顺序/ }), page.getByTestId('video-reference-image-item-1'))
+  await dragReference(page.getByRole('button', { name: /调整参考视频 1 顺序/ }), page.getByTestId('video-reference-video-item-1'))
   const audioTarget = page.getByTestId('video-reference-audio-item-1')
   await audioTarget.scrollIntoViewIfNeeded()
-  await page.getByRole('button', { name: /调整参考音频 1 顺序/ }).dragTo(audioTarget)
+  await dragReference(page.getByRole('button', { name: /调整参考音频 1 顺序/ }), audioTarget)
 
   await page.getByRole('button', { name: '打开视频参考图片 1' }).click()
   await expect(page.getByRole('dialog', { name: '参考图片预览' })).toContainText('video-image-second.png')

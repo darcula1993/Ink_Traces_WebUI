@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react'
 import { GripVertical } from 'lucide-react'
 
 const REFERENCE_DRAG_TYPE = 'application/x-ink-traces-reference-order'
+let activeReferenceDrag = null
 
 export function moveArrayItem(items, fromIndex, toIndex) {
   const source = Array.isArray(items) ? items : []
@@ -20,7 +21,8 @@ export function moveArrayItem(items, fromIndex, toIndex) {
 }
 
 function acceptsReferenceDrag(event) {
-  return Array.from(event.dataTransfer?.types || []).includes(REFERENCE_DRAG_TYPE)
+  return Boolean(activeReferenceDrag)
+    || Array.from(event.dataTransfer?.types || []).includes(REFERENCE_DRAG_TYPE)
 }
 
 export default function SortableReferenceItem({
@@ -40,7 +42,8 @@ export default function SortableReferenceItem({
   const handleDragStart = event => {
     event.stopPropagation()
     event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData(REFERENCE_DRAG_TYPE, JSON.stringify({ listId, index }))
+    activeReferenceDrag = { listId, index }
+    event.dataTransfer.setData(REFERENCE_DRAG_TYPE, JSON.stringify(activeReferenceDrag))
     const bounds = itemRef.current?.getBoundingClientRect()
     if (itemRef.current && bounds) {
       const offsetX = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left))
@@ -69,7 +72,8 @@ export default function SortableReferenceItem({
     event.stopPropagation()
     setDropTarget(false)
     try {
-      const source = JSON.parse(event.dataTransfer.getData(REFERENCE_DRAG_TYPE))
+      const encoded = event.dataTransfer.getData(REFERENCE_DRAG_TYPE)
+      const source = encoded ? JSON.parse(encoded) : activeReferenceDrag
       if (source.listId === listId) onMove?.(Number(source.index), index)
     } catch {
       // Ignore malformed drag payloads from outside this list.
@@ -108,7 +112,7 @@ export default function SortableReferenceItem({
         className="reference-sort-handle"
         onClick={event => event.stopPropagation()}
         onDragStart={handleDragStart}
-        onDragEnd={() => { setDragging(false); setDropTarget(false) }}
+        onDragEnd={() => { activeReferenceDrag = null; setDragging(false); setDropTarget(false) }}
         onKeyDown={handleKeyDown}
       >
         <GripVertical size={12} strokeWidth={2.2} />

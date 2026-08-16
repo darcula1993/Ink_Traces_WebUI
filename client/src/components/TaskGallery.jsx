@@ -4,6 +4,7 @@ import axios from 'axios'
 import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 import {
   AlertTriangle,
+  AudioLines,
   ArchiveRestore,
   Ban,
   Braces,
@@ -116,11 +117,11 @@ function downloadExtension(item, url) {
   const configured = String(item.params?.output_format || '').toLowerCase()
   if (configured === 'jpeg') return 'jpg'
   if (['png', 'jpg', 'webp', 'gif'].includes(configured)) return configured
-  const dataType = String(url || '').match(/^data:(?:image|video)\/([a-z0-9.+-]+)/i)?.[1]
+  const dataType = String(url || '').match(/^data:(?:image|video|audio)\/([a-z0-9.+-]+)/i)?.[1]
   if (dataType) return dataType === 'jpeg' ? 'jpg' : dataType.split('+')[0]
   const pathExtension = String(url || '').split('?', 1)[0].match(/\.([a-z0-9]{2,5})$/i)?.[1]
   if (pathExtension) return pathExtension.toLowerCase() === 'jpeg' ? 'jpg' : pathExtension.toLowerCase()
-  return item.type === 'video' ? 'mp4' : 'png'
+  return item.type === 'video' ? 'mp4' : item.type === 'audio' ? 'mp3' : 'png'
 }
 
 function uniqueDownloadName(item, outputIndex, url, openedAt, original = false) {
@@ -142,7 +143,7 @@ function taskDownloadUrl(item, url, original = false) {
 function taskDisplayUrl(taskId, url) {
   const value = String(url || '')
   const prefix = `/api/tasks/${taskId}/file/`
-  if (!taskId || !value.startsWith(prefix) || value.includes('png_info=1')) return url
+  if (!taskId || !value.startsWith(prefix) || !value.split('?', 1)[0].toLowerCase().endsWith('.png') || value.includes('png_info=1')) return url
   return `${value}${value.includes('?') ? '&' : '?'}png_info=1`
 }
 
@@ -169,10 +170,34 @@ function serverItem(task) {
     sourceUrls: Array.isArray(result.source_urls) ? result.source_urls : [],
     thumbnail: result.local_thumbnail || result.local_thumbnails?.[0] || null,
     video: taskDisplayUrl(task.id, result.local_video) || null,
+    audio: result.local_audio || null,
     poster: taskDisplayUrl(task.id, result.local_last_frame) || null,
     refs: result.local_refs || [],
+    refTypes: result.local_ref_types || [],
     source: task,
   }
+}
+
+function taskTypeLabel(type) {
+  return type === 'video' ? '视频' : type === 'audio' ? '音频' : '图片'
+}
+
+function TaskTypeIcon({ type, size = 15 }) {
+  if (type === 'video') return <Film size={size} className="text-nexus-violet" />
+  if (type === 'audio') return <AudioLines size={size} className="text-nexus-cyan" />
+  return <ImageIcon size={size} className="text-nexus-blue" />
+}
+
+function AudioArtwork({ compact = false }) {
+  const bars = compact ? 18 : 36
+  return (
+    <div className="audio-task-artwork absolute inset-0 flex flex-col items-center justify-center gap-4 px-7">
+      <AudioLines size={compact ? 26 : 38} className="text-nexus-cyan" strokeWidth={1.4} />
+      <div className="audio-task-waveform" aria-hidden="true">
+        {Array.from({ length: bars }, (_, index) => <span key={index} style={{ '--wave-index': index }} />)}
+      </div>
+    </div>
+  )
 }
 
 function selectionToken(item) {
@@ -202,6 +227,7 @@ function TaskPreview({ item, compact = true }) {
       ? <img src={item.thumbnail || item.poster} loading="lazy" decoding="async" className="absolute inset-0 size-full object-contain" alt="视频任务预览" />
       : <video src={item.video} className="absolute inset-0 size-full object-contain" muted preload="metadata" />
   }
+  if (item.type === 'audio' && item.audio) return <AudioArtwork compact={compact} />
   if (item.images?.length) {
     return <img src={item.thumbnail || item.images[0]} loading="lazy" decoding="async" className="absolute inset-0 size-full object-contain" alt="图片任务预览" />
   }
@@ -213,7 +239,7 @@ function TaskPreview({ item, compact = true }) {
       </div>
     )
   }
-  const EmptyIcon = item.type === 'video' ? Film : ImageIcon
+  const EmptyIcon = item.type === 'video' ? Film : item.type === 'audio' ? AudioLines : ImageIcon
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-nexus-muted">
       <EmptyIcon size={30} strokeWidth={1.25} />
@@ -232,6 +258,7 @@ function TaskCard({
   onToggleSelection,
   onFavorite,
   onCancel,
+  onDelete,
   trash,
 }) {
   const status = STATUS[item.status] || STATUS.pending
@@ -249,8 +276,8 @@ function TaskCard({
       tabIndex={0}
       data-testid="task-gallery-card"
       aria-label={selectionMode
-        ? `${checked ? '取消选择' : '选择'}${item.type === 'video' ? '视频' : '图片'}任务`
-        : `打开${item.type === 'video' ? '视频' : '图片'}任务`}
+        ? `${checked ? '取消选择' : '选择'}${taskTypeLabel(item.type)}任务`
+        : `打开${taskTypeLabel(item.type)}任务`}
       aria-pressed={selectionMode ? checked : undefined}
       onClick={activate}
       onKeyDown={event => {
@@ -304,6 +331,17 @@ function TaskCard({
                 <Heart size={14} fill={item.favorite ? 'currentColor' : 'none'} />
               </button>
             )}
+            {item.taskId && (
+              <button
+                type="button"
+                aria-label={trash ? '彻底删除任务' : '删除任务'}
+                title={trash ? '彻底删除' : '移到回收站'}
+                onClick={event => { event.stopPropagation(); onDelete(item) }}
+                className="task-card-action hover:border-nexus-red/40 hover:text-nexus-red"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -330,13 +368,21 @@ function TaskCard({
 }
 
 function DetailMedia({ item, outputIndex, setOutputIndex }) {
-  if (ACTIVE_STATUSES.has(item.status) || item.status === 'failed' || (!item.images?.length && !item.video && !item.poster)) {
+  if (ACTIVE_STATUSES.has(item.status) || item.status === 'failed' || (!item.images?.length && !item.video && !item.audio && !item.poster)) {
     return <div className="relative size-full min-h-0"><TaskPreview item={item} compact={false} /></div>
   }
   if (item.type === 'video') {
     return item.video
       ? <video src={item.video} poster={item.poster || undefined} controls autoPlay={false} className="max-h-full max-w-full object-contain" />
       : <img src={item.poster} className="max-h-full max-w-full object-contain" alt="视频尾帧" />
+  }
+  if (item.type === 'audio') {
+    return (
+      <div className="audio-detail-player">
+        <AudioArtwork compact={false} />
+        <audio src={item.audio} controls preload="metadata" className="relative z-10 w-full" />
+      </div>
+    )
   }
   return (
     <div className="flex size-full min-h-0 flex-col">
@@ -377,6 +423,9 @@ function CompareMedia({ item, zoom }) {
   const style = { transform: `scale(${zoom})` }
   if (item.type === 'video' && item.video) {
     return <video src={item.video} poster={item.poster || undefined} controls preload="metadata" style={style} />
+  }
+  if (item.type === 'audio' && item.audio) {
+    return <div className="relative size-full"><AudioArtwork compact /><audio src={item.audio} controls preload="metadata" className="absolute inset-x-3 bottom-3 z-10 w-[calc(100%-24px)]" /></div>
   }
   const image = item.images?.[0] || item.poster || item.thumbnail
   if (image) return <img src={image} loading="eager" decoding="async" style={style} alt={`任务 ${item.taskId} 输出`} />
@@ -568,7 +617,7 @@ function TaskDetailModal({
   }, [item.refs.length, onClose, onNext, onPrevious, referenceIndex])
 
   const params = item.params || {}
-  const download = item.type === 'video' ? item.video : item.images?.[outputIndex]
+  const download = item.type === 'video' ? item.video : item.type === 'audio' ? item.audio : item.images?.[outputIndex]
   const downloadName = download ? uniqueDownloadName(item, outputIndex, download, openedAt) : ''
   const downloadUrl = download ? taskDownloadUrl(item, download) : ''
   const originalDownloadName = download ? uniqueDownloadName(item, outputIndex, download, openedAt, true) : ''
@@ -583,6 +632,9 @@ function TaskDetailModal({
     ['分辨率', params.resolution],
     ['时长', params.duration === -1 ? 'Auto' : params.duration ? `${params.duration}s` : null],
     ['格式', params.output_format?.toUpperCase()],
+    ['采样率', params.sample_rate ? `${Number(params.sample_rate) / 1000} kHz` : null],
+    ['字幕', params.enable_subtitle === undefined ? null : params.enable_subtitle ? '开启' : '关闭'],
+    ['声线', params.speaker],
     ['Provider', item.provider],
   ].filter(([, value]) => value !== undefined && value !== null && value !== '')
 
@@ -688,7 +740,13 @@ function TaskDetailModal({
                       onClick={() => setReferenceIndex(index)}
                       className="task-reference-thumbnail aspect-square w-full overflow-hidden"
                     >
-                      <img src={url} className="size-full object-cover" alt={`参考素材 ${index + 1}`} />
+                      {item.refTypes?.[index] === 'audio' ? (
+                        <span className="flex size-full items-center justify-center bg-black/35"><AudioLines size={18} className="text-nexus-cyan" /></span>
+                      ) : item.refTypes?.[index] === 'video' ? (
+                        <video src={url} className="size-full object-cover" muted preload="metadata" />
+                      ) : (
+                        <img src={url} className="size-full object-cover" alt={`参考素材 ${index + 1}`} />
+                      )}
                     </button>
                   ))}
                 </div>
@@ -796,11 +854,13 @@ function TaskDetailModal({
                     <ChevronLeft size={19} />
                   </IconButton>
                 )}
-                <img
-                  src={item.refs[referenceIndex]}
-                  className="max-h-full max-w-full object-contain"
-                  alt={`参考素材全图 ${referenceIndex + 1}`}
-                />
+                {item.refTypes?.[referenceIndex] === 'audio' ? (
+                  <div className="reference-audio-player"><AudioLines size={34} /><audio src={item.refs[referenceIndex]} controls autoPlay /></div>
+                ) : item.refTypes?.[referenceIndex] === 'video' ? (
+                  <video src={item.refs[referenceIndex]} controls autoPlay className="max-h-full max-w-full object-contain" />
+                ) : (
+                  <img src={item.refs[referenceIndex]} className="max-h-full max-w-full object-contain" alt={`参考素材全图 ${referenceIndex + 1}`} />
+                )}
                 {item.refs.length > 1 && (
                   <IconButton
                     label="下一个参考素材"
@@ -1603,7 +1663,7 @@ export default function TaskGallery({
         ? '当前收藏为空'
         : view === 'trash'
           ? '回收站为空'
-          : mode === 'video' ? '还没有视频任务' : '还没有图片任务'
+          : mode === 'video' ? '还没有视频任务' : mode === 'audio' ? '还没有音频任务' : '还没有图片任务'
 
   return (
     <div
@@ -1613,8 +1673,8 @@ export default function TaskGallery({
     >
       <div className={`task-gallery-toolbar liquid-glass flex h-13 shrink-0 items-center gap-2 px-3 ${selectionMode ? 'task-gallery-toolbar-selection' : ''}`}>
         <div className="task-gallery-title flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
-          {mode === 'image' ? <ImageIcon size={15} className="text-nexus-blue" /> : <Film size={15} className="text-nexus-violet" />}
-          {mode === 'image' ? '图片任务' : '视频任务'}
+          <TaskTypeIcon type={mode} />
+          {taskTypeLabel(mode)}任务
           <span className="task-gallery-count font-mono text-[10px] font-normal">{categoryTotal}</span>
         </div>
         {selectionMode ? (
@@ -2019,13 +2079,14 @@ export default function TaskGallery({
               onToggleSelection={toggleSelection}
               onFavorite={toggleFavorite}
               onCancel={cancelTask}
+              onDelete={deleteTask}
               trash={view === 'trash'}
             />
           ))}
         </div>
         {!loading && visibleItems.length === 0 && (
           <div className="task-empty-state">
-            <div className="task-empty-icon">{mode === 'image' ? <ImageIcon size={22} /> : <Film size={22} />}</div>
+            <div className="task-empty-icon"><TaskTypeIcon type={mode} size={22} /></div>
             <div className="text-sm font-medium text-nexus-text-light">{emptyTitle}</div>
             <div className="font-mono text-[10px] text-nexus-muted">{hasSearchOrFilters ? 'FILTER RESULT: 0' : `${mode.toUpperCase()} TASKS: 0`}</div>
             {hasSearchOrFilters && (

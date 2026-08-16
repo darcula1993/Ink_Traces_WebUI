@@ -180,6 +180,37 @@ def init_db():
         )
     ''')
     db.execute('''
+        CREATE TABLE IF NOT EXISTS layer_projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            source_name TEXT,
+            source_path TEXT,
+            source_metadata TEXT,
+            document TEXT,
+            document_revision INTEGER NOT NULL DEFAULT 1,
+            current_task_id INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT,
+            FOREIGN KEY(current_task_id) REFERENCES tasks(id) ON DELETE SET NULL
+        )
+    ''')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS layer_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL,
+            task_id INTEGER NOT NULL UNIQUE,
+            prompt TEXT,
+            size TEXT NOT NULL,
+            result TEXT NOT NULL,
+            document TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES layer_projects(id) ON DELETE CASCADE,
+            FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        )
+    ''')
+    _ensure_columns(db, 'layer_revisions', {'document': 'TEXT'})
+    db.execute('''
         CREATE TABLE IF NOT EXISTS favorite_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -250,11 +281,132 @@ def init_db():
     db.execute('CREATE INDEX IF NOT EXISTS idx_task_provider_assets_asset ON task_provider_assets(provider_asset_id, task_id)')
     db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external ON tasks(provider, external_task_id) WHERE external_task_id IS NOT NULL')
     db.execute('CREATE INDEX IF NOT EXISTS idx_task_favorite_groups_group ON task_favorite_groups(group_id, task_id)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_layer_projects_updated ON layer_projects(deleted_at, updated_at DESC)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_layer_revisions_project ON layer_revisions(project_id, id DESC)')
     now = utcnow()
     db.execute('UPDATE tasks SET updated_at = COALESCE(updated_at, created_at, ?)', (now,))
     if not search_exists:
         db.execute("INSERT INTO task_search(task_search) VALUES ('rebuild')")
     db.commit()
+
+
+def _layer_project(row, include_document=True):
+    if not row:
+        return None
+    project = dict(row)
+    project['source_metadata'] = _from_json(project.get('source_metadata')) or {}
+    project['document'] = (_from_json(project.get('document')) or {}) if include_document else None
+    return project
+
+
+def create_layer_project(name, source_name=None, source_path=None, source_metadata=None):
+    now = utcnow()
+    cursor = get_db().execute(
+        '''INSERT INTO layer_projects
+           (name, source_name, source_path, source_metadata, document, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (name, source_name, source_path, _json(source_metadata or {}), _json({}), now, now),
+    )
+    get_db().commit()
+    return cursor.lastrowid
+
+
+def get_layer_project(project_id):
+    row = get_db().execute(
+        'SELECT * FROM layer_projects WHERE id = ? AND deleted_at IS NULL',
+        (project_id,),
+    ).fetchone()
+    project = _layer_project(row)
+    if not project:
+        return None
+    task = get_task(project['current_task_id']) if project.get('current_task_id') else None
+    project['current_task'] = task
+    revisions = get_db().execute(
+        '''SELECT id, project_id, task_id, prompt, size, result, document, created_at
+           FROM layer_revisions WHERE project_id = ? ORDER BY id DESC''',
+        (project_id,),
+    ).fetchall()
+    project['revisions'] = [
+        {
+            **dict(revision),
+            'result': _from_json(revision['result']) or {},
+            'document': _from_json(revision['document']) or {},
+        }
+        for revision in revisions
+    ]
+    return project
+
+
+def list_layer_projects():
+    rows = get_db().execute(
+        '''SELECT id, name, source_name, source_metadata, document_revision,
+                  current_task_id, created_at, updated_at
+           FROM layer_projects WHERE deleted_at IS NULL
+           ORDER BY updated_at DESC, id DESC'''
+    ).fetchall()
+    projects = []
+    for row in rows:
+        project = dict(row)
+        project['source_metadata'] = _from_json(project.get('source_metadata')) or {}
+        task = get_task(project['current_task_id']) if project.get('current_task_id') else None
+        project['current_task'] = task
+        projects.append(project)
+    return projects
+
+
+def update_layer_project(project_id, **fields):
+    allowed = {'name', 'source_name', 'source_path', 'source_metadata', 'document', 'current_task_id', 'deleted_at'}
+    values = {key: value for key, value in fields.items() if key in allowed}
+    if not values:
+        return False
+    for key in ('source_metadata', 'document'):
+        if key in values and not isinstance(values[key], str):
+            values[key] = _json(values[key])
+    values['updated_at'] = utcnow()
+    sets = ', '.join(f'{key} = ?' for key in values)
+    cursor = get_db().execute(
+        f'UPDATE layer_projects SET {sets} WHERE id = ? AND deleted_at IS NULL',
+        [*values.values(), project_id],
+    )
+    get_db().commit()
+    return cursor.rowcount > 0
+
+
+def save_layer_document(project_id, document, expected_revision=None):
+    params = [_json(document), utcnow(), project_id]
+    condition = ''
+    if expected_revision is not None:
+        condition = ' AND document_revision = ?'
+        params.append(int(expected_revision))
+    cursor = get_db().execute(
+        f'''UPDATE layer_projects
+            SET document = ?, document_revision = document_revision + 1, updated_at = ?
+            WHERE id = ? AND deleted_at IS NULL{condition}''',
+        params,
+    )
+    get_db().commit()
+    if cursor.rowcount == 0:
+        return None
+    return get_layer_project(project_id)
+
+
+def add_layer_revision(project_id, task_id, prompt, size, result, document):
+    now = utcnow()
+    db = get_db()
+    cursor = db.execute(
+        '''INSERT INTO layer_revisions (project_id, task_id, prompt, size, result, document, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)''',
+        (project_id, task_id, prompt, size, _json(result), _json(document), now),
+    )
+    db.execute(
+        '''UPDATE layer_projects
+           SET document = ?, document_revision = document_revision + 1,
+               current_task_id = ?, updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL''',
+        (_json(document), task_id, now, project_id),
+    )
+    db.commit()
+    return cursor.lastrowid
 
 
 def create_task(task_type, prompt, params, provider=None, external_task_id=None, status='pending', retry_of=None):
@@ -500,6 +652,8 @@ def list_tasks(task_type=None, status=None, limit=50, offset=0, summary=False,
                 'local_video', json_extract(t.result, '$.local_video'),
                 'local_last_frame', json_extract(t.result, '$.local_last_frame'),
                 'local_thumbnail', json_extract(t.result, '$.local_thumbnail'),
+                'local_audio', json_extract(t.result, '$.local_audio'),
+                'local_ref_types', json_extract(t.result, '$.local_ref_types'),
                 'thinking', substr(COALESCE(json_extract(t.result, '$.thinking'), ''), 1, 100)
             ) ELSE NULL END AS result
         '''
@@ -624,11 +778,13 @@ def claim_next_task(worker_id, lease_seconds=900):
               AND (next_run_at IS NULL OR next_run_at <= ?)
               AND (lease_until IS NULL OR lease_until < ?)
               AND (
-                    (type = 'image' AND status = 'pending')
+                    (type IN ('image', 'layer') AND status = 'pending')
                  OR (type = 'video' AND status IN ('pending', 'processing')
                      AND (external_task_id IS NOT NULL OR provider = 'cupsy'))
+                 OR (type = 'audio' AND status IN ('pending', 'processing')
+                     AND provider = 'cupsy')
               )
-            ORDER BY CASE type WHEN 'video' THEN 0 ELSE 1 END, id ASC
+            ORDER BY CASE WHEN type IN ('image', 'layer') THEN 1 ELSE 0 END, id ASC
             LIMIT 1
             ''',
             (now, now),
@@ -1445,6 +1601,17 @@ def ping():
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+
+
+def _from_json(value):
+    if not value:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return None
 
 
 def _row_to_dict(row):

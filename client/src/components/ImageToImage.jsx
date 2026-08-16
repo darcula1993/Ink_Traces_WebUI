@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import axios from 'axios'
 import { Maximize2, UploadCloud, X, Plus } from 'lucide-react'
 import SortableReferenceItem, { moveArrayItem } from './SortableReferenceItem'
 
@@ -22,7 +23,16 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, onPreview,
     const filesToProcess = imageFiles.slice(0, remainingSlots)
     const newImagePromises = filesToProcess.map(file => new Promise((resolve) => {
       const reader = new FileReader()
-      reader.onload = (ev) => resolve({ file, preview: ev.target.result, name: file.name })
+      reader.onload = async (ev) => {
+        let hasAlpha = null
+        try {
+          const data = new FormData()
+          data.append('file', file)
+          const response = await axios.post('/api/images/inspect', data)
+          hasAlpha = Boolean(response.data.image?.has_alpha)
+        } catch (_) {}
+        resolve({ file, preview: ev.target.result, name: file.name, hasAlpha })
+      }
       reader.onerror = () => resolve(null)
       reader.readAsDataURL(file)
     }))
@@ -162,7 +172,7 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, onPreview,
                   <X size={12} />
                 </button>
                 <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-[10px] text-nexus-text">
-                  {index + 1}
+                  {img.hasAlpha ? 'α' : index + 1}
                 </div>
               </SortableReferenceItem>
             ))}

@@ -113,7 +113,9 @@ export function estimateBytePlusVideoCost({
   fast = false,
   referenceVideos = [],
 } = {}) {
-  const normalizedModel = model === 'seedance-2.5' ? 'seedance-2.5' : 'seedance-2.0'
+  const normalizedModel = ['seedance-2.5', 'seedance-2.5-moderated'].includes(model)
+    ? 'seedance-2.5'
+    : 'seedance-2.0'
   const dimensionsByRatio = OUTPUT_DIMENSIONS[normalizedModel][resolution]
     || OUTPUT_DIMENSIONS[normalizedModel]['720p']
   const ratioAssumed = !dimensionsByRatio[ratio]

@@ -121,8 +121,12 @@ class Worker:
             with application.app.app_context():
                 if task['type'] == 'image':
                     self._process_image(task)
+                elif task['type'] == 'layer':
+                    self._process_layer(task)
                 elif task['type'] == 'video':
                     self._process_video(task)
+                elif task['type'] == 'audio':
+                    self._process_audio(task)
                 else:
                     task_db.fail_task(task['id'], f'未知任务类型: {task["type"]}')
         except Exception as exc:
@@ -130,10 +134,10 @@ class Worker:
             if task_db.cancellation_requested(task['id']):
                 task_db.finalize_task_cancel(task['id'])
                 return
-            max_attempts = self._image_crash_max_attempts(task) if task['type'] == 'image' else self._video_max_attempts()
+            max_attempts = self._image_crash_max_attempts(task) if task['type'] in {'image', 'layer'} else self._poll_max_attempts(task['type'])
             if int(task.get('attempt_count') or 0) < max_attempts:
-                status = 'pending' if task['type'] == 'image' or (
-                    task['type'] == 'video' and task.get('provider') == 'cupsy'
+                status = 'pending' if task['type'] in {'image', 'layer'} or (
+                    task['type'] in {'video', 'audio'} and task.get('provider') == 'cupsy'
                     and not task.get('external_task_id')
                 ) else 'processing'
                 task_db.reschedule_task(task['id'], self._retry_delay(task), status=status, error=str(exc))
@@ -167,6 +171,17 @@ class Worker:
             return
         LOG.warning('task_failed id=%s type=image status=%s', task['id'], status_code)
 
+    def _process_layer(self, task):
+        payload, status_code = application.execute_layer_task(task['id'])
+        if payload.get('cancelled') or task_db.cancellation_requested(task['id']):
+            task_db.finalize_task_cancel(task['id'])
+            LOG.info('task_cancelled id=%s type=layer', task['id'])
+            return
+        if payload.get('success'):
+            LOG.info('task_succeeded id=%s type=layer', task['id'])
+            return
+        LOG.warning('task_failed id=%s type=layer status=%s', task['id'], status_code)
+
     @staticmethod
     def _image_crash_max_attempts(task):
         # An Ark POST may have reached the provider before a local exception was raised.
@@ -196,8 +211,33 @@ class Worker:
             progress=outcome.get('progress'),
         )
 
+    def _process_audio(self, task):
+        outcome = application.poll_audio_task_once(task['id'])
+        state = outcome.get('state')
+        if state in ('succeeded', 'failed', 'cancelled'):
+            LOG.info('task_terminal id=%s type=audio state=%s', task['id'], state)
+            return
+
+        attempts = int(task.get('attempt_count') or 0)
+        if attempts >= self._poll_max_attempts('audio'):
+            task_db.fail_task(task['id'], outcome.get('error') or '音频任务轮询超时')
+            return
+        delay = self._retry_delay(task, maximum=60) if state == 'retry' else int(
+            application.AUDIO_CONFIG.get('poll_interval_seconds', 4) or 4
+        )
+        task_db.reschedule_task(
+            task['id'], delay,
+            status='pending' if state == 'preparing' else 'processing',
+            error=outcome.get('error'), progress=outcome.get('progress'),
+        )
+
     def _video_max_attempts(self):
         return int(application.VIDEO_CONFIG.get('poll_max_attempts', 1800) or 1800)
+
+    @staticmethod
+    def _poll_max_attempts(task_type):
+        settings = application.AUDIO_CONFIG if task_type == 'audio' else application.VIDEO_CONFIG
+        return int(settings.get('poll_max_attempts', 1800) or 1800)
 
     @staticmethod
     def _retry_delay(task, maximum=30):

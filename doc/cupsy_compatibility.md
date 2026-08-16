@@ -3,9 +3,24 @@
 Verified against `https://cupsy.io` on 2026-08-14. Secrets and signed URLs are
 intentionally omitted.
 
+## Seed Audio 1.0
+
+- Model id: `seed-audio-1.0`.
+- Asynchronous endpoints: `POST /v1/audio/generations`, status and content at
+  `/v1/audio/generations/{id}` and `/v1/audio/generations/{id}/content`.
+- Output formats: `mp3`, `wav`, `ogg_opus`; sample rates: 8, 16, 24, 32, 44.1,
+  and 48 kHz; maximum generated duration: 120 seconds.
+- Inputs are text-only, up to three ordered audio/speaker references, or one
+  image reference. Audio and image references cannot be mixed.
+- Generated audio remains a short-lived artifact at Cupsy and is downloaded to
+  local task storage. It is not automatically imported into Cupsy Assets.
+
 ## Model contract
 
 `GET /v1/models` reports the following contract for `seedance-2.5`:
+
+- `seedance-2.5`: standard model.
+- `seedance-2.5-moderated`: the same declared capabilities with enhanced moderation.
 
 | Capability | Cupsy behavior |
 | --- | --- |

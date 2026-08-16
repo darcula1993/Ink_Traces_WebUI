@@ -3,11 +3,13 @@ import hashlib
 import io
 import json
 import os
+import zipfile
 
 from flask import jsonify
 from PIL import Image
 import pytest
 import requests
+from werkzeug.datastructures import FileStorage
 
 import app as application
 import storage
@@ -23,6 +25,153 @@ def _png_data_url():
 
 def _png_bytes():
     return base64.b64decode(_png_data_url().split(',', 1)[1])
+
+
+def _rgba_png_bytes(size=(2, 2)):
+    buffer = io.BytesIO()
+    image = Image.new('RGBA', size, (20, 40, 60, 255))
+    image.putpixel((1, 0), (100, 120, 140, 64))
+    image.save(buffer, format='PNG')
+    return buffer.getvalue()
+
+
+def test_uploaded_image_normalization_preserves_png_alpha(tmp_path):
+    target = tmp_path / 'reference.png'
+    upload = FileStorage(
+        stream=io.BytesIO(_rgba_png_bytes()),
+        filename='transparent-reference.png',
+        content_type='image/png',
+    )
+
+    storage.save_uploaded_image(upload, str(target))
+
+    with Image.open(target) as image:
+        assert image.mode == 'RGBA'
+        assert image.getpixel((1, 0))[3] == 64
+
+
+def test_seedream_transparent_background_requires_one_alpha_png(monkeypatch):
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'api_key': 'test-key', 'endpoint': 'https://provider.invalid', 'model': 'test-model',
+    })
+    client = application.app.test_client()
+    alpha_upload = client.post('/api/workspace/assets/img_tabs', data={
+        'file': (io.BytesIO(_rgba_png_bytes()), 'alpha.png'),
+    }).get_json()['asset']
+
+    invalid_format = client.post('/api/generate', json={
+        'prompt': 'transparent object', 'provider': 'ark', 'aspect_ratio': '1:1',
+        'resolution': '1K', 'output_format': 'jpeg', 'background': 'transparent',
+        'image_urls': [alpha_upload['url']],
+    })
+    assert invalid_format.status_code == 400
+    assert 'PNG' in invalid_format.get_json()['error']
+
+    valid = client.post('/api/generate', json={
+        'prompt': 'transparent object', 'provider': 'ark', 'aspect_ratio': '1:1',
+        'resolution': '1K', 'output_format': 'png', 'background': 'transparent',
+        'image_urls': [alpha_upload['url']],
+    })
+    assert valid.status_code == 202
+    valid_task_id = valid.get_json()['task_id']
+    assert task_db.get_task(valid_task_id)['params']['background'] == 'transparent'
+
+    observed = {}
+    def fake_generate(*args, **_kwargs):
+        observed['background'] = args[10]
+        return {'success': True, 'images': [_png_data_url()]}, 200
+
+    monkeypatch.setattr(application, '_generate_ark_image', fake_generate)
+    assert task_db.claim_next_task('transparent-worker')['id'] == valid_task_id
+    with application.app.app_context():
+        _payload, status = application.execute_image_task(valid_task_id)
+    assert status == 200
+    assert observed['background'] == 'transparent'
+
+    no_alpha = client.post('/api/workspace/assets/img_tabs', data={
+        'file': (io.BytesIO(_png_bytes()), 'opaque.png'),
+    }).get_json()['asset']
+    rejected = client.post('/api/generate', json={
+        'prompt': 'transparent object', 'provider': 'ark', 'aspect_ratio': '1:1',
+        'resolution': '1K', 'output_format': 'png', 'background': 'transparent',
+        'image_urls': [no_alpha['url']],
+    })
+    assert rejected.status_code == 400
+    assert 'Alpha' in rejected.get_json()['error']
+
+
+def test_layer_studio_project_decomposes_and_persists_document(monkeypatch):
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'api_key': 'test-key', 'endpoint': 'https://provider.invalid', 'model': 'test-model',
+    })
+    client = application.app.test_client()
+    created = client.post('/api/layer/projects', data={
+        'image': (io.BytesIO(_rgba_png_bytes((512, 512))), 'composition.png'),
+        'prompt': 'separate foreground and background',
+        'size': 'auto',
+    })
+    assert created.status_code == 202
+    project_id = created.get_json()['project_id']
+    task_id = created.get_json()['task_id']
+    assert task_db.claim_next_task('layer-worker')['id'] == task_id
+
+    layer_url = 'data:image/png;base64,' + base64.b64encode(_rgba_png_bytes()).decode()
+
+    def fake_generate(*_args, **kwargs):
+        assert kwargs['layer_decomposition'] is True
+        return {
+            'success': True,
+            'images': [_png_data_url(), layer_url],
+            'items': [
+                {'data_url': _png_data_url(), 'z_index': 0, 'name': 'Base', 'size': '512x512', 'output_format': 'png'},
+                {
+                    'data_url': layer_url, 'z_index': 1, 'name': 'Subject',
+                    'description': 'foreground subject', 'size': '256x384', 'output_format': 'png',
+                    'bounding_box': {'absolute': [64, 32, 320, 416], 'normalized': [125, 63, 625, 813]},
+                },
+            ],
+            'source_urls': ['https://media.invalid/base.png', 'https://media.invalid/layer.png'],
+        }, 200
+
+    monkeypatch.setattr(application, '_generate_ark_image', fake_generate)
+    with application.app.app_context():
+        payload, status = application.execute_layer_task(task_id)
+    assert status == 200
+    assert payload['success'] is True
+
+    project = client.get(f'/api/layer/projects/{project_id}').get_json()['project']
+    assert len(project['revisions']) == 1
+    assert [layer['name'] for layer in project['document']['layers']] == ['Base', 'Subject']
+    subject = project['document']['layers'][1]
+    assert [subject['x'], subject['y'], subject['display_width'], subject['display_height']] == [64, 32, 256, 384]
+    assert subject['bounding_box']['normalized'] == [125, 63, 625, 813]
+
+    archive = client.get(f'/api/layer/projects/{project_id}/layers.zip')
+    assert archive.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(archive.data)) as bundle:
+        assert 'manifest.json' in bundle.namelist()
+        manifest = json.loads(bundle.read('manifest.json'))
+        assert [layer['name'] for layer in manifest['layers']] == ['Base', 'Subject']
+
+    changed_document = project['document']
+    changed_document['layers'][1]['x'] = 999
+    saved = client.put(f'/api/layer/projects/{project_id}', json={
+        'document': changed_document,
+        'revision': project['document_revision'],
+    })
+    assert saved.status_code == 200
+    restored = client.post(
+        f'/api/layer/projects/{project_id}/revisions/{project["revisions"][0]["id"]}/restore'
+    )
+    assert restored.status_code == 200
+    assert restored.get_json()['project']['document']['layers'][1]['x'] == 64
+
+    source_path = task_db.get_layer_project(project_id)['source_path']
+    deleted = client.delete(f'/api/layer/projects/{project_id}')
+    assert deleted.status_code == 200
+    assert task_db.get_layer_project(project_id) is None
+    assert task_db.get_task(task_id) is None
+    assert not os.path.exists(source_path)
 
 
 def test_seedream_pro_accepts_auto_and_bounded_custom_sizes(monkeypatch):
@@ -180,7 +329,7 @@ def test_workspace_upload_is_reused_by_image_task(monkeypatch):
     client = application.app.test_client()
 
     upload = client.post('/api/workspace/assets/img_tabs', data={
-        'file': (io.BytesIO(_png_bytes()), 'reference.png'),
+        'file': (io.BytesIO(_rgba_png_bytes()), 'reference.png'),
     })
     assert upload.status_code == 201
     asset = upload.get_json()['asset']
@@ -189,6 +338,8 @@ def test_workspace_upload_is_reused_by_image_task(monkeypatch):
     stored_workspace_path = storage.resolve_workspace_asset_url('img_tabs', asset['url'])
     with Image.open(io.BytesIO(client.get(asset['url']).data)) as image:
         assert image.size == (2, 2)
+        assert image.mode == 'RGBA'
+        assert image.getpixel((1, 0))[3] == 64
 
     response = client.post('/api/generate', json={
         'prompt': 'reuse workspace reference',
@@ -215,6 +366,8 @@ def test_workspace_upload_is_reused_by_image_task(monkeypatch):
     assert os.stat(input_assets[0]['path']).st_ino == os.stat(stored_workspace_path).st_ino
     with Image.open(input_assets[0]['path']) as image:
         assert image.size == (2, 2)
+        assert image.mode == 'RGBA'
+        assert image.getpixel((1, 0))[3] == 64
 
 
 def test_png_download_embeds_only_reusable_generation_metadata():
@@ -599,6 +752,10 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
         'model': 'seedance-2.5',
         'source_base_url': 'https://studio.example',
     })
+    provider_info = application.app.test_client().get('/api/video/provider').get_json()
+    assert provider_info['providers']['cupsy']['models'] == [
+        'seedance-2.5', 'seedance-2.5-moderated',
+    ]
     local_path = os.path.join(storage.WORKSPACE_ASSET_DIR, 'reference.png')
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     with open(local_path, 'wb') as handle:
@@ -614,7 +771,7 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
 
     response = application.app.test_client().post('/api/video/generate', json={
         'provider': 'cupsy',
-        'model': 'seedance-2.5',
+        'model': 'seedance-2.5-moderated',
         'prompt': 'A slow cinematic camera move',
         'ratio': '16:9',
         'duration': 4,
@@ -625,6 +782,8 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     })
     assert response.status_code == 202
     task_id = response.get_json()['db_task_id']
+    queued_task = task_db.get_task(task_id)
+    assert queued_task['params']['model'] == 'seedance-2.5-moderated'
     detail = application.app.test_client().get(f'/api/tasks/{task_id}').get_json()['task']
     assert detail['result']['local_refs'] == [f'/api/cupsy/assets/{asset["id"]}/content']
     assert task_db.claim_next_task('cupsy-worker')['id'] == task_id
@@ -644,6 +803,7 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     assert set(observed['body']) == {
         'model', 'content', 'ratio', 'duration', 'resolution', 'generate_audio', 'watermark',
     }
+    assert observed['body']['model'] == 'seedance-2.5-moderated'
     assert observed['body']['content'][1] == {
         'type': 'image_url', 'image_url': {'url': 'asset://asset_remote_2'},
         'role': 'reference_image',
@@ -661,6 +821,95 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     task = task_db.get_task(task_id)
     assert task['result']['local_video'] == f'/api/tasks/{task_id}/file/video.mp4'
     assert task_db.list_provider_assets('cupsy')[0]['external_asset_id'] == 'asset_remote_2'
+
+    invalid = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'cupsy', 'model': 'seedance-2.0', 'prompt': 'invalid model',
+        'ratio': '16:9', 'duration': 4, 'resolution': '480p',
+    })
+    assert invalid.status_code == 400
+
+
+def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):
+    monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
+        'api_key': 'cupsy-test-key',
+        'endpoint': 'https://cupsy.invalid',
+        'source_base_url': 'https://studio.example',
+    })
+    monkeypatch.setattr(application, 'CUPSY_AUDIO_CONFIG', {
+        'endpoint': 'https://cupsy.invalid',
+        'model': 'seed-audio-1.0',
+    })
+    info = application.app.test_client().get('/api/audio/provider').get_json()
+    assert info['current'] == 'cupsy'
+    assert info['capabilities']['max_audio_references'] == 3
+
+    local_path = os.path.join(storage.WORKSPACE_ASSET_DIR, 'voice.wav')
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, 'wb') as handle:
+        handle.write(b'wave-reference')
+    asset = task_db.create_provider_asset(
+        'cupsy', 'audio', hashlib.sha256(b'wave-reference').hexdigest(), 'voice.wav',
+        'audio/wav', len(b'wave-reference'), local_path,
+    )
+    task_db.update_provider_asset(
+        asset['id'], external_asset_id='asset_audio_1', asset_uri='asset://asset_audio_1',
+        status='active', next_run_at=None,
+    )
+
+    response = application.app.test_client().post('/api/audio/generate', json={
+        'prompt': 'Use @Audio1 for a calm host over a quiet ambient score.',
+        'model': 'seed-audio-1.0',
+        'output_format': 'wav',
+        'sample_rate': 48000,
+        'enable_subtitle': True,
+        'watermark': False,
+        'reference_mode': 'audio',
+        'cupsy_assets': [{'id': asset['id']}],
+    })
+    assert response.status_code == 202
+    task_id = response.get_json()['task_id']
+    assert task_db.claim_next_task('audio-worker')['id'] == task_id
+
+    observed = {}
+    def fake_post(url, **kwargs):
+        observed['url'] = url
+        observed['headers'] = kwargs['headers']
+        observed['body'] = kwargs['json']
+        return FakeResponse(status_code=202, payload={'id': 'audio_remote_1', 'status': 'queued'})
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    assert application.poll_audio_task_once(task_id)['state'] == 'pending'
+    assert observed['url'] == 'https://cupsy.invalid/v1/audio/generations'
+    assert observed['headers']['Idempotency-Key'] == f'nanobanana-audio-{task_id}'
+    assert observed['body']['references'] == [
+        {'audio_url': {'url': 'asset://asset_audio_1'}},
+    ]
+    assert observed['body']['audio_config'] == {
+        'format': 'wav', 'sample_rate': 48000, 'enable_subtitle': True,
+    }
+
+    def fake_get(url, **_kwargs):
+        if url.endswith('/content'):
+            return FakeResponse(content=b'generated-wave')
+        return FakeResponse(payload={
+            'id': 'audio_remote_1', 'status': 'succeeded', 'duration_seconds': 12.4,
+            'artifacts': [{'id': 'artifact_audio_1'}],
+        })
+
+    monkeypatch.setattr(application.HTTP, 'get', fake_get)
+    assert application.poll_audio_task_once(task_id)['state'] == 'succeeded'
+    task = task_db.get_task(task_id)
+    assert task['result']['local_audio'] == f'/api/tasks/{task_id}/file/audio.wav'
+    assert task['result']['duration_seconds'] == 12.4
+    output = next(item for item in task_db.list_assets(task_id) if item['kind'] == 'output_audio')
+    assert output['mime_type'] == 'audio/wav'
+    detail = application.app.test_client().get(f'/api/tasks/{task_id}').get_json()['task']
+    assert detail['result']['local_ref_types'] == ['audio']
+
+    invalid = application.app.test_client().post('/api/audio/generate', json={
+        'prompt': 'Invalid mixed references', 'reference_mode': 'image', 'speaker': 'vivi',
+    })
+    assert invalid.status_code == 400
 
 
 def test_seedance_25_submission_reuses_ark_key_and_endpoint(monkeypatch):
