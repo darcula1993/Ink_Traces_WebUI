@@ -745,6 +745,17 @@ def test_cupsy_asset_lifecycle_uses_signed_local_source(monkeypatch):
     assert task_db.get_provider_asset(asset_id)['status'] == 'deleted'
 
 
+def test_cupsy_api_key_only_comes_from_config(monkeypatch):
+    monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
+        'api_key': 'configured-cupsy-key',
+        'endpoint': 'https://cupsy.invalid',
+    })
+    monkeypatch.setenv('CUPSY_API_KEY', 'environment-cupsy-key')
+
+    assert application._cupsy_settings()['api_key'] == 'configured-cupsy-key'
+    assert application._cupsy_audio_settings()['api_key'] == 'configured-cupsy-key'
+
+
 def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
         'api_key': 'cupsy-test-key',

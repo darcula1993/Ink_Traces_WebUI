@@ -1919,7 +1919,7 @@ def _video_fast_available(provider_config):
 def _cupsy_settings():
     return {
         **CUPSY_VIDEO_CONFIG,
-        'api_key': os.environ.get('CUPSY_API_KEY') or CUPSY_VIDEO_CONFIG.get('api_key', ''),
+        'api_key': CUPSY_VIDEO_CONFIG.get('api_key', ''),
         'source_base_url': (
             os.environ.get('CUPSY_SOURCE_BASE_URL')
             or CUPSY_VIDEO_CONFIG.get('source_base_url', '')

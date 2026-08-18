@@ -114,9 +114,8 @@ For video reference uploads through Ark, set `server.public_host`, `server.publi
 
 Dreamina Seedance 2.5 reuses `video.ark.api_key`. Configure its endpoint ID in `video.ark.seedance_2_5_model`; `config.json.example` includes the current default. The UI applies the model-specific limits for resolution, duration, output format, and reference counts.
 
-Cupsy is available as a separate Seedance 2.5 video endpoint. Keep its key out
-of the repository and provide it with `CUPSY_API_KEY` (or the ignored local
-`video.cupsy.api_key`). Video and Seed Audio reference media is imported through Cupsy Assets, so
+Cupsy is available as a separate Seedance 2.5 video endpoint. Store its key in
+the ignored local `video.cupsy.api_key` setting. Video and Seed Audio reference media is imported through Cupsy Assets, so
 `CUPSY_SOURCE_BASE_URL` or `video.cupsy.source_base_url` must be a public
 HTTP(S) origin that routes back to this application. HTTPS is recommended so
 signed source URLs are not sent in cleartext. The backend exposes only a
