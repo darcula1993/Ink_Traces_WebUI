@@ -1920,10 +1920,7 @@ def _cupsy_settings():
     return {
         **CUPSY_VIDEO_CONFIG,
         'api_key': CUPSY_VIDEO_CONFIG.get('api_key', ''),
-        'source_base_url': (
-            os.environ.get('CUPSY_SOURCE_BASE_URL')
-            or CUPSY_VIDEO_CONFIG.get('source_base_url', '')
-        ).rstrip('/'),
+        'source_base_url': CUPSY_VIDEO_CONFIG.get('source_base_url', '').rstrip('/'),
     }
 
 
@@ -1992,7 +1989,7 @@ def _cupsy_source_url(asset):
     settings = _cupsy_settings()
     base_url = settings['source_base_url']
     if not _cupsy_source_ready(settings):
-        raise ValueError('Cupsy 素材导入需要配置 CUPSY_SOURCE_BASE_URL 公网 HTTP(S) 地址')
+        raise ValueError('Cupsy 素材导入需要配置 video.cupsy.source_base_url 公网 HTTP(S) 地址')
     serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='cupsy-asset-source')
     token = serializer.dumps({'asset_id': asset['id'], 'sha256': asset['sha256']})
     return f'{base_url}/api/cupsy/source/{token}'

@@ -19,7 +19,7 @@ echo -e "${CYAN}  Ink Traces WebUI Setup${NC}"
 echo -e "${CYAN}================================${NC}\n"
 
 # 1. 检查环境
-echo -e "${YELLOW}[1/5] 检查环境...${NC}"
+echo -e "${YELLOW}[1/6] 检查环境...${NC}"
 
 MISSING=0
 
@@ -64,7 +64,7 @@ if [ $MISSING -eq 1 ]; then
 fi
 
 # 2. 初始化 config.json
-echo -e "\n${YELLOW}[2/5] 初始化配置文件...${NC}"
+echo -e "\n${YELLOW}[2/6] 初始化配置文件...${NC}"
 
 if [ -f "$PROJECT_ROOT/config.json" ]; then
     echo -e "${GREEN}  ✓ config.json 已存在${NC}"
@@ -112,21 +112,33 @@ elif [ -f "$SERVER_DIR/prompts.json.example" ]; then
 fi
 
 # 3. 安装后端依赖
-echo -e "\n${YELLOW}[3/5] 安装后端依赖...${NC}"
+echo -e "\n${YELLOW}[3/6] 安装后端依赖...${NC}"
 cd "$SERVER_DIR"
 $PIP_CMD install -r requirements.txt -q 2>&1 | tail -1
 echo -e "${GREEN}  ✓ 后端依赖安装完成${NC}"
 
 # 4. 安装前端依赖
-echo -e "\n${YELLOW}[4/5] 安装前端依赖...${NC}"
+echo -e "\n${YELLOW}[4/6] 安装前端依赖...${NC}"
 cd "$CLIENT_DIR"
 npm install --silent 2>&1 | tail -1
 echo -e "${GREEN}  ✓ 前端依赖安装完成${NC}"
 
 # 5. 设置脚本权限
-echo -e "\n${YELLOW}[5/5] 设置权限...${NC}"
-chmod +x "$PROJECT_ROOT/start.sh" "$PROJECT_ROOT/stop.sh"
+echo -e "\n${YELLOW}[5/6] 设置权限...${NC}"
+chmod +x "$PROJECT_ROOT/start.sh" "$PROJECT_ROOT/stop.sh" "$PROJECT_ROOT/deploy/configure-public-source.sh" "$PROJECT_ROOT/deploy/certbot/reload-nginx.sh"
 echo -e "${GREEN}  ✓ 脚本权限已设置${NC}"
+
+# 6. 根据已有配置部署 Cupsy 公网入口；空配置会安全跳过。
+echo -e "\n${YELLOW}[6/6] 配置 Cupsy 公网入口...${NC}"
+AUTO_CONFIGURE_PUBLIC_SOURCE=$($PYTHON_CMD -c 'import json,sys; print(str(json.load(open(sys.argv[1])).get("deployment", {}).get("cupsy_public_source", {}).get("auto_configure", True)).lower())' "$PROJECT_ROOT/config.json")
+CUPSY_SOURCE_URL=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("video", {}).get("cupsy", {}).get("source_base_url", ""))' "$PROJECT_ROOT/config.json")
+if [ -n "$CUPSY_SOURCE_URL" ] && [ "$AUTO_CONFIGURE_PUBLIC_SOURCE" = "true" ]; then
+    "$PROJECT_ROOT/deploy/configure-public-source.sh"
+elif [ -z "$CUPSY_SOURCE_URL" ]; then
+    echo -e "${GREEN}  ✓ video.cupsy.source_base_url 为空，已跳过${NC}"
+else
+    echo -e "${YELLOW}  ⚠ deployment.cupsy_public_source.auto_configure 已关闭${NC}"
+fi
 
 # 完成
 echo -e "\n${GREEN}================================${NC}"

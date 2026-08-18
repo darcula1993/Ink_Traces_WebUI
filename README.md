@@ -116,8 +116,8 @@ Dreamina Seedance 2.5 reuses `video.ark.api_key`. Configure its endpoint ID in `
 
 Cupsy is available as a separate Seedance 2.5 video endpoint. Store its key in
 the ignored local `video.cupsy.api_key` setting. Video and Seed Audio reference media is imported through Cupsy Assets, so
-`CUPSY_SOURCE_BASE_URL` or `video.cupsy.source_base_url` must be a public
-HTTP(S) origin that routes back to this application. HTTPS is recommended so
+`video.cupsy.source_base_url` must be a public HTTP(S) origin that routes back
+to this application. HTTPS is recommended so
 signed source URLs are not sent in cleartext. The backend exposes only a
 short-lived signed source URL; generated videos are downloaded locally and are
 never imported into Assets. See `doc/cupsy_compatibility.md` for the verified
@@ -134,18 +134,51 @@ capabilities with enhanced content moderation.
 
 ### IP-only HTTPS for Cupsy sources
 
-Cupsy accepts public HTTP(S) source URLs. This deployment terminates HTTPS on
-the public IP with a free, short-lived Let's Encrypt IP certificate and proxies
-only `/api/cupsy/source/` to Gunicorn. Repository templates are in:
+Cupsy accepts public HTTP(S) source URLs. Set the origin and optional
+certificate notification email in the ignored local config:
 
-- `deploy/nginx/nanobanana-cupsy.conf`
+```json
+{
+  "video": {
+    "cupsy": { "source_base_url": "https://public-source.example.com" }
+  },
+  "deployment": {
+    "cupsy_public_source": {
+      "auto_configure": true,
+      "certificate_email": "ops@example.com"
+    }
+  }
+}
+```
+
+`setup.sh` and `start.sh` call `deploy/configure-public-source.sh`
+idempotently. For HTTPS it installs or updates Nginx and Certbot when needed,
+serves the ACME HTTP challenge, obtains the certificate, renders the proxy from
+the configured host and backend port, validates Nginx before reload, and
+installs renewal automation. A failed certificate request or invalid Nginx
+configuration restores the previous site. Use these commands for explicit
+operation:
+
+```bash
+sudo ./deploy/configure-public-source.sh
+./deploy/configure-public-source.sh --check
+./deploy/configure-public-source.sh --dry-run
+```
+
+Set `NANOBANANA_SKIP_PUBLIC_SOURCE_DEPLOY=1` for one start when infrastructure
+is managed externally. Repository deployment assets are:
+
+- `deploy/configure_public_source.py`
+- `deploy/nginx/nanobanana-cupsy.conf.template`
 - `deploy/certbot/reload-nginx.sh`
 
-IP certificates use the `shortlived` profile and require reliable automated
-renewal. Certbot is configured with the Nginx-served webroot
-`/var/www/certbot`; the Snap renewal timer runs automatically and the deploy
-hook reloads Nginx after a successful renewal. Signed source URLs are disabled
-in Nginx access logs and redacted from application logs.
+Public IP certificates require Certbot 5.4 or newer and use Let's Encrypt's
+roughly six-day `shortlived` profile. The script ensures a twice-daily renewal
+timer is available and reloads Nginx after successful renewal. Port 80 must be
+publicly reachable for HTTP-01 validation; cloud firewall rules remain the
+operator's responsibility. Running the certificate automation accepts the
+Let's Encrypt Subscriber Agreement. Signed source URLs are disabled in Nginx
+access logs and redacted from application logs.
 
 Set `auth.secret_key` or `INK_TRACES_SECRET_KEY` for controlled deployments. If neither is set, the backend creates an ignored local `.flask_secret_key` file so browser sessions survive restarts without committing secrets.
 

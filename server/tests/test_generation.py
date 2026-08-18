@@ -749,10 +749,13 @@ def test_cupsy_api_key_only_comes_from_config(monkeypatch):
     monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
         'api_key': 'configured-cupsy-key',
         'endpoint': 'https://cupsy.invalid',
+        'source_base_url': 'https://configured.example',
     })
     monkeypatch.setenv('CUPSY_API_KEY', 'environment-cupsy-key')
+    monkeypatch.setenv('CUPSY_SOURCE_BASE_URL', 'https://environment.example')
 
     assert application._cupsy_settings()['api_key'] == 'configured-cupsy-key'
+    assert application._cupsy_settings()['source_base_url'] == 'https://configured.example'
     assert application._cupsy_audio_settings()['api_key'] == 'configured-cupsy-key'
 
 

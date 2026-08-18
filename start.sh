@@ -52,6 +52,8 @@ if [ -f "$CONFIG_FILE" ]; then
     REQUEST_TIMEOUT=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("request_timeout_seconds", 120))' "$CONFIG_FILE")
     GUNICORN_MAX_REQUESTS=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("gunicorn_max_requests", 1500))' "$CONFIG_FILE")
     GUNICORN_MAX_REQUESTS_JITTER=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("server", {}).get("gunicorn_max_requests_jitter", 150))' "$CONFIG_FILE")
+    CUPSY_SOURCE_URL=$($PYTHON_CMD -c 'import json,sys; print(json.load(open(sys.argv[1])).get("video", {}).get("cupsy", {}).get("source_base_url", ""))' "$CONFIG_FILE")
+    AUTO_CONFIGURE_PUBLIC_SOURCE=$($PYTHON_CMD -c 'import json,sys; print(str(json.load(open(sys.argv[1])).get("deployment", {}).get("cupsy_public_source", {}).get("auto_configure", True)).lower())' "$CONFIG_FILE")
 else
     echo -e "${YELLOW}Warning: config.json not found, using default ports${NC}"
     SERVER_PORT=5000
@@ -61,6 +63,8 @@ else
     REQUEST_TIMEOUT=120
     GUNICORN_MAX_REQUESTS=1500
     GUNICORN_MAX_REQUESTS_JITTER=150
+    CUPSY_SOURCE_URL=""
+    AUTO_CONFIGURE_PUBLIC_SOURCE=false
 fi
 
 # production: Gunicorn 同时提供构建后的 SPA；dev: 保留 Vite 热更新。
@@ -71,7 +75,7 @@ if [ "$FRONTEND_MODE" != "production" ] && [ "$FRONTEND_MODE" != "dev" ]; then
 fi
 
 # 检查依赖是否安装
-echo -e "${YELLOW}[1/5] 检查依赖...${NC}"
+echo -e "${YELLOW}[1/6] 检查依赖...${NC}"
 
 # 检查前端依赖
 if [ ! -d "$CLIENT_DIR/node_modules" ]; then
@@ -97,6 +101,16 @@ else
     echo -e "${GREEN}✓ 后端依赖已安装${NC}"
 fi
 
+echo -e "\n${YELLOW}[2/6] 检查 Cupsy 公网入口...${NC}"
+if [ -n "$CUPSY_SOURCE_URL" ] && [ "$AUTO_CONFIGURE_PUBLIC_SOURCE" = "true" ] && [ "${NANOBANANA_SKIP_PUBLIC_SOURCE_DEPLOY:-0}" != "1" ]; then
+    "$PROJECT_ROOT/deploy/configure-public-source.sh"
+    echo -e "${GREEN}✓ Cupsy 公网入口与 config.json 一致${NC}"
+elif [ -n "$CUPSY_SOURCE_URL" ] && [ "${NANOBANANA_SKIP_PUBLIC_SOURCE_DEPLOY:-0}" = "1" ]; then
+    echo -e "${YELLOW}⚠ 已通过 NANOBANANA_SKIP_PUBLIC_SOURCE_DEPLOY 跳过公网入口配置${NC}"
+else
+    echo -e "${GREEN}✓ 无需自动配置 Cupsy 公网入口${NC}"
+fi
+
 if [ "$FRONTEND_MODE" = "production" ]; then
     echo -e "${YELLOW}构建生产前端...${NC}"
     cd "$CLIENT_DIR"
@@ -105,7 +119,7 @@ if [ "$FRONTEND_MODE" = "production" ]; then
 fi
 
 # 清理旧进程
-echo -e "\n${YELLOW}[2/5] 清理旧进程...${NC}"
+echo -e "\n${YELLOW}[3/6] 清理旧进程...${NC}"
 
 # 查找并终止占用后端端口的进程
 if lsof -Pi :$SERVER_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -138,14 +152,14 @@ if [ -f "$PROJECT_ROOT/.worker.pid" ]; then
 fi
 
 # 启动任务 worker
-echo -e "\n${YELLOW}[3/5] 启动任务 worker...${NC}"
+echo -e "\n${YELLOW}[4/6] 启动任务 worker...${NC}"
 cd "$SERVER_DIR"
 setsid $PYTHON_CMD worker.py > "$PROJECT_ROOT/worker.log" 2>&1 < /dev/null &
 WORKER_PID=$!
 echo -e "${GREEN}✓ 任务 worker 已启动 (PID: $WORKER_PID)${NC}"
 
 # 启动后端服务
-echo -e "\n${YELLOW}[4/5] 启动后端服务...${NC}"
+echo -e "\n${YELLOW}[5/6] 启动后端服务...${NC}"
 GUNICORN_TIMEOUT=$((REQUEST_TIMEOUT + 30))
 GUNICORN_BINDS=(--bind "$SERVER_HOST:$SERVER_PORT")
 if [ "$FRONTEND_MODE" = "production" ]; then
@@ -171,7 +185,7 @@ for i in {1..10}; do
 done
 
 # 启动前端服务
-echo -e "\n${YELLOW}[5/5] 启动前端服务...${NC}"
+echo -e "\n${YELLOW}[6/6] 启动前端服务...${NC}"
 CLIENT_PID=""
 if [ "$FRONTEND_MODE" = "dev" ]; then
     cd "$CLIENT_DIR"
