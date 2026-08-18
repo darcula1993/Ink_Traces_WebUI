@@ -116,7 +116,7 @@ BUILTIN_DEFAULT_CONFIG = {
             'endpoint': 'https://cupsy.io',
             'model': 'seedance-2.5',
             'source_base_url': '',
-            'asset_token_ttl_seconds': 3600,
+            'asset_token_ttl_seconds': 7200,
         },
     },
     'audio': {
@@ -1850,6 +1850,7 @@ CUPSY_AUDIO_MODEL = 'seed-audio-1.0'
 CUPSY_AUDIO_FORMATS = {'mp3': 'audio/mpeg', 'wav': 'audio/wav', 'ogg_opus': 'audio/ogg'}
 CUPSY_AUDIO_SAMPLE_RATES = {8000, 16000, 24000, 32000, 44100, 48000}
 CUPSY_AUDIO_SPEAKERS = {'vivi', 'mindy', 'kian', 'jess', 'opal'}
+CUPSY_ASSET_SOURCE_MIN_TTL = 7200
 SEEDANCE_25_DEFAULT_MODEL = 'ep-20260807145632-xprc6'
 VIDEO_MODEL_SPECS = {
     SEEDANCE_20: {
@@ -1995,6 +1996,18 @@ def _cupsy_source_url(asset):
     return f'{base_url}/api/cupsy/source/{token}'
 
 
+def _cupsy_asset_create_request(asset):
+    source_url = asset.get('create_source_url')
+    if not source_url:
+        source_url = _cupsy_source_url(asset)
+        task_db.update_provider_asset(asset['id'], create_source_url=source_url)
+    body = {'type': asset['kind'], 'source_url': source_url}
+    fingerprint = hashlib.sha256(
+        json.dumps(body, sort_keys=True, separators=(',', ':')).encode('utf-8')
+    ).hexdigest()[:24]
+    return body, f'nanobanana-asset-{asset["id"]}-{fingerprint}'
+
+
 def create_cupsy_asset_from_upload(file_storage, kind=None):
     mime_type = file_storage.mimetype or 'application/octet-stream'
     inferred_kind = mime_type.split('/', 1)[0]
@@ -2055,10 +2068,11 @@ def process_cupsy_asset_once(asset_id):
     endpoint = settings.get('endpoint', 'https://cupsy.io').rstrip('/')
     try:
         if not asset.get('external_asset_id'):
+            body, idempotency_key = _cupsy_asset_create_request(asset)
             response = HTTP.post(
                 f'{endpoint}/v1/assets',
-                headers=_cupsy_headers(f'nanobanana-asset-{asset_id}-{asset["sha256"][:16]}'),
-                json={'type': asset['kind'], 'source_url': _cupsy_source_url(asset)},
+                headers=_cupsy_headers(idempotency_key),
+                json=body,
                 timeout=(10, 60),
             )
             if response.status_code not in {200, 201, 202}:
@@ -2140,7 +2154,11 @@ def cupsy_asset_content(asset_id):
 @app.route('/api/cupsy/source/<token>', methods=['GET', 'HEAD'])
 def cupsy_asset_source(token):
     serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='cupsy-asset-source')
-    ttl = max(60, int(_cupsy_settings().get('asset_token_ttl_seconds', 3600) or 3600))
+    ttl = max(
+        CUPSY_ASSET_SOURCE_MIN_TTL,
+        int(_cupsy_settings().get('asset_token_ttl_seconds', CUPSY_ASSET_SOURCE_MIN_TTL)
+            or CUPSY_ASSET_SOURCE_MIN_TTL),
+    )
     try:
         payload = serializer.loads(token, max_age=ttl)
     except SignatureExpired:

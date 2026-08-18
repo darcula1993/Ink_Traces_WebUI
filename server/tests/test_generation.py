@@ -745,6 +745,68 @@ def test_cupsy_asset_lifecycle_uses_signed_local_source(monkeypatch):
     assert task_db.get_provider_asset(asset_id)['status'] == 'deleted'
 
 
+def test_cupsy_asset_retry_reuses_source_url_and_idempotency_key(monkeypatch):
+    monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
+        'api_key': 'cupsy-test-key',
+        'endpoint': 'https://cupsy.invalid',
+        'source_base_url': 'https://studio.example',
+    })
+    asset = task_db.create_provider_asset(
+        'cupsy', 'image', hashlib.sha256(_png_bytes()).hexdigest(), 'reference.png',
+        'image/png', len(_png_bytes()), str(storage.WORKSPACE_ASSET_DIR + '/reference.png'),
+    )
+    source_calls = []
+
+    def source_url(_asset):
+        source_calls.append(_asset['id'])
+        return 'https://studio.example/api/cupsy/source/stable-token'
+
+    requests_seen = []
+
+    def post(_url, **kwargs):
+        requests_seen.append({
+            'body': dict(kwargs['json']),
+            'key': kwargs['headers']['Idempotency-Key'],
+        })
+        if len(requests_seen) == 1:
+            raise requests.Timeout('response lost')
+        return FakeResponse(status_code=202, payload={
+            'id': 'asset_retry_1', 'asset_uri': 'asset://asset_retry_1', 'status': 'pending',
+        })
+
+    monkeypatch.setattr(application, '_cupsy_source_url', source_url)
+    monkeypatch.setattr(application.HTTP, 'post', post)
+
+    assert application.process_cupsy_asset_once(asset['id'])['state'] == 'retry'
+    assert application.process_cupsy_asset_once(asset['id'])['state'] == 'pending'
+    assert source_calls == [asset['id']]
+    assert requests_seen[0] == requests_seen[1]
+    assert requests_seen[0]['body']['source_url'].endswith('/stable-token')
+    assert task_db.get_provider_asset(asset['id'])['create_source_url'].endswith('/stable-token')
+
+
+def test_cupsy_idempotency_conflict_is_requeued_during_migration():
+    asset = task_db.create_provider_asset(
+        'cupsy', 'image', hashlib.sha256(_png_bytes()).hexdigest(), 'reference.png',
+        'image/png', len(_png_bytes()), str(storage.WORKSPACE_ASSET_DIR + '/reference.png'),
+    )
+    task_db.update_provider_asset(
+        asset['id'], status='failed', attempt_count=5,
+        create_source_url='https://old.example/source/token',
+        error='Idempotency key was already used for a different request.',
+        next_run_at=None,
+    )
+
+    task_db.init_db()
+
+    recovered = task_db.get_provider_asset(asset['id'])
+    assert recovered['status'] == 'pending'
+    assert recovered['error'] is None
+    assert recovered['attempt_count'] == 0
+    assert recovered['create_source_url'] is None
+    assert recovered['next_run_at'] is not None
+
+
 def test_cupsy_api_key_only_comes_from_config(monkeypatch):
     monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
         'api_key': 'configured-cupsy-key',

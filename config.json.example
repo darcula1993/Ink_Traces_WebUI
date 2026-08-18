@@ -82,7 +82,7 @@
       "endpoint": "https://cupsy.io",
       "model": "seedance-2.5",
       "source_base_url": "",
-      "asset_token_ttl_seconds": 3600
+      "asset_token_ttl_seconds": 7200
     }
   },
   "audio": {

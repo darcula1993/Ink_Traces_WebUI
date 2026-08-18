@@ -131,6 +131,7 @@ def init_db():
             mime_type TEXT,
             size_bytes INTEGER NOT NULL DEFAULT 0,
             local_path TEXT NOT NULL,
+            create_source_url TEXT,
             error TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
@@ -143,6 +144,9 @@ def init_db():
             UNIQUE(provider, kind, sha256)
         )
     ''')
+    _ensure_columns(db, 'provider_assets', {
+        'create_source_url': 'TEXT',
+    })
     db.execute('''
         CREATE TABLE IF NOT EXISTS task_provider_assets (
             task_id INTEGER NOT NULL,
@@ -285,6 +289,17 @@ def init_db():
     db.execute('CREATE INDEX IF NOT EXISTS idx_layer_revisions_project ON layer_revisions(project_id, id DESC)')
     now = utcnow()
     db.execute('UPDATE tasks SET updated_at = COALESCE(updated_at, created_at, ?)', (now,))
+    db.execute(
+        '''UPDATE provider_assets
+           SET status = 'pending', error = NULL, next_run_at = ?, attempt_count = 0,
+               create_source_url = NULL, lease_owner = NULL, lease_until = NULL,
+               updated_at = ?
+           WHERE provider = 'cupsy'
+             AND external_asset_id IS NULL
+             AND status = 'failed'
+             AND error LIKE '%Idempotency key was already used for a different request%' ''',
+        (now, now),
+    )
     if not search_exists:
         db.execute("INSERT INTO task_search(task_search) VALUES ('rebuild')")
     db.commit()
@@ -1280,6 +1295,22 @@ def create_provider_asset(provider, kind, sha256, original_name, mime_type, size
                WHEN provider_assets.deleted_at IS NOT NULL THEN NULL
                ELSE provider_assets.asset_uri
              END,
+             create_source_url = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN NULL
+               ELSE provider_assets.create_source_url
+             END,
+             attempt_count = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN 0
+               ELSE provider_assets.attempt_count
+             END,
+             lease_owner = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN NULL
+               ELSE provider_assets.lease_owner
+             END,
+             lease_until = CASE
+               WHEN provider_assets.deleted_at IS NOT NULL THEN NULL
+               ELSE provider_assets.lease_until
+             END,
              error = CASE WHEN provider_assets.deleted_at IS NOT NULL THEN NULL ELSE provider_assets.error END,
              deleted_at = NULL,
              next_run_at = CASE WHEN provider_assets.deleted_at IS NOT NULL THEN excluded.next_run_at ELSE provider_assets.next_run_at END,
@@ -1312,7 +1343,7 @@ def update_provider_asset(asset_id, **kwargs):
     allowed = {
         'external_asset_id', 'asset_uri', 'status', 'error', 'updated_at', 'last_used_at',
         'deleted_at', 'next_run_at', 'attempt_count', 'lease_owner', 'lease_until',
-        'mime_type', 'size_bytes',
+        'mime_type', 'size_bytes', 'create_source_url',
     }
     fields = {key: value for key, value in kwargs.items() if key in allowed}
     if not fields:
