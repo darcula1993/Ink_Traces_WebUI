@@ -51,6 +51,13 @@ one `video/mp4` artifact and a video content URL, with no image artifact or last
 frame URL. The content endpoint also returned only `video/mp4`. Cupsy therefore
 accepts but does not honor this parameter as of the verification date.
 
+Completed outputs are downloaded through `/v1/artifacts/{id}/content`, which
+redirects to object storage. The task-specific video content proxy can transfer
+large files very slowly despite continuing to return data, so it is retained
+only as a compatibility fallback when the response has no artifact id. The
+downloaded byte count is checked against the artifact's declared `size_bytes`
+before a task is marked complete.
+
 ## Asset contract
 
 All Cupsy generation references are durable Assets. The application does not

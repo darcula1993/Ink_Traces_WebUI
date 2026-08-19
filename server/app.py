@@ -15,7 +15,7 @@ import zipfile
 import hashlib
 import mimetypes
 import shutil
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 from PIL import Image, UnidentifiedImageError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import uuid
@@ -3921,6 +3921,67 @@ def _cupsy_video_content(task, assets):
     return content
 
 
+def _cupsy_output_source(payload, endpoint, output_kind, fallback_path):
+    """Resolve a completed Cupsy output, preferring its direct artifact route."""
+    artifacts = [item for item in (payload.get('artifacts') or []) if isinstance(item, dict)]
+    artifact = next((
+        item for item in artifacts
+        if item.get('id') and (
+            str(item.get('kind') or '').lower() == output_kind
+            or str(item.get('mime_type') or '').lower().startswith(f'{output_kind}/')
+        )
+    ), None)
+    if artifact is None and len(artifacts) == 1 and artifacts[0].get('id'):
+        artifact = artifacts[0]
+    if artifact:
+        size_bytes = artifact.get('size_bytes') or artifact.get('size')
+        try:
+            expected_size = int(size_bytes) if size_bytes is not None else None
+        except (TypeError, ValueError):
+            expected_size = None
+        if expected_size is not None and expected_size <= 0:
+            expected_size = None
+        artifact_id = quote(str(artifact['id']), safe='')
+        return f'{endpoint}/v1/artifacts/{artifact_id}/content', expected_size, True
+
+    content_url = str(payload.get('content_url') or '').strip()
+    if content_url:
+        resolved_url = urljoin(f'{endpoint}/', content_url)
+        endpoint_origin = urlsplit(endpoint)[:2]
+        content_origin = urlsplit(resolved_url)[:2]
+        return resolved_url, None, endpoint_origin == content_origin
+    return f'{endpoint}/{fallback_path.lstrip("/")}', None, True
+
+
+def _download_cupsy_output(payload, endpoint, output_kind, fallback_path, path):
+    url, expected_size, authenticated = _cupsy_output_source(
+        payload, endpoint, output_kind, fallback_path,
+    )
+    try:
+        with HTTP.get(
+            url, headers=_cupsy_headers() if authenticated else {},
+            timeout=(10, DOWNLOAD_TIMEOUT), stream=True,
+        ) as download:
+            if download.status_code >= 400:
+                return f'Cupsy {output_kind} download failed {download.status_code}'
+            storage.stream_response_to_file(download, path)
+    except requests.RequestException as error:
+        return str(error)
+
+    if expected_size is not None:
+        try:
+            actual_size = os.path.getsize(path)
+        except OSError as error:
+            return str(error)
+        if actual_size != expected_size:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return f'Cupsy {output_kind} download incomplete: {actual_size}/{expected_size} bytes'
+    return None
+
+
 def _poll_cupsy_video_task(task):
     task_id = task['id']
     settings = _cupsy_settings()
@@ -4009,16 +4070,11 @@ def _poll_cupsy_video_task(task):
     output_dir = task.get('output_dir') or storage.task_output_dir('video', task_id)
     filename = 'video.mp4'
     path = os.path.join(output_dir, filename)
-    try:
-        with HTTP.get(
-            f'{endpoint}/v1/videos/{external_id}/content', headers=_cupsy_headers(),
-            timeout=(10, DOWNLOAD_TIMEOUT), stream=True,
-        ) as download:
-            if download.status_code >= 400:
-                return {'state': 'retry', 'error': f'Cupsy 视频下载失败 {download.status_code}'}
-            storage.stream_response_to_file(download, path)
-    except requests.RequestException as error:
-        return {'state': 'retry', 'error': str(error)}
+    download_error = _download_cupsy_output(
+        payload, endpoint, 'video', f'/v1/videos/{external_id}/content', path,
+    )
+    if download_error:
+        return {'state': 'retry', 'error': download_error}
     storage.register_file(task_id, 'output_video', path, 'video/mp4')
     result = {
         'videos': [],
@@ -4028,6 +4084,7 @@ def _poll_cupsy_video_task(task):
         'local_thumbnails': [],
         'local_video': f'/api/tasks/{task_id}/file/{filename}',
         'provider_video_id': external_id,
+        'artifacts': payload.get('artifacts') or [],
     }
     if not task_db.complete_task(task_id, result, output_dir):
         storage.remove_task_output_files(task_id)
@@ -4138,16 +4195,12 @@ def _poll_cupsy_audio_task(task):
     filename = f'audio.{"ogg" if output_format == "ogg_opus" else output_format}'
     output_dir = task.get('output_dir') or storage.task_output_dir('audio', task_id)
     path = os.path.join(output_dir, filename)
-    try:
-        with HTTP.get(
-            f'{endpoint}/v1/audio/generations/{external_id}/content',
-            headers=_cupsy_headers(), timeout=(10, DOWNLOAD_TIMEOUT), stream=True,
-        ) as download:
-            if download.status_code >= 400:
-                return {'state': 'retry', 'error': f'Cupsy 音频下载失败 {download.status_code}'}
-            storage.stream_response_to_file(download, path)
-    except requests.RequestException as error:
-        return {'state': 'retry', 'error': str(error)}
+    download_error = _download_cupsy_output(
+        payload, endpoint, 'audio',
+        f'/v1/audio/generations/{external_id}/content', path,
+    )
+    if download_error:
+        return {'state': 'retry', 'error': download_error}
     storage.register_file(task_id, 'output_audio', path, CUPSY_AUDIO_FORMATS[output_format])
     result = {
         'local_audio': f'/api/tasks/{task_id}/file/{filename}',

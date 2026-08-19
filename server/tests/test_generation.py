@@ -821,6 +821,26 @@ def test_cupsy_api_key_only_comes_from_config(monkeypatch):
     assert application._cupsy_audio_settings()['api_key'] == 'configured-cupsy-key'
 
 
+def test_cupsy_output_source_keeps_legacy_fallbacks_scoped_to_provider():
+    assert application._cupsy_output_source(
+        {'content_url': '/v1/videos/video_legacy/content'},
+        'https://cupsy.invalid', 'video', '/unused',
+    ) == (
+        'https://cupsy.invalid/v1/videos/video_legacy/content', None, True,
+    )
+    assert application._cupsy_output_source(
+        {'content_url': 'https://objects.invalid/output.mp4'},
+        'https://cupsy.invalid', 'video', '/unused',
+    ) == (
+        'https://objects.invalid/output.mp4', None, False,
+    )
+    assert application._cupsy_output_source(
+        {}, 'https://cupsy.invalid', 'video', '/v1/videos/video_legacy/content',
+    ) == (
+        'https://cupsy.invalid/v1/videos/video_legacy/content', None, True,
+    )
+
+
 def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
         'api_key': 'cupsy-test-key',
@@ -886,16 +906,51 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     }
     assert task_db.list_task_provider_assets(task_id)[0]['id'] == asset['id']
 
+    downloaded_urls = []
+    video_bytes = b'cupsy-video'
+
     def fake_get(url, **_kwargs):
-        if url.endswith('/content'):
+        if '/v1/artifacts/' in url:
+            downloaded_urls.append(url)
             return FakeResponse(content=b'cupsy-video')
-        return FakeResponse(payload={'id': 'video_remote_1', 'status': 'succeeded'})
+        return FakeResponse(payload={
+            'id': 'video_remote_1', 'status': 'succeeded',
+            'content_url': '/v1/videos/video_remote_1/content',
+            'artifacts': [{
+                'id': 'artifact/video 1', 'kind': 'video', 'mime_type': 'video/mp4',
+                'size_bytes': len(video_bytes) + 1,
+            }],
+        })
 
     monkeypatch.setattr(application.HTTP, 'get', fake_get)
     outcome = application.poll_video_task_once(task_id)
+    assert outcome['state'] == 'retry'
+    assert 'download incomplete' in outcome['error']
+    assert not os.path.exists(os.path.join(storage.OUTPUT_DIR, 'video', str(task_id), 'video.mp4'))
+
+    def complete_get(url, **_kwargs):
+        if '/v1/artifacts/' in url:
+            downloaded_urls.append(url)
+            return FakeResponse(content=video_bytes)
+        return FakeResponse(payload={
+            'id': 'video_remote_1', 'status': 'succeeded',
+            'content_url': '/v1/videos/video_remote_1/content',
+            'artifacts': [{
+                'id': 'artifact/video 1', 'kind': 'video', 'mime_type': 'video/mp4',
+                'size_bytes': len(video_bytes),
+            }],
+        })
+
+    monkeypatch.setattr(application.HTTP, 'get', complete_get)
+    outcome = application.poll_video_task_once(task_id)
     assert outcome['state'] == 'succeeded'
+    assert downloaded_urls == [
+        'https://cupsy.invalid/v1/artifacts/artifact%2Fvideo%201/content',
+        'https://cupsy.invalid/v1/artifacts/artifact%2Fvideo%201/content',
+    ]
     task = task_db.get_task(task_id)
     assert task['result']['local_video'] == f'/api/tasks/{task_id}/file/video.mp4'
+    assert task['result']['artifacts'][0]['id'] == 'artifact/video 1'
     assert task_db.list_provider_assets('cupsy')[0]['external_asset_id'] == 'asset_remote_2'
 
     invalid = application.app.test_client().post('/api/video/generate', json={
@@ -964,12 +1019,18 @@ def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):
         'format': 'wav', 'sample_rate': 48000, 'enable_subtitle': True,
     }
 
+    audio_downloads = []
+
     def fake_get(url, **_kwargs):
-        if url.endswith('/content'):
+        if '/v1/artifacts/' in url:
+            audio_downloads.append(url)
             return FakeResponse(content=b'generated-wave')
         return FakeResponse(payload={
             'id': 'audio_remote_1', 'status': 'succeeded', 'duration_seconds': 12.4,
-            'artifacts': [{'id': 'artifact_audio_1'}],
+            'artifacts': [{
+                'id': 'artifact_audio_1', 'kind': 'audio', 'mime_type': 'audio/wav',
+                'size_bytes': len(b'generated-wave'),
+            }],
         })
 
     monkeypatch.setattr(application.HTTP, 'get', fake_get)
@@ -977,6 +1038,7 @@ def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):
     task = task_db.get_task(task_id)
     assert task['result']['local_audio'] == f'/api/tasks/{task_id}/file/audio.wav'
     assert task['result']['duration_seconds'] == 12.4
+    assert audio_downloads == ['https://cupsy.invalid/v1/artifacts/artifact_audio_1/content']
     output = next(item for item in task_db.list_assets(task_id) if item['kind'] == 'output_audio')
     assert output['mime_type'] == 'audio/wav'
     detail = application.app.test_client().get(f'/api/tasks/{task_id}').get_json()['task']
