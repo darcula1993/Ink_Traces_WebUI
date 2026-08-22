@@ -1334,6 +1334,59 @@
   color: var(--color-nexus-green);
 }
 
+.prompt-mention-menu {
+  position: fixed;
+  z-index: 1400;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #303943;
+  border-radius: 7px;
+  background: #0c1014;
+  padding: 4px;
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.68);
+}
+
+.prompt-mention-option {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 5px 7px;
+  color: var(--color-nexus-text);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.prompt-mention-option:hover,
+.prompt-mention-option[aria-selected="true"] {
+  border-color: rgba(83, 218, 153, 0.28);
+  background: #14221d;
+}
+
+.prompt-mention-thumbnail {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid #323c45;
+  border-radius: 4px;
+  background: #080b0e;
+  color: var(--color-nexus-text);
+}
+
+.prompt-mention-thumbnail-video {
+  color: var(--color-nexus-green);
+}
+
+.prompt-mention-thumbnail-audio {
+  color: var(--color-nexus-cyan);
+}
+
 .audio-task-artwork {
   background:
     linear-gradient(rgba(77, 224, 235, 0.045) 1px, transparent 1px),

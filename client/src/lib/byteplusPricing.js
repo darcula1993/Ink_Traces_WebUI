@@ -56,33 +56,25 @@ const OUTPUT_DIMENSIONS = {
   },
 }
 
-const STANDARD_UNIT_PRICE_CNY = {
-  '480p': { withoutVideo: 46, withVideo: 28 },
-  '720p': { withoutVideo: 46, withVideo: 28 },
-  '1080p': { withoutVideo: 51, withVideo: 31 },
+const STANDARD_UNIT_PRICE_USD = {
+  '480p': { withoutVideo: 7.0, withVideo: 4.3 },
+  '720p': { withoutVideo: 7.0, withVideo: 4.3 },
+  '1080p': { withoutVideo: 7.7, withVideo: 4.7 },
 }
 
-const FAST_UNIT_PRICE_CNY = {
-  '480p': { withoutVideo: 37, withVideo: 22 },
-  '720p': { withoutVideo: 37, withVideo: 22 },
+const FAST_UNIT_PRICE_USD = {
+  '480p': { withoutVideo: 5.6, withVideo: 3.3 },
+  '720p': { withoutVideo: 5.6, withVideo: 3.3 },
 }
 
-// Preserve the existing CNY display basis while applying Seedance 2.5's
-// resolution- and input-specific USD token rates.
-const SEEDANCE_25_UNIT_PRICE_CNY = {
-  '480p': {
-    withoutVideo: STANDARD_UNIT_PRICE_CNY['480p'].withoutVideo * (10.70 / 7.00),
-    withVideo: STANDARD_UNIT_PRICE_CNY['480p'].withVideo * (6.40 / 4.30),
-  },
-  '720p': {
-    withoutVideo: STANDARD_UNIT_PRICE_CNY['720p'].withoutVideo * (10.70 / 7.00),
-    withVideo: STANDARD_UNIT_PRICE_CNY['720p'].withVideo * (6.40 / 4.30),
-  },
-  '1080p': {
-    withoutVideo: STANDARD_UNIT_PRICE_CNY['1080p'].withoutVideo * (11.70 / 7.70),
-    withVideo: STANDARD_UNIT_PRICE_CNY['1080p'].withVideo * (7.00 / 4.70),
-  },
+const SEEDANCE_25_UNIT_PRICE_USD = {
+  '480p': { withoutVideo: 10.70, withVideo: 6.40 },
+  '720p': { withoutVideo: 10.70, withVideo: 6.40 },
+  '1080p': { withoutVideo: 11.70, withVideo: 7.00 },
 }
+const SEEDANCE_25_1080P_PROMOTION_FACTOR = 0.72
+const SEEDANCE_25_1080P_PROMOTION_START = Date.parse('2026-08-14T06:00:00Z')
+const SEEDANCE_25_1080P_PROMOTION_END = Date.parse('2026-09-17T06:00:00Z')
 
 function outputDurationRange(model, duration) {
   if (Number(duration) !== -1) {
@@ -118,11 +110,13 @@ function tokensForSeconds(seconds, width, height) {
 
 export function estimateBytePlusVideoCost({
   model = 'seedance-2.0',
+  provider = 'ark',
   resolution = '720p',
   ratio = 'adaptive',
   duration = 5,
   fast = false,
   referenceVideos = [],
+  now = Date.now(),
 } = {}) {
   const normalizedModel = ['seedance-2.5', 'seedance-2.5-moderated'].includes(model)
     ? 'seedance-2.5'
@@ -137,12 +131,19 @@ export function estimateBytePlusVideoCost({
   const hasVideo = readyVideos.length > 0
   const useFastPrice = normalizedModel === 'seedance-2.0' && Boolean(fast)
   const priceTable = normalizedModel === 'seedance-2.5'
-    ? SEEDANCE_25_UNIT_PRICE_CNY
+    ? SEEDANCE_25_UNIT_PRICE_USD
     : useFastPrice
-      ? FAST_UNIT_PRICE_CNY
-      : STANDARD_UNIT_PRICE_CNY
+      ? FAST_UNIT_PRICE_USD
+      : STANDARD_UNIT_PRICE_USD
   const priceRow = priceTable[resolution] || priceTable['720p']
-  const unitPrice = hasVideo ? priceRow.withVideo : priceRow.withoutVideo
+  const listUnitPrice = hasVideo ? priceRow.withVideo : priceRow.withoutVideo
+  const promotionActive = normalizedModel === 'seedance-2.5'
+    && provider === 'ark'
+    && resolution === '1080p'
+    && Number(now) >= SEEDANCE_25_1080P_PROMOTION_START
+    && Number(now) < SEEDANCE_25_1080P_PROMOTION_END
+  const discountFactor = promotionActive ? SEEDANCE_25_1080P_PROMOTION_FACTOR : 1
+  const unitPrice = listUnitPrice * discountFactor
   const [minimumOutputSeconds, maximumOutputSeconds] = outputDurationRange(normalizedModel, duration)
   const minimumTokens = tokensForSeconds(input.seconds + minimumOutputSeconds, width, height)
   const maximumTokens = tokensForSeconds(input.seconds + maximumOutputSeconds, width, height)
@@ -162,16 +163,22 @@ export function estimateBytePlusVideoCost({
     maximumOutputSeconds,
     minimumTokens,
     maximumTokens,
+    currency: 'USD',
+    listUnitPrice,
     unitPrice,
+    discountFactor,
+    promotionActive,
     minimumCost: minimumTokens / 1_000_000 * unitPrice,
     maximumCost: maximumTokens / 1_000_000 * unitPrice,
+    minimumListCost: minimumTokens / 1_000_000 * listUnitPrice,
+    maximumListCost: maximumTokens / 1_000_000 * listUnitPrice,
   }
 }
 
-export function formatCnyEstimate(estimate) {
+export function formatUsdEstimate(estimate) {
   const minimum = estimate.minimumCost.toFixed(2)
   const maximum = estimate.maximumCost.toFixed(2)
-  return minimum === maximum ? `¥${minimum}` : `¥${minimum}~¥${maximum}`
+  return minimum === maximum ? `$${minimum}` : `$${minimum}~$${maximum}`
 }
 
 export function formatWanTokens(minimumTokens, maximumTokens) {

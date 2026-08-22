@@ -7,6 +7,7 @@ import TaskGallery from './components/TaskGallery'
 import PngInfoModal from './components/PngInfoModal'
 import ReferenceMediaModal from './components/ReferenceMediaModal'
 import CupsyAssetManager from './components/CupsyAssetManager'
+import PromptMentionTextarea from './components/PromptMentionTextarea'
 import SortableReferenceItem, { moveArrayItem } from './components/SortableReferenceItem'
 import CodeRainCanvas from './components/CodeRainCanvas'
 import GlassBackdrop from './components/GlassBackdrop'
@@ -16,7 +17,7 @@ import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
 import { Play, Settings, Cpu, HardDrive, Grid3X3, Grid2X2Check, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, User, LockKeyhole, Lock, LockOpen, ArrowLeftRight, AudioLines, CircleAlert, FileSearch, Layers3 } from 'lucide-react'
-import { estimateBytePlusVideoCost, formatCnyEstimate, formatWanTokens } from './lib/byteplusPricing'
+import { estimateBytePlusVideoCost, formatUsdEstimate, formatWanTokens } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceState } from './lib/useWorkspaceState'
 
 axios.defaults.withCredentials = true
@@ -41,6 +42,57 @@ const AUDIO_SPEAKERS = [
 ]
 const VIDEO_REFERENCE_EXTENSIONS = new Set(['mp4', 'mov'])
 const AUDIO_REFERENCE_EXTENSIONS = new Set(['wav', 'mp3'])
+
+function promptMentionItem(type, number, item, source) {
+  const label = `${type[0].toUpperCase()}${type.slice(1)}${number}`
+  return {
+    id: `${source}-${number}-${item?.cupsyAssetId || item?.uid || item?.name || label}`,
+    type,
+    label,
+    token: `[${label}]`,
+    name: item?.name || item?.file?.name || label,
+    preview: type === 'image' ? item?.preview : null,
+    thumbnail: type === 'video' ? item?.thumbnail : null,
+  }
+}
+
+function currentPromptMentionItems(appMode, imageTab, videoTab, audioForm) {
+  if (appMode === 'image') {
+    return (imageTab.uploadedImages || []).map((item, index) => (
+      promptMentionItem('image', index + 1, item, 'image-form')
+    ))
+  }
+
+  if (appMode === 'video') {
+    if (videoTab.mode === 'keyframe') {
+      return [
+        videoTab.firstFrame && promptMentionItem('image', 1, videoTab.firstFrame, 'first-frame'),
+        videoTab.lastFrame && promptMentionItem('image', 2, videoTab.lastFrame, 'last-frame'),
+      ].filter(Boolean)
+    }
+    return [
+      ...(videoTab.refImages || []).map((item, index) => promptMentionItem('image', index + 1, item, 'video-image')),
+      ...(videoTab.refVideos || [])
+        .filter(item => item.url && !item.uploading)
+        .map((item, index) => promptMentionItem('video', index + 1, item, 'video-video')),
+      ...(videoTab.refAudios || []).map((item, index) => promptMentionItem('audio', index + 1, item, 'video-audio')),
+    ]
+  }
+
+  if (appMode === 'audio') {
+    const references = audioForm.references || []
+    const imageReferences = references.filter(item => item.kind === 'image')
+    const audioReferences = references.filter(item => item.kind === 'audio')
+    const audioOffset = audioForm.speaker ? 1 : 0
+    return [
+      ...imageReferences.map((item, index) => promptMentionItem('image', index + 1, item, 'audio-image')),
+      ...audioReferences.map((item, index) => promptMentionItem('audio', index + audioOffset + 1, item, 'audio-audio')),
+    ]
+  }
+
+  return []
+}
+
 const VIDEO_MODEL_CAPABILITIES = {
   [SEEDANCE_20]: {
     label: 'Dreamina Seedance 2.0',
@@ -1574,6 +1626,7 @@ function App({ onLogout }) {
     else if (appMode === 'audio') updateAudioForm({ prompt })
     else updateImgTab(activeImgTab.id, { prompt })
   }
+  const promptMentionItems = currentPromptMentionItems(appMode, activeImgTab, activeTab, audioForm)
 
   return (
     <div ref={appShellRef} className="app-shell bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative">
@@ -1624,6 +1677,7 @@ function App({ onLogout }) {
           <div className="flex-grow flex flex-col min-h-0 relative z-10">
             <TextToImage 
               prompt={activeImgTab.prompt} setPrompt={v => updateImgTab(activeImgTab.id, { prompt: v })}
+              mentionItems={promptMentionItems}
               isGenerating={false} chatMode={activeImgTab.chatMode}
               onSavePrompt={handleSavePrompt}
             />
@@ -1955,10 +2009,12 @@ function App({ onLogout }) {
                   <span className="font-mono text-[11px] text-nexus-muted">{activeTab.prompt.length}</span>
                 </div>
                 <div className="flex-grow min-h-0 relative overflow-hidden">
-                  <textarea
+                  <PromptMentionTextarea
                     aria-label="视频提示词"
                     value={activeTab.prompt}
-                    onChange={(e) => updateTab(activeTab.id, { prompt: e.target.value })}
+                    onValueChange={prompt => updateTab(activeTab.id, { prompt })}
+                    mentionItems={promptMentionItems}
+                    wrapperClassName="absolute inset-0"
                     className="absolute inset-0 resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
                     spellCheck="true"
                     placeholder="描述镜头、主体、动作、光线与节奏..."
@@ -2409,12 +2465,13 @@ function App({ onLogout }) {
               {/* PRICE ESTIMATE */}
               <div className="inspector-section">
                 <div className="inspector-title">
-                  <Database size={14} className="text-nexus-amber" /> 费用估算
+                  <Database size={14} className="text-nexus-amber" /> 费用估算 (USD)
                 </div>
                 <div className="flex flex-col justify-between flex-grow gap-2">
                   {(() => {
                     const estimate = estimateBytePlusVideoCost({
                       model: effectiveVideoModel,
+                      provider: activeVideoProvider,
                       resolution: activeTab.resolution,
                       ratio: effectiveVideoRatio,
                       duration: effectiveVideoDuration,
@@ -2428,9 +2485,12 @@ function App({ onLogout }) {
                       ? `参考视频 ${estimate.inputVideoSeconds.toFixed(1).replace(/\.0$/, '')}s${estimate.inputDurationAssumed ? '（含 5s 默认值）' : ''}`
                       : '无参考视频'
                     return (<>
-                      <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatCnyEstimate(estimate)}</div>
+                      <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatUsdEstimate(estimate)}</div>
                       <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
-                        <div>{effectiveVideoModel === SEEDANCE_25_MODERATED ? 'Seedance 2.5 · 加强审核' : isSeedance25 ? 'Seedance 2.5 · 官方费率' : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
+                        <div>{activeVideoProvider === 'cupsy'
+                          ? effectiveVideoModel === SEEDANCE_25_MODERATED ? 'Seedance 2.5 · Cupsy 加强审核' : 'Seedance 2.5 · Cupsy 费率'
+                          : isSeedance25 ? `Seedance 2.5 · BytePlus${estimate.promotionActive ? ' 限时按 72% 计费' : ''}`
+                            : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
                         <div>{estimate.width}×{estimate.height} · {outputDuration} · {estimate.fps}fps</div>
                         <div>{inputVideo}</div>
                         <div className="mt-1 opacity-50">≈{formatWanTokens(estimate.minimumTokens, estimate.maximumTokens)}{estimate.ratioAssumed ? ' · Adaptive 按 16:9' : ''}</div>
@@ -2451,13 +2511,15 @@ function App({ onLogout }) {
                 <span className="text-xs font-medium text-nexus-text-light">音频场景提示词</span>
                 <span className={`font-mono text-[11px] ${audioForm.prompt.length > 3000 ? 'text-nexus-red' : 'text-nexus-muted'}`}>{audioForm.prompt.length} / 3000</span>
               </div>
-              <textarea
+              <PromptMentionTextarea
                 aria-label="音频提示词"
                 value={audioForm.prompt}
                 maxLength={3000}
-                onChange={event => updateAudioForm({ prompt: event.target.value })}
-                className="min-h-0 flex-grow resize-none bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
-                placeholder="描述对白、音乐、环境声、音效及时间关系；使用 @Audio1 引用音频素材..."
+                onValueChange={prompt => updateAudioForm({ prompt })}
+                mentionItems={promptMentionItems}
+                wrapperClassName="relative min-h-0 flex-grow"
+                className="absolute inset-0 resize-none bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
+                placeholder="描述对白、音乐、环境声、音效及时间关系..."
               />
             </div>
             <div className="prompt-actions z-10 border-t border-nexus-border p-3">
@@ -2555,7 +2617,7 @@ function App({ onLogout }) {
                       <div key={`${reference.cupsyAssetId}-${index}`} className="audio-reference-card group relative">
                         <button type="button" className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2" onClick={() => setReferenceMedia({ type: reference.kind, src: reference.preview, name: reference.name })}>
                           {reference.kind === 'image' ? <img src={reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
-                          {reference.kind === 'audio' && <span className="w-full truncate text-center text-[9px] text-nexus-muted">@Audio{index + (audioForm.speaker ? 2 : 1)}</span>}
+                          {reference.kind === 'audio' && <span className="w-full truncate text-center text-[9px] text-nexus-muted">[Audio{index + (audioForm.speaker ? 2 : 1)}]</span>}
                         </button>
                         <button type="button" aria-label={`删除参考素材 ${index + 1}`} onClick={() => updateAudioForm(form => ({ references: form.references.filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white opacity-0 group-hover:opacity-100 hover:bg-nexus-red"><X size={10} /></button>
                       </div>
@@ -2569,7 +2631,7 @@ function App({ onLogout }) {
                     )}
                   </div>
                   <div className="mt-2 font-mono text-[9px] text-nexus-muted">
-                    {audioForm.referenceMode === 'audio' ? '按顺序对应 @Audio1–@Audio3' : '图片用于引导完整音频场景'}
+                    {audioForm.referenceMode === 'audio' ? '按顺序对应 [Audio1]–[Audio3]' : '图片用于引导完整音频场景'}
                   </div>
                 </div>
               )}
@@ -2653,12 +2715,14 @@ function App({ onLogout }) {
                   ))}
                 </div>
                 {/* 输入区 */}
-                <textarea
+                <PromptMentionTextarea
                   autoFocus
                   aria-label="编辑提示词"
                   value={currentEditorPrompt}
-                  onChange={(e) => setCurrentEditorPrompt(e.target.value)}
-                  className="min-w-0 flex-grow resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent p-4 font-mono text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar"
+                  onValueChange={setCurrentEditorPrompt}
+                  mentionItems={promptMentionItems}
+                  wrapperClassName="relative min-w-0 flex-grow"
+                  className="absolute inset-0 resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent p-4 font-mono text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar"
                   spellCheck="true"
                   placeholder="输入提示词..."
                 />

@@ -1,9 +1,8 @@
-import React, { useRef } from 'react'
+import React from 'react'
 import { Save } from 'lucide-react'
+import PromptMentionTextarea from './PromptMentionTextarea'
 
-function TextToImage({ prompt, setPrompt, isGenerating, chatMode, onSavePrompt }) {
-  const textareaRef = useRef(null)
-
+function TextToImage({ prompt, setPrompt, mentionItems, isGenerating, chatMode, onSavePrompt }) {
   return (
     <div className="flex-grow flex flex-col min-h-0 relative bg-transparent">
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
@@ -15,12 +14,13 @@ function TextToImage({ prompt, setPrompt, isGenerating, chatMode, onSavePrompt }
       </div>
       
       <div className="flex-grow min-h-0 relative overflow-hidden">
-        <textarea
-          ref={textareaRef}
+        <PromptMentionTextarea
           aria-label="图片提示词"
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onValueChange={setPrompt}
+          mentionItems={mentionItems}
           disabled={isGenerating}
+          wrapperClassName="absolute inset-0"
           className="absolute inset-0 resize-none overflow-y-auto whitespace-pre-wrap break-words bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
           spellCheck="true"
           placeholder="描述主体、场景、构图、光线与风格..."

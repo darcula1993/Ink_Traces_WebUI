@@ -309,6 +309,9 @@ test('transparent background controls and Layer Studio workspace', async ({ page
 
 test('Seedance 2.5 exposes model capabilities and submits its stable alias', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Video model controls only need one browser run')
+  await page.addInitScript(() => {
+    Date.now = () => Date.parse('2026-08-22T00:00:00Z')
+  })
   let submitted = null
   await page.route('**/api/video/generate', async route => {
     submitted = route.request().postDataJSON()
@@ -321,10 +324,10 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await login(page)
 
   await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '视频', exact: true }).click()
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥4.97')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('$0.76')
   await page.getByLabel('视频模型').selectOption('seedance-2.5')
   await expect(page.getByLabel('视频模型')).toHaveValue('seedance-2.5')
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥6.08~¥45.56')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('$0.92~$6.93')
   await expect(page.getByLabel('视频分辨率').locator('option')).toHaveText(['480p', '720p', '1080p'])
   await expect(page.getByLabel('视频时长').locator('option[value="30"]')).toHaveText('30s')
   await expect(page.getByLabel('视频时长')).toHaveValue('-1')
@@ -335,9 +338,9 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
 
   await page.getByLabel('视频画幅').selectOption('21:9')
   await page.getByLabel('视频时长').selectOption('30')
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥45.79')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('$6.97')
   await page.getByLabel('视频分辨率').selectOption('1080p')
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥113.71')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('$12.36')
   await page.getByLabel('视频输出格式').selectOption('mov')
   await page.getByLabel('视频提示词').fill('A continuous cinematic shot through a neon city')
   await page.getByRole('button', { name: '生成视频' }).click()
@@ -354,6 +357,101 @@ test('Seedance 2.5 exposes model capabilities and submits its stable alias', asy
   await expect(page.getByText('视频 · 10')).toBeVisible()
   await expect(page.getByText('音频 · 10')).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('desktop-seedance-2.5.png') })
+})
+
+test('prompt mention menu inserts current image, video, and audio references at the caret', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Prompt mention interactions only need one browser run')
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+  await login(page, {
+    initialWorkspaceState: {
+      img_tabs: [{
+        id: 1,
+        prompt: '',
+        uploadedImages: [
+          { name: 'subject.png', preview: pixel },
+          { name: 'style.png', preview: pixel },
+        ],
+      }],
+      vid_tabs: [{
+        id: 1,
+        prompt: '',
+        provider: 'ark',
+        model: 'seedance-2.5',
+        mode: 'reference',
+        refImages: [{ name: 'scene.png', preview: pixel }],
+        refVideos: [{ uid: 'video-1', name: 'motion.mp4', url: '/uploads/motion.mp4', thumbnail: pixel, uploading: false }],
+        refAudios: [{ name: 'rhythm.wav' }],
+      }],
+      audio_form: {
+        prompt: '',
+        referenceMode: 'audio',
+        speaker: '',
+        references: [{ cupsyAssetId: 31, kind: 'audio', name: 'voice.wav', preview: '/api/cupsy/assets/31/content' }],
+      },
+    },
+  })
+
+  const imagePrompt = page.getByLabel('图片提示词')
+  await imagePrompt.fill('first line\nsecond line')
+  const imageEditorMetrics = await imagePrompt.evaluate(element => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop,
+  }))
+  expect(imageEditorMetrics.clientHeight).toBeGreaterThan(300)
+  expect(imageEditorMetrics.scrollHeight).toBeLessThanOrEqual(imageEditorMetrics.clientHeight)
+  expect(imageEditorMetrics.scrollTop).toBe(0)
+  await imagePrompt.fill('front  back')
+  await imagePrompt.evaluate(element => {
+    element.focus()
+    element.setSelectionRange(6, 6)
+  })
+  await page.keyboard.type('@')
+  const imageMenu = page.getByRole('listbox', { name: '参考素材' })
+  await expect(imageMenu).toBeVisible()
+  await expect(imageMenu.getByRole('option')).toHaveCount(2)
+  await expect(imageMenu.getByRole('option').nth(0)).toContainText('Image1')
+  await expect(imageMenu.getByRole('option').nth(0)).toContainText('subject.png')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(imagePrompt).toHaveValue('front [Image2] back')
+
+  await dragReference(page.getByRole('button', { name: /调整参考图片 1 顺序/ }), page.getByTestId('image-reference-item-1'))
+  await expect(imagePrompt).toHaveValue('front [Image2] back')
+  await imagePrompt.fill('@')
+  await expect(page.getByRole('listbox', { name: '参考素材' }).getByRole('option').nth(0)).toContainText('style.png')
+  await page.keyboard.press('Escape')
+
+  await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '视频', exact: true }).click()
+  const videoPrompt = page.getByLabel('视频提示词')
+  await videoPrompt.fill('first line\nsecond line')
+  const videoEditorMetrics = await videoPrompt.evaluate(element => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop,
+  }))
+  expect(videoEditorMetrics.clientHeight).toBeGreaterThan(300)
+  expect(videoEditorMetrics.scrollHeight).toBeLessThanOrEqual(videoEditorMetrics.clientHeight)
+  expect(videoEditorMetrics.scrollTop).toBe(0)
+  await videoPrompt.fill('@')
+  const videoMenu = page.getByRole('listbox', { name: '参考素材' })
+  await expect(videoMenu.getByRole('option')).toHaveCount(3)
+  await expect(videoMenu.getByRole('option').nth(0)).toContainText('Image1')
+  await expect(videoMenu.getByRole('option').nth(1)).toContainText('Video1')
+  await expect(videoMenu.getByRole('option').nth(2)).toContainText('Audio1')
+  await page.screenshot({ path: testInfo.outputPath('desktop-prompt-mention-menu.png') })
+  await videoMenu.getByRole('option').nth(1).click()
+  await expect(videoPrompt).toHaveValue('[Video1]')
+
+  await page.getByRole('group', { name: '生成模式' }).getByRole('button', { name: '音频', exact: true }).click()
+  const audioPrompt = page.getByLabel('音频提示词')
+  await audioPrompt.fill('@aud')
+  const audioMenu = page.getByRole('listbox', { name: '参考素材' })
+  await expect(audioMenu.getByRole('option')).toHaveCount(1)
+  await expect(audioMenu.getByRole('option')).toContainText('Audio1')
+  await page.keyboard.press('Tab')
+  await expect(audioPrompt).toHaveValue('[Audio1]')
+  await page.screenshot({ path: testInfo.outputPath('desktop-prompt-mentions.png') })
 })
 
 test('Seed Audio workspace submits Cupsy full-scene audio parameters', async ({ page }, testInfo) => {
@@ -469,7 +567,7 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
   await page.getByLabel('视频模型').selectOption('seedance-2.5-moderated')
   await expect(page.getByLabel('视频时长').locator('option[value="-1"]')).toHaveText('Auto')
   await page.getByLabel('视频时长').selectOption('-1')
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥6.08~¥45.56')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('$0.92~$6.93')
   await page.getByLabel('视频提示词').fill('A restrained cinematic product shot')
   await page.getByRole('button', { name: '生成视频' }).click()
   await expect.poll(() => submitted).not.toBeNull()
