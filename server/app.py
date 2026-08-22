@@ -2516,6 +2516,33 @@ def _parse_files(has_files, video_mode, model_spec=None):
     return files_data
 
 
+def _persist_ark_video_references(task_id, output_dir, files_data):
+    references = []
+    if files_data.get('first_frame'):
+        references.append(('input_image', 'first_frame.png', 'image/png', files_data['first_frame']))
+    if files_data.get('last_frame'):
+        references.append(('input_image', 'last_frame.png', 'image/png', files_data['last_frame']))
+    references.extend(
+        ('input_image', f'reference_image_{index}.png', 'image/png', data_url)
+        for index, data_url in enumerate(files_data.get('ref_images', []), 1)
+    )
+    for index, data_url in enumerate(files_data.get('ref_audios', []), 1):
+        mime_type = data_url.split(';', 1)[0].removeprefix('data:')
+        extension = 'mp3' if mime_type == 'audio/mp3' else 'wav'
+        references.append((
+            'input_audio', f'reference_audio_{index}.{extension}', mime_type, data_url,
+        ))
+
+    for kind, filename, mime_type, data_url in references:
+        path = os.path.join(output_dir, filename)
+        storage.save_data_url(data_url, path)
+        storage.register_file(task_id, kind, path, mime_type)
+
+    for path in files_data.get('ref_video_paths', []):
+        if os.path.isfile(path):
+            storage.register_file(task_id, 'input_video', path, expires_at=None)
+
+
 def _queue_cupsy_video(
     has_files, data, prompt, ratio, duration, resolution, fast, generate_audio,
     video_mode, requested_model,
@@ -2781,8 +2808,7 @@ def video_generate():
         db_task_id = task_db.create_task('video', prompt, params, provider=provider)
         output_dir = storage.task_output_dir('video', db_task_id)
         task_db.update_task(db_task_id, output_dir=output_dir)
-        for path in ref_video_paths:
-            task_db.link_asset(path, db_task_id, expires_at=None)
+        _persist_ark_video_references(db_task_id, output_dir, files_data)
 
         upload_timeout, request_timeout = resolve_ark_timeouts(prov)
 
@@ -2989,23 +3015,47 @@ def _attach_task_input_references(tasks):
     missing_ref_tasks = []
     for task in tasks:
         result = task.get('result') if isinstance(task.get('result'), dict) else {}
-        if not result.get('local_refs') or len(result.get('local_ref_types') or []) != len(result.get('local_refs') or []):
+        local_refs = result.get('local_refs') or []
+        metadata_fields = ('local_ref_types', 'local_ref_roles', 'local_ref_names', 'local_ref_asset_ids')
+        if (
+            not local_refs
+            or any(len(result.get(field) or []) != len(local_refs) for field in metadata_fields)
+        ):
             missing_ref_tasks.append(task)
     if not missing_ref_tasks:
         return tasks
 
     refs_by_task = {}
     ref_types_by_task = {}
+    ref_roles_by_task = {}
+    ref_names_by_task = {}
+    ref_asset_ids_by_task = {}
     task_ids = [task['id'] for task in missing_ref_tasks]
-    for asset in task_db.list_assets_for_tasks(task_ids, ('input_image', 'input_audio')):
+    task_by_id = {task['id']: task for task in missing_ref_tasks}
+    local_type_counts = {}
+    for asset in task_db.list_assets_for_tasks(task_ids, ('input_image', 'input_audio', 'input_video')):
+        task = task_by_id[asset['task_id']]
+        params = task.get('params') if isinstance(task.get('params'), dict) else {}
+        media_type = {
+            'input_audio': 'audio',
+            'input_video': 'video',
+        }.get(asset['kind'], 'image')
+        count_key = (asset['task_id'], media_type)
+        media_index = local_type_counts.get(count_key, 0)
+        local_type_counts[count_key] = media_index + 1
+        if task.get('type') == 'video' and params.get('video_mode') == 'keyframe' and media_type == 'image':
+            role = 'first_frame' if media_index == 0 else 'last_frame'
+        else:
+            role = f'reference_{media_type}'
         if not os.path.isfile(asset['path']):
             continue
         refs_by_task.setdefault(asset['task_id'], []).append(
             f'/api/tasks/{asset["task_id"]}/file/{os.path.basename(asset["path"])}'
         )
-        ref_types_by_task.setdefault(asset['task_id'], []).append(
-            'audio' if asset['kind'] == 'input_audio' else 'image'
-        )
+        ref_types_by_task.setdefault(asset['task_id'], []).append(media_type)
+        ref_roles_by_task.setdefault(asset['task_id'], []).append(role)
+        ref_names_by_task.setdefault(asset['task_id'], []).append(os.path.basename(asset['path']))
+        ref_asset_ids_by_task.setdefault(asset['task_id'], []).append(None)
     for asset in task_db.list_task_provider_assets_for_tasks(task_ids, ('image', 'audio', 'video')):
         if asset.get('deleted_at') or not os.path.isfile(asset['local_path']):
             continue
@@ -3013,13 +3063,19 @@ def _attach_task_input_references(tasks):
             f'/api/cupsy/assets/{asset["id"]}/content'
         )
         ref_types_by_task.setdefault(asset['task_id'], []).append(asset['kind'])
+        ref_roles_by_task.setdefault(asset['task_id'], []).append(asset['role'])
+        ref_names_by_task.setdefault(asset['task_id'], []).append(
+            asset.get('original_name') or os.path.basename(asset['local_path'])
+        )
+        ref_asset_ids_by_task.setdefault(asset['task_id'], []).append(asset['id'])
     for task in missing_ref_tasks:
-        local_refs = refs_by_task.get(task['id'])
-        if not local_refs:
-            continue
+        local_refs = refs_by_task.get(task['id'], [])
         result = dict(task['result']) if isinstance(task.get('result'), dict) else {}
         result['local_refs'] = local_refs
         result['local_ref_types'] = ref_types_by_task.get(task['id'], [])
+        result['local_ref_roles'] = ref_roles_by_task.get(task['id'], [])
+        result['local_ref_names'] = ref_names_by_task.get(task['id'], [])
+        result['local_ref_asset_ids'] = ref_asset_ids_by_task.get(task['id'], [])
         task['result'] = result
     return tasks
 
@@ -3128,6 +3184,9 @@ def api_list_tasks():
                 'local_last_frame': r.get('local_last_frame'),
                 'local_thumbnail': r.get('local_thumbnail'),
                 'local_ref_types': r.get('local_ref_types', []),
+                'local_ref_roles': r.get('local_ref_roles', []),
+                'local_ref_names': r.get('local_ref_names', []),
+                'local_ref_asset_ids': r.get('local_ref_asset_ids', []),
                 'thinking': r.get('thinking', '')[:100]
             }
     return jsonify({'success': True, 'tasks': tasks, 'total': total})

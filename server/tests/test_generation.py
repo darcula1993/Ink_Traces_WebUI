@@ -882,6 +882,10 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     assert queued_task['params']['model'] == 'seedance-2.5-moderated'
     detail = application.app.test_client().get(f'/api/tasks/{task_id}').get_json()['task']
     assert detail['result']['local_refs'] == [f'/api/cupsy/assets/{asset["id"]}/content']
+    assert detail['result']['local_ref_types'] == ['image']
+    assert detail['result']['local_ref_roles'] == ['reference_image']
+    assert detail['result']['local_ref_names'] == ['reference.png']
+    assert detail['result']['local_ref_asset_ids'] == [asset['id']]
     assert task_db.claim_next_task('cupsy-worker')['id'] == task_id
 
     observed = {}
@@ -984,6 +988,40 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
     monkeypatch.setattr(application.HTTP, 'post', fake_auto_post)
     assert application.poll_video_task_once(auto_task_id)['state'] == 'pending'
     assert auto_submission['duration'] == -1
+
+
+def test_task_reuse_silently_skips_deleted_provider_assets():
+    available_path = os.path.join(storage.WORKSPACE_ASSET_DIR, 'available.png')
+    deleted_path = os.path.join(storage.WORKSPACE_ASSET_DIR, 'deleted.png')
+    os.makedirs(os.path.dirname(available_path), exist_ok=True)
+    with open(available_path, 'wb') as handle:
+        handle.write(_png_bytes())
+    with open(deleted_path, 'wb') as handle:
+        handle.write(_png_bytes())
+
+    available = task_db.create_provider_asset(
+        'cupsy', 'image', 'available-sha', 'available.png',
+        'image/png', len(_png_bytes()), available_path,
+    )
+    deleted = task_db.create_provider_asset(
+        'cupsy', 'image', 'deleted-sha', 'deleted.png',
+        'image/png', len(_png_bytes()), deleted_path,
+    )
+    task_db.update_provider_asset(deleted['id'], deleted_at='2026-08-22T12:00:00+00:00')
+    task_id = task_db.create_task(
+        'video', 'reuse available references',
+        {'video_mode': 'reference'}, provider='cupsy',
+    )
+    task_db.link_task_provider_asset(task_id, available['id'], 'reference_image', 0)
+    task_db.link_task_provider_asset(task_id, deleted['id'], 'reference_image', 1)
+
+    response = application.app.test_client().get(f'/api/tasks/{task_id}')
+
+    assert response.status_code == 200
+    result = response.get_json()['task']['result']
+    assert result['local_refs'] == [f'/api/cupsy/assets/{available["id"]}/content']
+    assert result['local_ref_names'] == ['available.png']
+    assert result['local_ref_asset_ids'] == [available['id']]
 
 
 def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):
@@ -1149,6 +1187,41 @@ def test_seedance_25_reference_video_preserves_explicit_output_settings(monkeypa
     task = task_db.get_task(response.get_json()['db_task_id'])
     assert task['params']['duration'] == 28
     assert task['params']['ratio'] == '16:9'
+
+
+def test_ark_video_task_reuse_restores_persisted_image_and_audio_references(monkeypatch):
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
+        'api_key': 'shared-seedance-key',
+        'endpoint': 'https://provider.invalid',
+        'seedance_2_5_model': 'ep-20260807145632-xprc6',
+    })
+    monkeypatch.setattr(
+        application.HTTP, 'post',
+        lambda *_args, **_kwargs: FakeResponse(payload={'id': 'seedance-reference-task'}),
+    )
+
+    response = application.app.test_client().post('/api/video/generate', data={
+        'provider': 'ark',
+        'model': 'seedance-2.5',
+        'prompt': 'Reuse an image and audio reference',
+        'ratio': '16:9',
+        'duration': '8',
+        'resolution': '480p',
+        'video_mode': 'reference',
+        'ref_images': (io.BytesIO(_rgba_png_bytes((512, 512))), 'subject.png'),
+        'ref_audios': (io.BytesIO(b'wave-reference'), 'rhythm.wav'),
+    }, content_type='multipart/form-data')
+
+    assert response.status_code == 200
+    task_id = response.get_json()['db_task_id']
+    detail = application.app.test_client().get(f'/api/tasks/{task_id}').get_json()['task']
+    assert detail['result']['local_ref_types'] == ['image', 'audio']
+    assert detail['result']['local_ref_roles'] == ['reference_image', 'reference_audio']
+    assert detail['result']['local_ref_names'] == ['reference_image_1.png', 'reference_audio_1.wav']
+    assert all(
+        application.app.test_client().get(url).status_code == 200
+        for url in detail['result']['local_refs']
+    )
 
 
 def test_seedance_25_uses_documented_auto_duration_when_omitted(monkeypatch):

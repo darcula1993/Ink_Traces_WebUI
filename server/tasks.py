@@ -669,6 +669,9 @@ def list_tasks(task_type=None, status=None, limit=50, offset=0, summary=False,
                 'local_thumbnail', json_extract(t.result, '$.local_thumbnail'),
                 'local_audio', json_extract(t.result, '$.local_audio'),
                 'local_ref_types', json_extract(t.result, '$.local_ref_types'),
+                'local_ref_roles', json_extract(t.result, '$.local_ref_roles'),
+                'local_ref_names', json_extract(t.result, '$.local_ref_names'),
+                'local_ref_asset_ids', json_extract(t.result, '$.local_ref_asset_ids'),
                 'thinking', substr(COALESCE(json_extract(t.result, '$.thinking'), ''), 1, 100)
             ) ELSE NULL END AS result
         '''

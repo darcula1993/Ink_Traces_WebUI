@@ -454,6 +454,84 @@ test('prompt mention menu inserts current image, video, and audio references at 
   await page.screenshot({ path: testInfo.outputPath('desktop-prompt-mentions.png') })
 })
 
+test('reusing a video task restores all reference assets and their Cupsy roles', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'Task reuse only needs one browser run')
+  const task = {
+    id: 701,
+    type: 'video',
+    status: 'succeeded',
+    prompt: 'Reuse every bound reference',
+    provider: 'cupsy',
+    progress: 100,
+    created_at: '2026-08-22T12:00:00+00:00',
+    params: {
+      model: 'seedance-2.5',
+      ratio: '16:9',
+      duration: 8,
+      resolution: '1080p',
+      video_mode: 'reference',
+      generate_audio: true,
+    },
+    result: {
+      local_video: '/api/tasks/701/file/video.mp4',
+      local_refs: [
+        '/api/cupsy/assets/11/content',
+        '/api/cupsy/assets/12/content',
+        '/api/cupsy/assets/13/content',
+      ],
+      local_ref_types: ['image', 'video', 'audio'],
+      local_ref_roles: ['reference_image', 'reference_video', 'reference_audio'],
+      local_ref_names: ['subject.png', 'motion.mp4', 'rhythm.wav'],
+      local_ref_asset_ids: [11, 12, 13],
+    },
+  }
+  let submitted = ''
+  await page.route('**/api/tasks?*', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, tasks: [task], total: 1 }),
+  }))
+  await page.route('**/api/tasks/701', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, task }),
+  }))
+  await page.route('**/api/cupsy/assets/11/content', route => route.fulfill({
+    status: 200,
+    contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
+  }))
+  await page.route('**/api/video/generate', route => {
+    submitted = route.request().postDataBuffer().toString('utf8')
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, db_task_id: 702, task_id: 'remote-702' }),
+    })
+  })
+  await login(page, {
+    mockTasks: false,
+    initialWorkspaceState: { appMode: 'video' },
+  })
+
+  await page.getByTestId('task-gallery-card').click()
+  const detailModal = page.getByRole('dialog', { name: '任务详情' })
+  await detailModal.getByRole('button', { name: '复用任务参数' }).click()
+  await expect(page.getByLabel('视频提示词')).toHaveValue(task.prompt)
+  await expect(page.getByLabel('视频生成模式')).toHaveValue('reference')
+  await expect(page.getByTestId('video-reference-image-item-0')).toBeVisible()
+  await expect(page.getByTestId('video-reference-video-item-0')).toBeVisible()
+  await expect(page.getByTestId('video-reference-audio-item-0')).toBeVisible()
+  await expect(page.getByRole('button', { name: '播放参考视频 1' })).toBeEnabled()
+
+  await detailModal.getByRole('button', { name: '关闭任务详情' }).click()
+  await page.getByRole('button', { name: '生成视频' }).click()
+  await expect.poll(() => submitted).not.toBe('')
+  expect(submitted).toContain('{"id":11,"role":"reference_image"}')
+  expect(submitted).toContain('{"id":12,"role":"reference_video"}')
+  expect(submitted).toContain('{"id":13,"role":"reference_audio"}')
+})
+
 test('Seed Audio workspace submits Cupsy full-scene audio parameters', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Audio workspace is desktop focused')
   let submitted = null

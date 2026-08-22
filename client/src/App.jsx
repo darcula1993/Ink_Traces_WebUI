@@ -93,6 +93,37 @@ function currentPromptMentionItems(appMode, imageTab, videoTab, audioForm) {
   return []
 }
 
+function restoredTaskReferences(task) {
+  const result = task.result || {}
+  const params = task.params || {}
+  const refs = Array.isArray(result.local_refs) ? result.local_refs : []
+  const types = Array.isArray(result.local_ref_types) ? result.local_ref_types : []
+  const roles = Array.isArray(result.local_ref_roles) ? result.local_ref_roles : []
+  const names = Array.isArray(result.local_ref_names) ? result.local_ref_names : []
+  const assetIds = Array.isArray(result.local_ref_asset_ids) ? result.local_ref_asset_ids : []
+  const typeCounts = { image: 0, video: 0, audio: 0 }
+
+  return refs.map((url, index) => {
+    const type = ['image', 'video', 'audio'].includes(types[index]) ? types[index] : 'image'
+    const typeIndex = typeCounts[type]++
+    let role = roles[index]
+    if (!role) {
+      role = task.type === 'video' && params.video_mode === 'keyframe' && type === 'image'
+        ? typeIndex === 0 ? 'first_frame' : 'last_frame'
+        : `reference_${type}`
+    }
+    const idFromUrl = String(url).match(/\/api\/cupsy\/assets\/(\d+)\/content/)?.[1]
+    const parsedAssetId = Number(assetIds[index] ?? idFromUrl)
+    return {
+      url,
+      type,
+      role,
+      name: names[index] || `reference_${type}_${typeIndex + 1}`,
+      cupsyAssetId: Number.isInteger(parsedAssetId) && parsedAssetId > 0 ? parsedAssetId : null,
+    }
+  })
+}
+
 const VIDEO_MODEL_CAPABILITIES = {
   [SEEDANCE_20]: {
     label: 'Dreamina Seedance 2.0',
@@ -1506,12 +1537,14 @@ function App({ onLogout }) {
       const resp = await axios.get(`/api/tasks/${taskSummary.id}`)
       if (resp.data.success) task = resp.data.task
     } catch (e) { /* use summary as fallback */ }
-    const result = task.result || {}
     const params = task.params || {}
+    const restoredReferences = restoredTaskReferences(task)
 
     if (task.type === 'image') {
       const id = activeImgTab.id || 1
-      const restoredRefs = (result.local_refs || []).map((url, i) => ({ preview: url, name: `ref_${i}.png` }))
+      const restoredRefs = restoredReferences
+        .filter(reference => reference.type === 'image')
+        .map(reference => ({ preview: reference.url, name: reference.name }))
       const tab = {
         ...makeImgTab(id),
         prompt: task.prompt || '',
@@ -1521,6 +1554,7 @@ function App({ onLogout }) {
         customHeight: Number(params.custom_height) || 1024,
         customAspectRatio: (Number(params.custom_width) || 1024) / (Number(params.custom_height) || 1024),
         outputFormat: params.output_format || 'png',
+        background: params.background || 'default',
         watermark: Boolean(params.watermark),
         useSearch: params.use_search || false,
         thinkLevel: params.think_level || 'minimal',
@@ -1531,42 +1565,81 @@ function App({ onLogout }) {
       setAppMode('image')
     } else if (task.type === 'video') {
       const id = activeTab.id || 1
-      const restoredVideos = (params.ref_video_urls || []).map((url, i) => ({
-        uid: `restored_${i}_${Date.now()}`,
-        name: `ref_video_${i}.mp4`, url, filepath: (params.ref_video_paths || [])[i] || null,
-        thumbnail: null, progress: 100, uploading: false
-      }))
-      const lastFrameSrc = result.local_last_frame || result.images?.[0]?.image_url || null
+      const knownVideoUrls = new Set(restoredReferences.filter(reference => reference.type === 'video').map(reference => reference.url))
+      const knownVideoNames = new Set(restoredReferences.filter(reference => reference.type === 'video').map(reference => reference.name))
+      const paramsVideos = (params.ref_video_urls || []).map((url, index) => ({
+        url,
+        type: 'video',
+        role: 'reference_video',
+        name: `ref_video_${index + 1}.mp4`,
+        filepath: (params.ref_video_paths || [])[index] || null,
+        cupsyAssetId: null,
+      })).filter(reference => {
+        const filename = decodeURIComponent(String(reference.url).split('/').pop() || '')
+        return !knownVideoUrls.has(reference.url) && !knownVideoNames.has(filename)
+      })
+      const videoReferences = [...restoredReferences, ...paramsVideos]
+      const restoredImages = videoReferences
+        .filter(reference => reference.role === 'reference_image')
+        .map(reference => ({
+          file: null, preview: reference.url, name: reference.name,
+          cupsyAssetId: reference.cupsyAssetId,
+        }))
+      const restoredVideos = videoReferences
+        .filter(reference => reference.role === 'reference_video')
+        .map((reference, index) => ({
+          uid: `restored_${task.id}_${index}`,
+          name: reference.name, url: reference.url, filepath: reference.filepath || null,
+          cupsyAssetId: reference.cupsyAssetId,
+          thumbnail: null, progress: 100, uploading: false,
+        }))
+      const restoredAudios = videoReferences
+        .filter(reference => reference.role === 'reference_audio')
+        .map(reference => ({
+          file: null, preview: reference.url, name: reference.name,
+          cupsyAssetId: reference.cupsyAssetId,
+        }))
+      const firstFrameReference = videoReferences.find(reference => reference.role === 'first_frame')
+      const lastFrameReference = videoReferences.find(reference => reference.role === 'last_frame')
       const tab = {
         ...makeVideoTab(id),
         prompt: task.prompt || '',
         provider: task.provider === 'cupsy' ? 'cupsy' : 'ark',
         model: params.model || SEEDANCE_20,
         ratio: params.ratio || 'adaptive',
-        duration: params.duration || 5,
+        duration: params.duration ?? 5,
         resolution: params.resolution || '720p',
         outputFormat: params.output_format || 'mp4',
         fast: params.fast || false,
         audio: params.generate_audio !== false,
         returnLastFrame: params.return_last_frame || false,
         mode: params.video_mode || 'keyframe',
+        firstFrame: firstFrameReference ? {
+          file: null, preview: firstFrameReference.url, name: firstFrameReference.name,
+          cupsyAssetId: firstFrameReference.cupsyAssetId,
+        } : null,
+        lastFrame: lastFrameReference ? {
+          file: null, preview: lastFrameReference.url, name: lastFrameReference.name,
+          cupsyAssetId: lastFrameReference.cupsyAssetId,
+        } : null,
+        refImages: restoredImages,
         refVideos: restoredVideos,
-        lastFrame: lastFrameSrc ? { file: null, preview: lastFrameSrc } : null,
+        refAudios: restoredAudios,
       }
       setVideoTabs([tab])
       setActiveVideoTabId(id)
       setAppMode('video')
     } else if (task.type === 'audio') {
-      const refs = (result.local_refs || []).map((url, index) => {
-        const id = Number(String(url).match(/\/api\/cupsy\/assets\/(\d+)\/content/)?.[1])
-        return {
-          cupsyAssetId: Number.isInteger(id) ? id : null,
-          kind: result.local_ref_types?.[index] || params.reference_mode || 'audio',
-          name: `reference_${index + 1}`,
-          preview: url,
+      const refs = restoredReferences
+        .filter(reference => ['reference_audio', 'reference_image'].includes(reference.role))
+        .map(reference => ({
+          cupsyAssetId: reference.cupsyAssetId,
+          kind: reference.type,
+          name: reference.name,
+          preview: reference.url,
           status: 'active',
-        }
-      }).filter(reference => reference.cupsyAssetId)
+        }))
+        .filter(reference => reference.cupsyAssetId)
       updateAudioForm({
         ...DEFAULT_AUDIO_FORM,
         prompt: task.prompt || '',
