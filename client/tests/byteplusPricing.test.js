@@ -52,6 +52,17 @@ test('uses Seedance 2.5 pricing dimensions for the Cupsy moderated model', () =>
   assert.equal(moderated.maximumCost, standard.maximumCost)
 })
 
+test('estimates Seedance 2.5 at 1080p without falling back to 720p', () => {
+  const estimate = estimateBytePlusVideoCost({
+    model: 'seedance-2.5', resolution: '1080p', ratio: '16:9', duration: 5,
+  })
+
+  assert.equal(estimate.width, 1920)
+  assert.equal(estimate.height, 1080)
+  assert.equal(estimate.unitPrice, 51 * (11.70 / 7.70))
+  assert.equal(formatCnyEstimate(estimate), '¥18.83')
+})
+
 test('uses actual reference duration and the four-second billing floor', () => {
   const shortReference = estimateBytePlusVideoCost({
     model: 'seedance-2.0',

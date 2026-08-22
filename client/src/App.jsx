@@ -53,7 +53,7 @@ const VIDEO_MODEL_CAPABILITIES = {
   },
   [SEEDANCE_25]: {
     label: 'Dreamina Seedance 2.5',
-    resolutions: ['480p', '720p'],
+    resolutions: ['480p', '720p', '1080p'],
     minDuration: 4,
     maxDuration: 30,
     maxRefImages: 30,
@@ -506,7 +506,9 @@ function App({ onLogout }) {
       ]
       const nextIsSeedance25 = CUPSY_VIDEO_MODELS.includes(nextModel)
       const duration = activeVideoProvider === 'cupsy'
-        ? tab.duration === -1 ? 5 : Math.min(capabilities.maxDuration, tab.duration)
+        ? tab.duration === -1
+          ? -1
+          : Math.max(capabilities.minDuration, Math.min(capabilities.maxDuration, tab.duration))
         : nextIsSeedance25 ? -1
         : tab.duration !== -1 && tab.duration > capabilities.maxDuration
           ? capabilities.maxDuration
@@ -532,8 +534,10 @@ function App({ onLogout }) {
     updateTab(activeTab.id, tab => provider === 'cupsy' ? {
       provider: 'cupsy',
       model: CUPSY_VIDEO_MODELS.includes(tab.model) ? tab.model : SEEDANCE_25,
-      duration: tab.duration === -1 ? 5 : tab.duration,
-      resolution: ['480p', '720p'].includes(tab.resolution) ? tab.resolution : '720p',
+      duration: tab.duration,
+      resolution: VIDEO_MODEL_CAPABILITIES[SEEDANCE_25].resolutions.includes(tab.resolution)
+        ? tab.resolution
+        : '720p',
       fast: false, outputFormat: 'mp4', returnLastFrame: false,
     } : {
       provider: 'ark',
@@ -2110,9 +2114,13 @@ function App({ onLogout }) {
                       {videoDurationOptions.map(d => (
                         <option key={d} value={d} className="bg-nexus-bg">{d}s</option>
                       ))}
-                      {activeVideoProvider === 'ark' && <option value={-1} className="bg-nexus-bg">
-                        {isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo ? 'Auto · 编辑跟随输入' : 'Auto'}
-                      </option>}
+                      <option value={-1} className="bg-nexus-bg">
+                        {activeVideoProvider === 'cupsy'
+                          ? 'Auto · 默认 5s'
+                          : isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
+                            ? 'Auto · 编辑跟随输入'
+                            : 'Auto'}
+                      </option>
                     </select>
                   </div>
                   {!isSeedance25 && (
@@ -2409,7 +2417,9 @@ function App({ onLogout }) {
                       model: effectiveVideoModel,
                       resolution: activeTab.resolution,
                       ratio: effectiveVideoRatio,
-                      duration: effectiveVideoDuration,
+                      duration: activeVideoProvider === 'cupsy' && effectiveVideoDuration === -1
+                        ? 5
+                        : effectiveVideoDuration,
                       fast: activeTab.fast,
                       referenceVideos: activeTab.refVideos,
                     })

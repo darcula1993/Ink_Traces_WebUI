@@ -1865,7 +1865,7 @@ VIDEO_MODEL_SPECS = {
         'fast': True,
     },
     SEEDANCE_25: {
-        'resolutions': {'480p', '720p'},
+        'resolutions': {'480p', '720p', '1080p'},
         'duration_min': 4,
         'duration_max': 30,
         'output_formats': {'mp4', 'mov'},
@@ -2532,12 +2532,12 @@ def _queue_cupsy_video(
         duration = int(duration)
     except (TypeError, ValueError):
         return jsonify({'success': False, 'error': 'duration 必须是整数'}), 400
-    if duration < 4 or duration > 30:
-        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 时长必须为 4 到 30 秒'}), 400
+    if duration != -1 and (duration < 4 or duration > 30):
+        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 时长必须为 Auto 或 4 到 30 秒'}), 400
     if ratio not in {'adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'}:
         return jsonify({'success': False, 'error': f'不支持的视频比例: {ratio}'}), 400
-    if resolution not in {'480p', '720p'}:
-        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 仅支持 480p 或 720p'}), 400
+    if resolution not in {'480p', '720p', '1080p'}:
+        return jsonify({'success': False, 'error': 'Cupsy Seedance 2.5 仅支持 480p、720p 或 1080p'}), 400
     if video_mode not in {'keyframe', 'reference'}:
         return jsonify({'success': False, 'error': f'不支持的视频模式: {video_mode}'}), 400
     if fast:
@@ -4009,11 +4009,13 @@ def _poll_cupsy_video_task(task):
             'model': cupsy_model,
             'content': _cupsy_video_content(task, assets),
             'ratio': params.get('ratio', 'adaptive'),
-            'duration': int(params.get('duration', 5)),
             'resolution': params.get('resolution', '720p'),
             'generate_audio': bool(params.get('generate_audio', True)),
             'watermark': False,
         }
+        duration = int(params.get('duration', 5))
+        if duration != -1:
+            body['duration'] = duration
         try:
             response = HTTP.post(
                 f'{endpoint}/v1/videos',

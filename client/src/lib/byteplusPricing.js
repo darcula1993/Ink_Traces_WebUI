@@ -45,6 +45,14 @@ const OUTPUT_DIMENSIONS = {
       '9:16': [720, 1280],
       '21:9': [1470, 630],
     },
+    '1080p': {
+      '16:9': [1920, 1080],
+      '4:3': [1664, 1248],
+      '1:1': [1440, 1440],
+      '3:4': [1248, 1664],
+      '9:16': [1080, 1920],
+      '21:9': [2206, 946],
+    },
   },
 }
 
@@ -59,9 +67,8 @@ const FAST_UNIT_PRICE_CNY = {
   '720p': { withoutVideo: 37, withVideo: 22 },
 }
 
-// BytePlus Seedance 2.5 official rates are USD 10.70/M tokens without video
-// input and USD 6.40/M tokens with video input. Preserve the existing CNY
-// display basis used by the corresponding Seedance 2.0 rates.
+// Preserve the existing CNY display basis while applying Seedance 2.5's
+// resolution- and input-specific USD token rates.
 const SEEDANCE_25_UNIT_PRICE_CNY = {
   '480p': {
     withoutVideo: STANDARD_UNIT_PRICE_CNY['480p'].withoutVideo * (10.70 / 7.00),
@@ -70,6 +77,10 @@ const SEEDANCE_25_UNIT_PRICE_CNY = {
   '720p': {
     withoutVideo: STANDARD_UNIT_PRICE_CNY['720p'].withoutVideo * (10.70 / 7.00),
     withVideo: STANDARD_UNIT_PRICE_CNY['720p'].withVideo * (6.40 / 4.30),
+  },
+  '1080p': {
+    withoutVideo: STANDARD_UNIT_PRICE_CNY['1080p'].withoutVideo * (11.70 / 7.70),
+    withVideo: STANDARD_UNIT_PRICE_CNY['1080p'].withVideo * (7.00 / 4.70),
   },
 }
 

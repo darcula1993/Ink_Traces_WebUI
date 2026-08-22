@@ -871,7 +871,7 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
         'prompt': 'A slow cinematic camera move',
         'ratio': '16:9',
         'duration': 4,
-        'resolution': '480p',
+        'resolution': '1080p',
         'generate_audio': True,
         'video_mode': 'reference',
         'cupsy_assets': [{'id': asset['id'], 'role': 'reference_image'}],
@@ -900,6 +900,7 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
         'model', 'content', 'ratio', 'duration', 'resolution', 'generate_audio', 'watermark',
     }
     assert observed['body']['model'] == 'seedance-2.5-moderated'
+    assert observed['body']['resolution'] == '1080p'
     assert observed['body']['content'][1] == {
         'type': 'image_url', 'image_url': {'url': 'asset://asset_remote_2'},
         'role': 'reference_image',
@@ -958,6 +959,31 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
         'ratio': '16:9', 'duration': 4, 'resolution': '480p',
     })
     assert invalid.status_code == 400
+
+    invalid_resolution = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'cupsy', 'model': 'seedance-2.5', 'prompt': 'invalid resolution',
+        'ratio': '16:9', 'duration': 4, 'resolution': '4k',
+    })
+    assert invalid_resolution.status_code == 400
+    assert '仅支持 480p、720p 或 1080p' in invalid_resolution.get_json()['error']
+
+    auto_response = application.app.test_client().post('/api/video/generate', json={
+        'provider': 'cupsy', 'model': 'seedance-2.5', 'prompt': 'automatic duration',
+        'ratio': 'adaptive', 'duration': -1, 'resolution': '1080p',
+    })
+    assert auto_response.status_code == 202
+    auto_task_id = auto_response.get_json()['db_task_id']
+    assert task_db.get_task(auto_task_id)['params']['duration'] == -1
+    assert task_db.claim_next_task('cupsy-auto-worker')['id'] == auto_task_id
+    auto_submission = {}
+
+    def fake_auto_post(_url, **kwargs):
+        auto_submission.update(kwargs['json'])
+        return FakeResponse(status_code=202, payload={'id': 'video_auto_1', 'status': 'queued'})
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_auto_post)
+    assert application.poll_video_task_once(auto_task_id)['state'] == 'pending'
+    assert 'duration' not in auto_submission
 
 
 def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):
@@ -1214,8 +1240,12 @@ def test_seedance_model_specific_constraints():
         application.SEEDANCE_25, spec_25, '16:9', 8, '720p', 'mp4',
         'keyframe', False, {'first_frame': 'data:image/png;base64,AA=='},
     )
-    assert '不支持的视频分辨率' in application._validate_video_settings(
+    assert application._validate_video_settings(
         application.SEEDANCE_25, spec_25, 'adaptive', 8, '1080p', 'mp4',
+        'keyframe', False, {},
+    ) is None
+    assert '不支持的视频分辨率' in application._validate_video_settings(
+        application.SEEDANCE_25, spec_25, 'adaptive', 8, '4k', 'mp4',
         'keyframe', False, {},
     )
     assert '不支持的视频时长' in application._validate_video_settings(

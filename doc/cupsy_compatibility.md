@@ -1,6 +1,6 @@
 # Cupsy Seedance 2.5 Compatibility
 
-Verified against `https://cupsy.io` on 2026-08-14. Secrets and signed URLs are
+Verified against `https://cupsy.io` on 2026-08-22. Secrets and signed URLs are
 intentionally omitted.
 
 ## Seed Audio 1.0
@@ -24,7 +24,7 @@ intentionally omitted.
 
 | Capability | Cupsy behavior |
 | --- | --- |
-| Resolutions | `480p`, `720p` |
+| Resolutions | `480p`, `720p`, `1080p` |
 | Ratios | `16:9`, `4:3`, `1:1`, `3:4`, `9:16`, `21:9`, `adaptive` |
 | Durations | Whole seconds from 4 through 30; default 5 |
 | Content types | `text`, `image_url`, `video_url`, `audio_url` |
@@ -33,13 +33,19 @@ intentionally omitted.
 | `watermark` | Supported |
 | `seed` | Explicitly unsupported |
 | `camera_fixed` | Explicitly unsupported |
-| `duration=-1` | Rejected with `422 validation_failed` |
+| `duration=-1` | Rejected with `422 validation_failed`; UI Auto omits the field and uses the current 5-second provider default |
 | `frames` | Not declared; do not send |
 | `return_last_frame` | Not declared; accepted but ignored in a live generation test |
 | `output_format` | Not declared; do not send |
 | `callback_url` | Not declared; do not send |
 | `priority` | Not declared; do not send |
 | `execution_expires_after` | Not declared; do not send |
+
+The customer pricing catalog version `2026-08-20-text-json-object` defines a
+separate 1080p tier for both models. At 480p/720p, other inputs cost USD 10.70
+and video inputs cost USD 6.40 per million completion tokens. At 1080p, those
+rates are USD 11.70 and USD 7.00 respectively. The enhanced-moderation model
+uses the same rates as the standard model.
 
 Unknown fields were not rejected ahead of an intentionally invalid ratio, so
 acceptance alone does not prove that Cupsy honors them. The adapter therefore
