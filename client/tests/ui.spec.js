@@ -467,9 +467,9 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
     '2.5 · 加强审核',
   ])
   await page.getByLabel('视频模型').selectOption('seedance-2.5-moderated')
-  await expect(page.getByLabel('视频时长').locator('option[value="-1"]')).toHaveText('Auto · 默认 5s')
+  await expect(page.getByLabel('视频时长').locator('option[value="-1"]')).toHaveText('Auto')
   await page.getByLabel('视频时长').selectOption('-1')
-  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥7.59')
+  await expect(page.getByTestId('video-cost-estimate')).toHaveText('¥6.08~¥45.56')
   await page.getByLabel('视频提示词').fill('A restrained cinematic product shot')
   await page.getByRole('button', { name: '生成视频' }).click()
   await expect.poll(() => submitted).not.toBeNull()

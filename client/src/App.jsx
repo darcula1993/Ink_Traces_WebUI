@@ -2116,7 +2116,7 @@ function App({ onLogout }) {
                       ))}
                       <option value={-1} className="bg-nexus-bg">
                         {activeVideoProvider === 'cupsy'
-                          ? 'Auto · 默认 5s'
+                          ? 'Auto'
                           : isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
                             ? 'Auto · 编辑跟随输入'
                             : 'Auto'}
@@ -2417,9 +2417,7 @@ function App({ onLogout }) {
                       model: effectiveVideoModel,
                       resolution: activeTab.resolution,
                       ratio: effectiveVideoRatio,
-                      duration: activeVideoProvider === 'cupsy' && effectiveVideoDuration === -1
-                        ? 5
-                        : effectiveVideoDuration,
+                      duration: effectiveVideoDuration,
                       fast: activeTab.fast,
                       referenceVideos: activeTab.refVideos,
                     })

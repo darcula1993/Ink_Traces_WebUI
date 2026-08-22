@@ -983,7 +983,7 @@ def test_cupsy_video_queues_assets_and_sends_only_declared_fields(monkeypatch):
 
     monkeypatch.setattr(application.HTTP, 'post', fake_auto_post)
     assert application.poll_video_task_once(auto_task_id)['state'] == 'pending'
-    assert 'duration' not in auto_submission
+    assert auto_submission['duration'] == -1
 
 
 def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):

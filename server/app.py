@@ -4009,13 +4009,11 @@ def _poll_cupsy_video_task(task):
             'model': cupsy_model,
             'content': _cupsy_video_content(task, assets),
             'ratio': params.get('ratio', 'adaptive'),
+            'duration': int(params.get('duration', 5)),
             'resolution': params.get('resolution', '720p'),
             'generate_audio': bool(params.get('generate_audio', True)),
             'watermark': False,
         }
-        duration = int(params.get('duration', 5))
-        if duration != -1:
-            body['duration'] = duration
         try:
             response = HTTP.post(
                 f'{endpoint}/v1/videos',

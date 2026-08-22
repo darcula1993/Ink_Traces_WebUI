@@ -33,7 +33,7 @@ intentionally omitted.
 | `watermark` | Supported |
 | `seed` | Explicitly unsupported |
 | `camera_fixed` | Explicitly unsupported |
-| `duration=-1` | Rejected with `422 validation_failed`; UI Auto omits the field and uses the current 5-second provider default |
+| `duration=-1` | Passed through by explicit product choice; the provider may reject it with `422 validation_failed` |
 | `frames` | Not declared; do not send |
 | `return_last_frame` | Not declared; accepted but ignored in a live generation test |
 | `output_format` | Not declared; do not send |
