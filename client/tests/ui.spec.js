@@ -585,6 +585,18 @@ test('Seed Audio workspace submits Cupsy full-scene audio parameters', async ({ 
 test('Cupsy endpoint reuses active Assets from the solid asset manager', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Cupsy asset manager is desktop focused')
   let submitted = null
+  const assets = Array.from({ length: 32 }, (_, index) => ({
+    id: 17 + index,
+    provider: 'cupsy',
+    external_asset_id: `asset_remote_${17 + index}`,
+    asset_uri: `asset://asset_remote_${17 + index}`,
+    kind: 'image',
+    status: 'active',
+    name: `reference-${String(index + 1).padStart(2, '0')}.png`,
+    mime_type: 'image/png',
+    size_bytes: 1234,
+    content_url: `/api/cupsy/assets/${17 + index}/content`,
+  }))
   await page.route('**/api/video/provider', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -613,18 +625,7 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
       success: true,
       configured: true,
       source_ready: true,
-      assets: [{
-        id: 17,
-        provider: 'cupsy',
-        external_asset_id: 'asset_remote_17',
-        asset_uri: 'asset://asset_remote_17',
-        kind: 'image',
-        status: 'active',
-        name: 'reference.png',
-        mime_type: 'image/png',
-        size_bytes: 1234,
-        content_url: '/api/cupsy/assets/17/content',
-      }],
+      assets,
     }),
   }))
   await page.route('**/api/cupsy/assets/17/content', route => route.fulfill({
@@ -656,7 +657,19 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
   const dialog = page.getByRole('dialog', { name: 'Cupsy 素材库' })
   await expect(dialog).toBeVisible()
   await expect(dialog).toHaveCSS('background-color', 'rgb(12, 16, 20)')
-  await dialog.getByRole('button', { name: '引用' }).click()
+  const cards = dialog.locator('.cupsy-asset-card')
+  await expect(cards).toHaveCount(32)
+  await expect.poll(() => cards.evaluateAll(items => items.slice(0, 5).every(card => {
+    const cardRect = card.getBoundingClientRect()
+    const actionsRect = card.querySelector('.cupsy-asset-actions')?.getBoundingClientRect()
+    return actionsRect && actionsRect.top >= cardRect.top && actionsRect.bottom <= cardRect.bottom
+  }))).toBe(true)
+  await expect(cards.first().getByRole('button', { name: '引用' })).toBeVisible()
+  await expect(cards.first().getByRole('button', { name: '删除素材 reference-01.png' })).toBeVisible()
+  await cards.last().scrollIntoViewIfNeeded()
+  await expect(cards.last().getByRole('button', { name: '引用' })).toBeVisible()
+  await expect(cards.last().getByRole('button', { name: '删除素材 reference-32.png' })).toBeVisible()
+  await cards.first().getByRole('button', { name: '引用' }).click()
   await expect(page.getByRole('button', { name: '打开视频参考图片 1' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('desktop-cupsy-assets.png') })
 })
