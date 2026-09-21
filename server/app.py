@@ -2174,13 +2174,12 @@ def cupsy_asset_source(token):
     return send_file(asset['local_path'], mimetype=asset.get('mime_type'), conditional=True)
 
 
-@app.route('/api/cupsy/assets/<int:asset_id>', methods=['DELETE'])
-def delete_cupsy_asset(asset_id):
+def _delete_cupsy_asset(asset_id):
     asset = task_db.get_provider_asset(asset_id)
     if not asset or asset.get('deleted_at'):
-        return jsonify({'success': False, 'error': '素材不存在'}), 404
+        return False, 404, '素材不存在'
     if task_db.provider_asset_has_active_tasks(asset_id):
-        return jsonify({'success': False, 'error': '素材正被进行中的任务使用'}), 409
+        return False, 409, '素材正被进行中的任务使用'
     settings = _cupsy_settings()
     if asset.get('external_asset_id') and settings['api_key']:
         try:
@@ -2189,9 +2188,9 @@ def delete_cupsy_asset(asset_id):
                 headers=_cupsy_headers(), timeout=(10, 30),
             )
         except requests.RequestException as error:
-            return jsonify({'success': False, 'error': f'Cupsy 素材删除失败: {error}'}), 502
+            return False, 502, f'Cupsy 素材删除失败: {error}'
         if response.status_code not in {200, 204, 404}:
-            return jsonify({'success': False, 'error': _cupsy_error(response, 'Cupsy 素材删除失败')}), 502
+            return False, 502, _cupsy_error(response, 'Cupsy 素材删除失败')
     now = task_db.utcnow()
     task_db.update_provider_asset(
         asset_id, status='deleted', deleted_at=now, next_run_at=None,
@@ -2201,6 +2200,48 @@ def delete_cupsy_asset(asset_id):
         os.remove(asset['local_path'])
     except FileNotFoundError:
         pass
+    return True, 200, None
+
+
+@app.route('/api/cupsy/assets/bulk-delete', methods=['POST'])
+def bulk_delete_cupsy_assets():
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get('ids')
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({'success': False, 'error': 'ids 必须是非空数组'}), 400
+    if len(raw_ids) > 100:
+        return jsonify({'success': False, 'error': '单次最多删除 100 个素材'}), 400
+    if any(not isinstance(asset_id, int) or isinstance(asset_id, bool) for asset_id in raw_ids):
+        return jsonify({'success': False, 'error': 'ids 包含无效素材 ID'}), 400
+    asset_ids = list(dict.fromkeys(raw_ids))
+    if any(asset_id <= 0 for asset_id in asset_ids):
+        return jsonify({'success': False, 'error': 'ids 包含无效素材 ID'}), 400
+
+    deleted_ids = []
+    missing_ids = []
+    failed = []
+    for asset_id in asset_ids:
+        deleted, status_code, error = _delete_cupsy_asset(asset_id)
+        if deleted:
+            deleted_ids.append(asset_id)
+        elif status_code == 404:
+            missing_ids.append(asset_id)
+        else:
+            failed.append({'id': asset_id, 'status': status_code, 'error': error})
+    return jsonify({
+        'success': not failed,
+        'deleted': len(deleted_ids),
+        'deleted_ids': deleted_ids,
+        'missing_ids': missing_ids,
+        'failed': failed,
+    })
+
+
+@app.route('/api/cupsy/assets/<int:asset_id>', methods=['DELETE'])
+def delete_cupsy_asset(asset_id):
+    deleted, status_code, error = _delete_cupsy_asset(asset_id)
+    if not deleted:
+        return jsonify({'success': False, 'error': error}), status_code
     return jsonify({'success': True})
 
 

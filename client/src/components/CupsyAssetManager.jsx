@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import { AudioLines, Film, Image as ImageIcon, Library, Plus, RefreshCw, Trash2, X } from 'lucide-react'
+import { AudioLines, CheckCheck, CheckSquare2, Film, Image as ImageIcon, Library, ListChecks, Plus, RefreshCw, Square, Trash2, X } from 'lucide-react'
 import IconButton from './ui/IconButton'
 
 const KIND_ICON = {
@@ -13,14 +13,20 @@ function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview
   const [assets, setAssets] = useState([])
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [sourceReady, setSourceReady] = useState(true)
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [selectedAssetIds, setSelectedAssetIds] = useState(new Set())
   const inputRef = useRef(null)
 
   const loadAssets = useCallback(async () => {
     setLoading(true)
     try {
       const response = await axios.get('/api/cupsy/assets')
-      setAssets(response.data.assets || [])
+      const nextAssets = response.data.assets || []
+      const availableIds = new Set(nextAssets.map(asset => asset.id))
+      setAssets(nextAssets)
+      setSelectedAssetIds(current => new Set([...current].filter(assetId => availableIds.has(assetId))))
       setSourceReady(response.data.source_ready !== false)
     } catch (error) {
       notify(error.response?.data?.error || 'Cupsy 素材加载失败', 'error')
@@ -35,6 +41,12 @@ function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview
     const timer = window.setInterval(loadAssets, 3000)
     return () => window.clearInterval(timer)
   }, [loadAssets, open])
+
+  useEffect(() => {
+    if (open) return
+    setSelectionMode(false)
+    setSelectedAssetIds(new Set())
+  }, [open])
 
   if (!open) return null
 
@@ -63,8 +75,66 @@ function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview
     try {
       await axios.delete(`/api/cupsy/assets/${asset.id}`)
       setAssets(current => current.filter(item => item.id !== asset.id))
+      setSelectedAssetIds(current => {
+        const next = new Set(current)
+        next.delete(asset.id)
+        return next
+      })
     } catch (error) {
       notify(error.response?.data?.error || 'Cupsy 素材删除失败', 'error')
+    }
+  }
+
+  const toggleSelectionMode = () => {
+    setSelectionMode(current => !current)
+    setSelectedAssetIds(new Set())
+  }
+
+  const toggleAssetSelection = assetId => {
+    setSelectedAssetIds(current => {
+      const next = new Set(current)
+      if (next.has(assetId)) next.delete(assetId)
+      else next.add(assetId)
+      return next
+    })
+  }
+
+  const allSelected = assets.length > 0 && selectedAssetIds.size === assets.length
+  const toggleSelectAll = () => {
+    setSelectedAssetIds(allSelected ? new Set() : new Set(assets.map(asset => asset.id)))
+  }
+
+  const deleteSelectedAssets = async () => {
+    const assetIds = [...selectedAssetIds]
+    if (!assetIds.length) return
+    if (!window.confirm(`永久删除选中的 ${assetIds.length} 个素材？此操作无法撤销。`)) return
+    setDeleting(true)
+    const removedIds = new Set()
+    let deletedCount = 0
+    const failed = []
+    try {
+      for (let offset = 0; offset < assetIds.length; offset += 100) {
+        const response = await axios.post('/api/cupsy/assets/bulk-delete', {
+          ids: assetIds.slice(offset, offset + 100),
+        }, { timeout: 600000 })
+        deletedCount += Number(response.data.deleted) || 0
+        ;[...(response.data.deleted_ids || []), ...(response.data.missing_ids || [])]
+          .forEach(assetId => removedIds.add(Number(assetId)))
+        failed.push(...(response.data.failed || []))
+      }
+      setAssets(current => current.filter(asset => !removedIds.has(asset.id)))
+      setSelectedAssetIds(new Set(failed.map(item => Number(item.id))))
+      if (failed.length) {
+        notify(`已删除 ${deletedCount} 个素材，${failed.length} 个删除失败`, 'error')
+      } else {
+        notify(`已删除 ${deletedCount} 个素材`)
+        setSelectionMode(false)
+      }
+    } catch (error) {
+      notify(error.response?.data?.error || '批量删除素材失败', 'error')
+      await loadAssets()
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -81,11 +151,25 @@ function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview
           </div>
         </header>
         <div className="cupsy-assets-toolbar">
-          <button type="button" className="btn-base btn-primary min-h-9 px-3 text-xs" disabled={uploading || !sourceReady} title={sourceReady ? '添加素材' : '需要配置公网 HTTP(S) 素材源'} onClick={() => inputRef.current?.click()}>
-            <Plus size={14} /> {uploading ? '上传中' : sourceReady ? '添加素材' : '公网源未配置'}
-          </button>
+          <div className="cupsy-assets-toolbar-actions">
+            <button type="button" className="btn-base btn-primary min-h-9 px-3 text-xs" disabled={uploading || deleting || !sourceReady} title={sourceReady ? '添加素材' : '需要配置公网 HTTP(S) 素材源'} onClick={() => inputRef.current?.click()}>
+              <Plus size={14} /> {uploading ? '上传中' : sourceReady ? '添加素材' : '公网源未配置'}
+            </button>
+            <button type="button" className={`cupsy-assets-command ${selectionMode ? 'active' : ''}`} aria-pressed={selectionMode} onClick={toggleSelectionMode} disabled={deleting || assets.length === 0}>
+              {selectionMode ? <X size={14} /> : <ListChecks size={14} />}
+              {selectionMode ? '退出选择' : '批量选择'}
+            </button>
+            {selectionMode && <>
+              <button type="button" className={`cupsy-assets-command ${allSelected ? 'active' : ''}`} onClick={toggleSelectAll} disabled={deleting}>
+                <CheckCheck size={14} /> {allSelected ? '取消全选' : '全选'}
+              </button>
+              <button type="button" className="cupsy-assets-command danger" onClick={deleteSelectedAssets} disabled={deleting || selectedAssetIds.size === 0}>
+                <Trash2 size={14} /> {deleting ? '删除中' : `删除 (${selectedAssetIds.size})`}
+              </button>
+            </>}
+          </div>
           <input ref={inputRef} className="hidden" type="file" accept="image/*,video/mp4,video/quicktime,audio/wav,audio/mp3,audio/mpeg" multiple onChange={event => uploadFiles(event.target.files)} />
-          <span className="text-xs text-nexus-muted">{assets.length} 个素材</span>
+          <span className="text-xs text-nexus-muted">{selectionMode ? `已选 ${selectedAssetIds.size} / ` : ''}{assets.length} 个素材</span>
         </div>
         <div className="cupsy-assets-grid custom-scrollbar">
           {!loading && assets.length === 0 && <div className="cupsy-assets-empty">暂无素材</div>}
@@ -93,9 +177,16 @@ function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview
             const KindIcon = KIND_ICON[asset.kind] || Library
             const ready = asset.status === 'active'
             const allowed = !allowedKinds || allowedKinds.includes(asset.kind)
+            const selected = selectedAssetIds.has(asset.id)
+            const selectionLabel = `${selected ? '取消选择' : '选择'}素材 ${asset.name || asset.id}`
             return (
-              <article className="cupsy-asset-card" key={asset.id}>
-                <button type="button" className="cupsy-asset-preview" onClick={() => onPreview({ type: asset.kind, src: asset.content_url, name: asset.name })}>
+              <article className={`cupsy-asset-card ${selected ? 'selected' : ''}`} key={asset.id}>
+                {selectionMode && (
+                  <button type="button" className="cupsy-asset-selector" aria-label={selectionLabel} aria-pressed={selected} onClick={() => toggleAssetSelection(asset.id)}>
+                    {selected ? <CheckSquare2 size={17} /> : <Square size={17} />}
+                  </button>
+                )}
+                <button type="button" className="cupsy-asset-preview" onClick={() => selectionMode ? toggleAssetSelection(asset.id) : onPreview({ type: asset.kind, src: asset.content_url, name: asset.name })}>
                   {asset.kind === 'image' && <img src={asset.content_url} alt={asset.name || 'Cupsy 素材'} />}
                   {asset.kind === 'video' && <video src={asset.content_url} muted preload="metadata" />}
                   {asset.kind === 'audio' && <AudioLines size={26} className="text-nexus-cyan" />}
@@ -107,13 +198,15 @@ function CupsyAssetManager({ open, mode, allowedKinds, onClose, onUse, onPreview
                 </div>
                 {asset.error && <div className="cupsy-asset-error" title={asset.error}>{asset.error}</div>}
                 <div className="cupsy-asset-actions">
-                  {mode === 'keyframe' && asset.kind === 'image' ? <>
+                  {selectionMode ? (
+                    <button type="button" className={selected ? 'selected' : ''} onClick={() => toggleAssetSelection(asset.id)}>{selected ? '已选择' : '选择素材'}</button>
+                  ) : mode === 'keyframe' && asset.kind === 'image' ? <>
                     <button type="button" disabled={!ready} onClick={() => onUse(asset, 'first_frame')}>首帧</button>
                     <button type="button" disabled={!ready} onClick={() => onUse(asset, 'last_frame')}>尾帧</button>
                   </> : (
                     <button type="button" disabled={!ready || mode === 'keyframe' || !allowed} title={allowed ? '引用素材' : '当前模式不支持此素材'} onClick={() => onUse(asset, `reference_${asset.kind}`)}>引用</button>
                   )}
-                  <button type="button" className="danger" title="删除素材" aria-label={`删除素材 ${asset.name || asset.id}`} onClick={() => deleteAsset(asset)}><Trash2 size={13} /></button>
+                  {!selectionMode && <button type="button" className="danger" title="删除素材" aria-label={`删除素材 ${asset.name || asset.id}`} onClick={() => deleteAsset(asset)}><Trash2 size={13} /></button>}
                 </div>
               </article>
             )

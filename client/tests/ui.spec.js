@@ -585,6 +585,7 @@ test('Seed Audio workspace submits Cupsy full-scene audio parameters', async ({ 
 test('Cupsy endpoint reuses active Assets from the solid asset manager', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Cupsy asset manager is desktop focused')
   let submitted = null
+  let bulkDeleteRequest = null
   const assets = Array.from({ length: 32 }, (_, index) => ({
     id: 17 + index,
     provider: 'cupsy',
@@ -633,6 +634,22 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
     contentType: 'image/png',
     body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
   }))
+  await page.route('**/api/cupsy/assets/bulk-delete', route => {
+    bulkDeleteRequest = route.request().postDataJSON()
+    const deletedIds = bulkDeleteRequest.ids
+    assets.splice(0, assets.length, ...assets.filter(asset => !deletedIds.includes(asset.id)))
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        deleted: deletedIds.length,
+        deleted_ids: deletedIds,
+        missing_ids: [],
+        failed: [],
+      }),
+    })
+  })
   await login(page, { initialWorkspaceState: { appMode: 'video' } })
 
   await page.getByLabel('视频端点').selectOption('cupsy')
@@ -669,6 +686,22 @@ test('Cupsy endpoint reuses active Assets from the solid asset manager', async (
   await cards.last().scrollIntoViewIfNeeded()
   await expect(cards.last().getByRole('button', { name: '引用' })).toBeVisible()
   await expect(cards.last().getByRole('button', { name: '删除素材 reference-32.png' })).toBeVisible()
+
+  await dialog.getByRole('button', { name: '批量选择' }).click()
+  await dialog.getByRole('button', { name: '全选' }).click()
+  await expect(dialog.getByText('已选 32 / 32 个素材')).toBeVisible()
+  await dialog.getByRole('button', { name: '取消全选' }).click()
+  await expect(dialog.getByText('已选 0 / 32 个素材')).toBeVisible()
+  await cards.nth(0).getByRole('button', { name: '选择素材 reference-01.png' }).click()
+  await cards.nth(1).getByRole('button', { name: '选择素材 reference-02.png' }).click()
+  await expect(dialog.getByText('已选 2 / 32 个素材')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('desktop-cupsy-assets-selection.png') })
+  page.once('dialog', confirmation => confirmation.accept())
+  await dialog.getByRole('button', { name: '删除 (2)' }).click()
+  await expect.poll(() => bulkDeleteRequest?.ids).toEqual([17, 18])
+  await expect(cards).toHaveCount(30)
+  await expect(dialog.getByRole('button', { name: '批量选择' })).toBeVisible()
+
   await cards.first().getByRole('button', { name: '引用' }).click()
   await expect(page.getByRole('button', { name: '打开视频参考图片 1' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('desktop-cupsy-assets.png') })

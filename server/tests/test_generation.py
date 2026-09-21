@@ -745,6 +745,58 @@ def test_cupsy_asset_lifecycle_uses_signed_local_source(monkeypatch):
     assert task_db.get_provider_asset(asset_id)['status'] == 'deleted'
 
 
+def test_cupsy_bulk_delete_reports_partial_results(monkeypatch):
+    monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
+        'api_key': 'cupsy-test-key',
+        'endpoint': 'https://cupsy.invalid',
+        'source_base_url': 'https://studio.example',
+    })
+    assets = []
+    for index, name in enumerate(('deletable.png', 'in-use.png')):
+        path = os.path.join(storage.WORKSPACE_ASSET_DIR, name)
+        with open(path, 'wb') as handle:
+            handle.write(_png_bytes())
+        asset = task_db.create_provider_asset(
+            'cupsy', 'image', hashlib.sha256(name.encode()).hexdigest(), name,
+            'image/png', len(_png_bytes()), path,
+        )
+        task_db.update_provider_asset(
+            asset['id'], external_asset_id=f'asset_remote_{index}',
+            asset_uri=f'asset://asset_remote_{index}', status='active', next_run_at=None,
+        )
+        assets.append(asset)
+
+    active_task_id = task_db.create_task(
+        'video', 'active task', {'video_mode': 'reference'}, provider='cupsy',
+    )
+    task_db.link_task_provider_asset(active_task_id, assets[1]['id'], 'reference_image', 0)
+    deleted_remote_ids = []
+
+    def fake_delete(url, **_kwargs):
+        deleted_remote_ids.append(url.rsplit('/', 1)[-1])
+        return FakeResponse(status_code=204)
+
+    monkeypatch.setattr(application.HTTP, 'delete', fake_delete)
+    client = application.app.test_client()
+    response = client.post('/api/cupsy/assets/bulk-delete', json={
+        'ids': [assets[0]['id'], assets[1]['id'], 999999, assets[0]['id']],
+    })
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['success'] is False
+    assert payload['deleted_ids'] == [assets[0]['id']]
+    assert payload['missing_ids'] == [999999]
+    assert payload['failed'] == [{
+        'id': assets[1]['id'], 'status': 409, 'error': '素材正被进行中的任务使用',
+    }]
+    assert deleted_remote_ids == ['asset_remote_0']
+    assert task_db.get_provider_asset(assets[0]['id'])['deleted_at'] is not None
+    assert task_db.get_provider_asset(assets[1]['id'])['deleted_at'] is None
+    assert client.post('/api/cupsy/assets/bulk-delete', json={'ids': []}).status_code == 400
+    assert client.post('/api/cupsy/assets/bulk-delete', json={'ids': [1.5]}).status_code == 400
+
+
 def test_cupsy_asset_retry_reuses_source_url_and_idempotency_key(monkeypatch):
     monkeypatch.setattr(application, 'CUPSY_VIDEO_CONFIG', {
         'api_key': 'cupsy-test-key',

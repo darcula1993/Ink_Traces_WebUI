@@ -2036,6 +2036,36 @@
 .cupsy-assets-header { height: 48px; }
 .cupsy-assets-toolbar { height: 52px; }
 
+.cupsy-assets-toolbar-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.cupsy-assets-command {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #344149;
+  border-radius: 5px;
+  background: #182128;
+  padding: 0 10px;
+  color: #b7c4cb;
+  font-size: 11px;
+}
+
+.cupsy-assets-command:hover:not(:disabled),
+.cupsy-assets-command.active {
+  border-color: #5798a0;
+  color: #7ee7ee;
+}
+
+.cupsy-assets-command.danger { color: #ff727c; }
+.cupsy-assets-command.danger:hover:not(:disabled) { border-color: #9b4650; color: #ff9aa2; }
+.cupsy-assets-command:disabled { cursor: not-allowed; opacity: 0.38; }
+
 .cupsy-assets-grid {
   display: grid;
   min-height: 0;
@@ -2058,6 +2088,7 @@
 }
 
 .cupsy-asset-card {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -2067,6 +2098,33 @@
   border: 1px solid #293239;
   border-radius: 7px;
   background: #13191e;
+}
+
+.cupsy-asset-card.selected {
+  border-color: #59c7cf;
+  box-shadow: inset 0 0 0 1px rgba(89, 199, 207, 0.22);
+}
+
+.cupsy-asset-selector {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid #46545d;
+  border-radius: 5px;
+  background: #10171c;
+  color: #aebbc2;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.cupsy-asset-selector[aria-pressed='true'] {
+  border-color: #59c7cf;
+  background: #11272b;
+  color: #7ee7ee;
 }
 
 .cupsy-asset-preview {
@@ -2136,6 +2194,7 @@
 }
 
 .cupsy-asset-actions button:hover:not(:disabled) { border-color: #5798a0; color: #7ee7ee; }
+.cupsy-asset-actions button.selected { border-color: #5798a0; background: #11272b; color: #7ee7ee; }
 .cupsy-asset-actions button:disabled { cursor: not-allowed; opacity: 0.38; }
 .cupsy-asset-actions button.danger { flex: 0 0 30px; color: #ff727c; }
 
