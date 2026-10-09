@@ -926,16 +926,15 @@ test('PNG Info applies reusable parameters without changing provider or model', 
 test('image endpoint and model selectors live in the parameter inspector', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop', 'Image parameter controls only need one desktop run')
   let provider = 'ark'
-  let model = 'gemini-3.1-flash-image-preview'
+  let model = 'gemini-nano-banana-2.1'
   const providerChanges = []
   const modelChanges = []
   const providers = {
     ark: { name: 'BytePlus Ark', model: 'seedream-5-0-pro', available: true },
-    vertex: { name: 'Vertex AI', model: 'gemini-3.1-flash-image-preview', available: true },
+    google: { name: 'Google Gemini API', model: 'gemini-nano-banana-2.1', available: true },
   }
   const models = [
-    { id: 'gemini-3.1-flash-image-preview', name: 'Gemini 3.1 Flash' },
-    { id: 'gemini-3-pro-image-preview', name: 'Gemini 3 Pro' },
+    { id: 'gemini-nano-banana-2.1', name: 'Nano Banana 2.1' },
   ]
 
   await page.route('**/api/provider', async route => {
@@ -975,16 +974,20 @@ test('image endpoint and model selectors live in the parameter inspector', async
   await expect(page.getByLabel('图片模型')).toBeDisabled()
   await expect(page.getByLabel('图片模型').locator('option')).toHaveText(['Seedream 5.0 Pro'])
 
-  await page.getByLabel('图片端点').selectOption('vertex')
-  await expect.poll(() => providerChanges).toEqual(['vertex'])
-  await expect(page.getByLabel('图片模型')).toBeEnabled()
-  await expect(page.getByLabel('图片模型').locator('option')).toHaveText(['Gemini 3.1 Flash', 'Gemini 3 Pro'])
-  await page.getByLabel('图片模型').selectOption('gemini-3-pro-image-preview')
-  await expect.poll(() => modelChanges).toEqual(['gemini-3-pro-image-preview'])
-  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-3-pro-image-preview')
+  await page.getByLabel('图片端点').selectOption('google')
+  await expect.poll(() => providerChanges).toEqual(['google'])
+  await expect(page.getByLabel('图片模型')).toBeDisabled()
+  await expect(page.getByLabel('图片模型').locator('option')).toHaveText(['Nano Banana 2.1'])
+  await expect(page.getByLabel('图片模型')).toHaveValue('gemini-nano-banana-2.1')
+  await expect(page.getByLabel('图片分辨率').locator('option')).toHaveText(['1K', '2K', '4K'])
+  await expect(page.getByLabel('画幅').locator('option[value="9:21"]')).toHaveCount(1)
+  await expect(page.getByLabel('图片思考深度').locator('option')).toHaveText(['快速', '标准', '深入'])
+  await expect(page.getByLabel('图片思考深度')).toHaveValue('medium')
+  await page.screenshot({ path: testInfo.outputPath('desktop-google-nano-banana-21.png') })
 
   await page.getByLabel('图片端点').selectOption('ark')
-  await expect.poll(() => providerChanges).toEqual(['vertex', 'ark'])
+  await expect.poll(() => providerChanges).toEqual(['google', 'ark'])
+  expect(modelChanges).toEqual([])
   await expect(page.getByLabel('图片模型')).toBeDisabled()
   await expect(page.getByLabel('图片模型')).toHaveValue('seedream-5-0-pro')
 })

@@ -119,13 +119,13 @@ def test_full_text_search_tracks_provider_updates_and_deletes():
     assert task_db.list_task_ids(search='neon') == [task_id]
     assert task_db.list_task_ids(search='ark') == [task_id]
 
-    assert task_db.update_task(task_id, provider='vertex')
+    assert task_db.update_task(task_id, provider='google')
     assert task_db.list_task_ids(search='ark') == []
-    assert task_db.list_task_ids(search='vertex') == [task_id]
+    assert task_db.list_task_ids(search='google') == [task_id]
 
     task_db.delete_task(task_id)
     assert task_db.list_task_ids(search='neon') == []
-    assert task_db.list_task_ids(search='vertex') == []
+    assert task_db.list_task_ids(search='google') == []
 
 
 def test_workspace_state_round_trip():

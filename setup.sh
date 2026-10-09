@@ -69,7 +69,7 @@ echo -e "\n${YELLOW}[2/6] 初始化配置文件...${NC}"
 if [ -f "$PROJECT_ROOT/config.json" ]; then
     echo -e "${GREEN}  ✓ config.json 已存在${NC}"
     # 检查是否有空 key
-    EMPTY_KEYS=$(grep '"key": ""' "$PROJECT_ROOT/config.json" 2>/dev/null | wc -l)
+    EMPTY_KEYS=$(grep -E '"(api_)?key": ""' "$PROJECT_ROOT/config.json" 2>/dev/null | wc -l)
     if [ "$EMPTY_KEYS" -gt 0 ]; then
         echo -e "${YELLOW}  ⚠ 检测到未配置的 API Key，请编辑 config.json 填入密钥${NC}"
     fi
@@ -84,15 +84,9 @@ else
   "client": { "host": "0.0.0.0", "port": 4545 },
   "api": {
     "default_provider": "ark",
-    "default_model": "gemini-3.1-flash-image-preview",
-    "available_models": [
-      { "id": "gemini-3.1-flash-image-preview", "name": "Gemini 3.1 Flash", "description": "Fast" },
-      { "id": "gemini-3-pro-image-preview", "name": "Gemini 3 Pro", "description": "High quality" }
-    ],
-    "vertex": { "key": "", "model_id": "gemini-3.1-flash-image-preview", "endpoint": "aiplatform.googleapis.com", "project_id": "" },
+    "google": { "api_key": "", "model": "gemini-nano-banana-2.1", "endpoint": "https://generativelanguage.googleapis.com/v1beta/interactions", "request_timeout_seconds": 600 },
     "ark": { "api_key": "", "model": "seedream-5-0-pro", "endpoint": "https://ark.ap-southeast.bytepluses.com" }
   },
-  "safety": { "hate_speech": "BLOCK_NONE", "dangerous_content": "BLOCK_NONE", "sexually_explicit": "BLOCK_NONE", "harassment": "BLOCK_NONE" },
   "video": {
     "ark": { "api_key": "", "endpoint": "https://ark.ap-southeast.bytepluses.com", "model": "dreamina-seedance-2-0-260128", "seedance_2_5_model": "ep-20260807145632-xprc6" }
   }

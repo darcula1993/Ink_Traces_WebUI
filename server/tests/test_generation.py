@@ -674,6 +674,145 @@ class FakeResponse:
         return False
 
 
+def test_google_nano_banana_21_uses_interactions_api_and_final_image(monkeypatch):
+    monkeypatch.setitem(application.API_PROVIDERS, 'google', {
+        'api_key': 'google-test-key',
+        'model': 'gemini-nano-banana-2.1',
+        'endpoint': 'https://generativelanguage.invalid/v1beta/interactions',
+        'request_timeout_seconds': 600,
+    })
+    observed = {}
+    final_image = _rgba_png_bytes((3, 2))
+
+    def fake_post(url, **kwargs):
+        observed['url'] = url
+        observed['headers'] = kwargs['headers']
+        observed['body'] = kwargs['json']
+        observed['timeout'] = kwargs['timeout']
+        return FakeResponse(payload={
+            'id': 'interaction-21',
+            'status': 'completed',
+            'steps': [{
+                'type': 'model_output',
+                'content': [
+                    {'type': 'image', 'mime_type': 'image/png', 'data': _png_data_url().split(',', 1)[1]},
+                    {'type': 'text', 'text': 'final rendering'},
+                    {'type': 'image', 'mime_type': 'image/png', 'data': base64.b64encode(final_image).decode()},
+                ],
+            }],
+        })
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    client = application.app.test_client()
+    upload = client.post('/api/workspace/assets/img_tabs', data={
+        'file': (io.BytesIO(_rgba_png_bytes((512, 512))), 'reference.png'),
+    }).get_json()['asset']
+    queued = client.post('/api/generate', json={
+        'provider': 'google',
+        'model': 'ignored-client-model',
+        'prompt': 'Create a tall editorial image',
+        'aspect_ratio': '9:21',
+        'resolution': '4K',
+        'think_level': 'high',
+        'use_search': True,
+        'image_urls': [upload['url']],
+    })
+
+    assert queued.status_code == 202
+    task_id = queued.get_json()['task_id']
+    assert task_db.get_task(task_id)['params']['model'] == 'gemini-nano-banana-2.1'
+    assert task_db.claim_next_task('google-image-worker')['id'] == task_id
+    with application.app.app_context():
+        payload, status_code = application.execute_image_task(task_id)
+
+    assert status_code == 200
+    assert observed['url'] == 'https://generativelanguage.invalid/v1beta/interactions'
+    assert observed['headers']['x-goog-api-key'] == 'google-test-key'
+    assert 'key=' not in observed['url']
+    assert observed['timeout'] == (10, 600)
+    assert observed['body']['model'] == 'gemini-nano-banana-2.1'
+    assert observed['body']['response_format'] == {
+        'type': 'image', 'mime_type': 'image/jpeg', 'aspect_ratio': '9:21', 'image_size': '4K',
+    }
+    assert observed['body']['generation_config'] == {'thinking_level': 'high'}
+    assert observed['body']['tools'] == [{'type': 'google_search'}]
+    assert [item['type'] for item in observed['body']['input']] == ['image', 'text']
+    assert observed['body']['input'][0]['mime_type'] == 'image/png'
+    assert observed['body']['input'][1]['text'] == 'Create a tall editorial image'
+    assert payload['thinking'] == 'final rendering'
+    output = next(asset for asset in task_db.list_assets(task_id) if asset['kind'] == 'output_image')
+    with open(output['path'], 'rb') as handle:
+        assert handle.read() == final_image
+
+
+def test_google_interactions_service_disabled_error_array_is_actionable():
+    response = FakeResponse(status_code=403, payload=[{
+        'error': {
+            'code': 403,
+            'message': 'Gemini API is disabled',
+            'status': 'PERMISSION_DENIED',
+            'details': [{'reason': 'SERVICE_DISABLED'}],
+        },
+    }])
+
+    error = application.parse_api_error(response, response.json())
+
+    assert error['type'] == 'service_disabled'
+    assert 'Generative Language API' in error['user_message']
+    assert error['details']['reasons'] == ['SERVICE_DISABLED']
+
+    blocked_response = FakeResponse(status_code=403, payload=[{
+        'error': {
+            'code': 403,
+            'message': 'Requests to this API method are blocked',
+            'status': 'PERMISSION_DENIED',
+            'details': [{'reason': 'API_KEY_SERVICE_BLOCKED'}],
+        },
+    }])
+    blocked = application.parse_api_error(blocked_response, blocked_response.json())
+    assert blocked['type'] == 'api_key_service_blocked'
+    assert 'API restrictions' in blocked['user_message']
+
+
+def test_google_interactions_chat_uses_previous_interaction_id(monkeypatch):
+    provider_config = {
+        'api_key': 'google-test-key',
+        'model': 'gemini-nano-banana-2.1',
+        'endpoint': 'https://generativelanguage.invalid/v1beta/interactions',
+    }
+    request_bodies = []
+
+    def fake_post(_url, **kwargs):
+        request_bodies.append(kwargs['json'])
+        interaction_id = f'interaction-{len(request_bodies)}'
+        return FakeResponse(payload={
+            'id': interaction_id,
+            'status': 'completed',
+            'output_image': {
+                'type': 'image', 'mime_type': 'image/png',
+                'data': _png_data_url().split(',', 1)[1],
+            },
+        })
+
+    monkeypatch.setattr(application.HTTP, 'post', fake_post)
+    application.chat_sessions.clear()
+    with application.app.app_context():
+        first_response, first_status = application._generate_google_image(
+            'first turn', '1:1', '1K', [{'text': 'first turn'}],
+            enable_chat=True, provider_config=provider_config,
+        )
+        first_session_id = first_response['session_id']
+        second_response, second_status = application._generate_google_image(
+            'second turn', '1:1', '1K', [{'text': 'second turn'}],
+            enable_chat=True, session_id=first_session_id, provider_config=provider_config,
+        )
+
+    assert first_status == second_status == 200
+    assert 'previous_interaction_id' not in request_bodies[0]
+    assert request_bodies[1]['previous_interaction_id'] == 'interaction-1'
+    assert second_response['session_id'] == first_session_id
+
+
 def test_retired_provider_and_generation_endpoints_are_unavailable():
     client = application.app.test_client()
 
@@ -683,7 +822,9 @@ def test_retired_provider_and_generation_endpoints_are_unavailable():
     assert client.post('/api/video/provider', json={'provider': 'ark'}).status_code == 405
 
     image_providers = client.get('/api/provider').get_json()['providers']
-    assert set(image_providers) == {'ark', 'vertex'}
+    assert set(image_providers) == {'ark', 'google'}
+    assert image_providers['google']['model'] == 'gemini-nano-banana-2.1'
+    assert client.post('/api/provider', json={'provider': 'vertex'}).status_code == 400
     assert client.post('/api/provider', json={'provider': 'ai_studio'}).status_code == 400
 
     response = client.post('/api/video/generate', json={
@@ -1129,7 +1270,7 @@ def test_cupsy_audio_queues_references_polls_and_downloads(monkeypatch):
     assert observed['url'] == 'https://cupsy.invalid/v1/audio/generations'
     assert observed['headers']['Idempotency-Key'] == f'nanobanana-audio-{task_id}'
     assert observed['body']['references'] == [
-        {'audio_url': {'url': 'asset://asset_audio_1'}},
+        {'audio_url': 'asset://asset_audio_1'},
     ]
     assert observed['body']['audio_config'] == {
         'format': 'wav', 'sample_rate': 48000, 'enable_subtitle': True,

@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-Ink Traces WebUI 是一个多 Provider AI 图片/视频生成 Web 应用。前后端分离，前端 React，后端 Python Flask。图片支持 Google Gemini Vertex AI 和 BytePlus Ark Seedream，视频固定使用 BytePlus Ark Seedance。
+Ink Traces WebUI 是一个多 Provider AI 图片/视频生成 Web 应用。前后端分离，前端 React，后端 Python Flask。图片支持 Google Gemini API Nano Banana 2.1 和 BytePlus Ark Seedream，视频支持 BytePlus Ark 与 Cupsy Seedance。
 
 GitHub: `darcula1993/Ink_Traces_WebUI`
 
@@ -16,7 +16,7 @@ GitHub: `darcula1993/Ink_Traces_WebUI`
 Flask 后端 (localhost:5000)
   ↓ SQLite 任务 + 独立 Worker
   ↓ REST API (HTTPS)
-  ├── Google Gemini API (Vertex AI) — 图片生成
+  ├── Google Gemini Interactions API (Nano Banana 2.1) — 图片生成
   ├── BytePlus Ark (Seedream 5.0 Pro) — 图片生成
   └── BytePlus Ark (Seedance 2.0 / 2.5) — 视频生成
 ```
@@ -63,8 +63,8 @@ Flask 后端 (localhost:5000)
 
 ### Provider 切换
 
-两个 Provider 循环切换（前端 NODE 按钮）：
-- `vertex` — Google Vertex AI
+两个 Provider 循环切换：
+- `google` — Google Gemini API (Nano Banana 2.1)
 - `ark` — BytePlus Ark (Seedream 5.0 Pro)
 
 ### 统一生成接口
@@ -76,7 +76,7 @@ POST /api/generate
 - 无文件 → 文生图（JSON body）
 - 有文件 → 图生图（multipart/form-data）
 - 普通模式返回 `202 + task_id`，前端轮询本地任务；Chat 模式保持同步
-- Gemini: 支持 14 种宽高比 × 4 种分辨率、思考深度、搜索增强、Chat 模式
+- Google: 支持官方宽高比、1K/2K/4K、`minimal`/`medium`/`high` 思考深度、搜索增强、Chat 模式和最多 14 张参考图
 - Ark: Seedream 5.0 Pro，支持 1K/2K、PNG/JPEG、watermark；prompt optimization 固定为 standard，无 think/search/chat
 
 ### 图片处理
@@ -159,14 +159,12 @@ POST /api/generate
   "client": { "host": "0.0.0.0", "port": 4545 },
   "api": {
     "default_provider": "ark",
-    "vertex": { "key": "", "project_id": "", "endpoint": "aiplatform.googleapis.com" },
+    "google": { "api_key": "", "model": "gemini-nano-banana-2.1", "endpoint": "https://generativelanguage.googleapis.com/v1beta/interactions" },
     "ark": { "api_key": "", "model": "", "endpoint": "https://ark.ap-southeast.bytepluses.com" }
   },
   "video": {
     "ark": { "api_key": "", "model": "dreamina-seedance-2-0-260128", "endpoint": "..." }
-  },
-  "safety": "BLOCK_NONE",
-  "model": "gemini-3.1-flash-image-preview"
+  }
 }
 ```
 

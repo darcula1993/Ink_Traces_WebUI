@@ -28,7 +28,7 @@ Ink Traces WebUI is a local web workstation for prompt-driven image and video cr
 |---|---|
 | Image generation | Text-to-image and image-to-image through one unified workflow |
 | Video generation | Seedance 2.0/2.5 keyframe and multimodal reference workflows with image, video, and audio inputs |
-| Providers | Google Vertex AI and BytePlus Ark for images; BytePlus Ark Seedance 2.0/2.5 for video |
+| Providers | Google Gemini API Nano Banana 2.1 and BytePlus Ark for images; BytePlus Ark Seedance 2.0/2.5 for video |
 | Prompt workflow | Prompt Vault, fullscreen editor, multi-tab workspaces, reusable saved prompts |
 | Runtime history | SQLite task queue for image/video results, local file recovery, task restore |
 | Controls | Aspect ratio, resolution, thinking level, Google Search grounding, chat mode |

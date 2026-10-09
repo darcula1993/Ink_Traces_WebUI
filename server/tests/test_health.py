@@ -95,7 +95,7 @@ def test_task_bulk_delete_api():
 
 def test_task_status_batch_and_filtered_navigation():
     first = task_db.create_task('image', 'alpha landscape', {}, provider='ark')
-    second = task_db.create_task('image', 'beta portrait', {}, provider='vertex')
+    second = task_db.create_task('image', 'beta portrait', {}, provider='google')
     third = task_db.create_task('image', 'gamma portrait', {}, provider='ark')
     task_db.update_task(second, status='processing', progress=37)
     client = application.app.test_client()

@@ -69,24 +69,11 @@ BUILTIN_DEFAULT_CONFIG = {
     'client': {'host': '0.0.0.0', 'port': 4545},
     'api': {
         'default_provider': 'ark',
-        'default_model': 'gemini-3.1-flash-image-preview',
-        'available_models': [
-            {
-                'id': 'gemini-3.1-flash-image-preview',
-                'name': 'Gemini 3.1 Flash',
-                'description': '快速响应，适合快速迭代',
-            },
-            {
-                'id': 'gemini-3-pro-image-preview',
-                'name': 'Gemini 3 Pro',
-                'description': '高质量生成，更强的理解能力',
-            },
-        ],
-        'vertex': {
-            'key': '',
-            'model_id': 'gemini-3.1-flash-image-preview',
-            'endpoint': 'aiplatform.googleapis.com',
-            'project_id': '',
+        'google': {
+            'api_key': '',
+            'model': 'gemini-nano-banana-2.1',
+            'endpoint': 'https://generativelanguage.googleapis.com/v1beta/interactions',
+            'request_timeout_seconds': 600,
         },
         'ark': {
             'api_key': '',
@@ -95,12 +82,6 @@ BUILTIN_DEFAULT_CONFIG = {
             'upload_timeout_seconds': 120,
             'request_timeout_seconds': 600,
         },
-    },
-    'safety': {
-        'hate_speech': 'BLOCK_NONE',
-        'dangerous_content': 'BLOCK_NONE',
-        'sexually_explicit': 'BLOCK_NONE',
-        'harassment': 'BLOCK_NONE',
     },
     'video': {
         'poll_interval_seconds': 4,
@@ -296,26 +277,22 @@ def log_request(response):
 
 # API Provider 配置
 API_PROVIDERS = {
-    'vertex': config['api'].get('vertex', {}),
+    'google': config['api'].get('google', {}),
     'ark': config['api'].get('ark', {})
 }
 configured_image_provider = config['api'].get('default_provider', 'ark')
 CURRENT_PROVIDER = configured_image_provider if configured_image_provider in API_PROVIDERS else 'ark'
 
-# 可用模型配置
-AVAILABLE_MODELS = config['api'].get('available_models', [
+# Google image model exposed by this endpoint.
+GOOGLE_IMAGE_MODEL = 'gemini-nano-banana-2.1'
+AVAILABLE_MODELS = [
     {
-        "id": "gemini-3.1-flash-image-preview",
-        "name": "Gemini 3.1 Flash",
-        "description": "快速响应，适合快速迭代"
-    },
-    {
-        "id": "gemini-3-pro-image-preview",
-        "name": "Gemini 3 Pro",
-        "description": "高质量生成，更强的理解能力"
+        'id': GOOGLE_IMAGE_MODEL,
+        'name': 'Nano Banana 2.1',
+        'description': 'Google 高效图像生成与编辑模型',
     }
-])
-CURRENT_MODEL = config['api'].get('default_model', 'gemini-3.1-flash-image-preview')
+]
+CURRENT_MODEL = GOOGLE_IMAGE_MODEL
 
 
 def get_session_image_provider():
@@ -337,15 +314,13 @@ def get_image_provider_config(provider):
 
 
 def get_provider_key(provider, provider_config):
-    if provider == 'ark':
-        return provider_config.get('api_key', '')
-    return provider_config.get('key', '')
+    return provider_config.get('api_key', '')
 
 
 def get_provider_default_model(provider, provider_config):
     if provider == 'ark':
         return provider_config.get('model') or 'seedream-5-0-pro'
-    return provider_config.get('model_id') or CURRENT_MODEL
+    return GOOGLE_IMAGE_MODEL
 
 # 服务器配置
 SERVER_HOST = config['server']['host']
@@ -423,34 +398,6 @@ def save_temp_file(file_storage, suffix='.mp4'):
     storage.register_file(None, 'video_upload', filepath, mime or None, storage.upload_expiry())
     public_url = build_public_url(f'/api/upload_video/{fname}')
     return filepath, public_url
-
-# 安全设置配置
-SAFETY_SETTINGS = config['safety']
-
-def build_safety_settings():
-    """构建安全设置数组"""
-    return [
-        {
-            "category": "HARM_CATEGORY_HATE_SPEECH",
-            "threshold": SAFETY_SETTINGS['hate_speech']
-        },
-        {
-            "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-            "threshold": SAFETY_SETTINGS['dangerous_content']
-        },
-        {
-            "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            "threshold": SAFETY_SETTINGS['sexually_explicit']
-        },
-        {
-            "category": "HARM_CATEGORY_HARASSMENT",
-            "threshold": SAFETY_SETTINGS['harassment']
-        }
-    ]
-
-def build_vertex_api_url(model_id, endpoint, api_key):
-    return f"https://{endpoint}/v1/publishers/google/models/{model_id}:generateContent?key={api_key}"
-
 
 SENSITIVE_KEYS = {'key', 'apikey', 'api_key', 'authorization', 'password', 'prompt', 'secret', 'secret_key', 'token'}
 
@@ -573,6 +520,7 @@ def get_or_create_session(session_id=None):
         new_session_id = str(uuid.uuid4())
         chat_sessions[new_session_id] = {
             'history': [],
+            'previous_interaction_id': None,
             'created_at': datetime.now().isoformat(),
             'last_used': datetime.now().isoformat()
         }
@@ -601,6 +549,9 @@ def parse_api_error(response, response_data=None):
         except:
             pass
 
+    if isinstance(response_data, list) and len(response_data) == 1:
+        response_data = response_data[0]
+
     error_obj = {}
     error_message = ''
     error_status = ''
@@ -615,7 +566,13 @@ def parse_api_error(response, response_data=None):
                 error_reasons.add(detail['reason'])
 
     # HTTP状态码错误
-    if 'API_KEY_INVALID' in error_reasons or ('api key' in error_message.lower() and any(word in error_message.lower() for word in ('expired', 'invalid'))):
+    if 'SERVICE_DISABLED' in error_reasons:
+        error_info['type'] = 'service_disabled'
+        error_info['user_message'] = 'Google Gemini API 尚未启用，请先在此 API Key 所属项目中启用 Generative Language API'
+    elif 'API_KEY_SERVICE_BLOCKED' in error_reasons:
+        error_info['type'] = 'api_key_service_blocked'
+        error_info['user_message'] = '当前 API Key 不允许调用 Gemini API，请检查 API restrictions 或重新创建 Gemini API Key'
+    elif 'API_KEY_INVALID' in error_reasons or ('api key' in error_message.lower() and any(word in error_message.lower() for word in ('expired', 'invalid'))):
         error_info['type'] = 'unauthorized'
         error_info['user_message'] = 'API密钥无效或已过期，请更新对应 Provider 的 API Key'
     elif status_code == 400:
@@ -651,75 +608,6 @@ def parse_api_error(response, response_data=None):
                 error_info['details']['status'] = error_status
                 if error_reasons:
                     error_info['details']['reasons'] = sorted(error_reasons)
-
-    return error_info
-
-def parse_safety_error(response_data):
-    """解析安全过滤相关的错误"""
-    error_info = {
-        'type': 'safety_filter',
-        'message': '',
-        'details': {},
-        'user_message': '内容被安全过滤器拦截'
-    }
-
-    safety_issues = []
-
-    # 检查 promptFeedback
-    if 'promptFeedback' in response_data:
-        prompt_feedback = response_data['promptFeedback']
-        if prompt_feedback.get('blockReason') == 'SAFETY':
-            error_info['details']['blocked_at'] = 'prompt'
-
-            # 分析安全评级
-            if 'safetyRatings' in prompt_feedback:
-                for rating in prompt_feedback['safetyRatings']:
-                    category = rating.get('category', '')
-                    probability = rating.get('probability', '')
-
-                    if probability in ['HIGH', 'MEDIUM']:
-                        # 转换为友好的类别名称
-                        category_name = category.replace('HARM_CATEGORY_', '').lower()
-                        category_names = {
-                            'harassment': '骚扰内容',
-                            'hate_speech': '仇恨言论',
-                            'sexually_explicit': '色情内容',
-                            'dangerous_content': '危险内容'
-                        }
-                        friendly_name = category_names.get(category_name, category_name)
-                        safety_issues.append(f"{friendly_name} ({probability.lower()})")
-
-    # 检查 candidates 的 finishReason
-    if 'candidates' in response_data and len(response_data['candidates']) > 0:
-        candidate = response_data['candidates'][0]
-        if candidate.get('finishReason') == 'SAFETY':
-            error_info['details']['blocked_at'] = 'response'
-
-            # 分析安全评级
-            if 'safetyRatings' in candidate:
-                for rating in candidate['safetyRatings']:
-                    category = rating.get('category', '')
-                    probability = rating.get('probability', '')
-
-                    if probability in ['HIGH', 'MEDIUM']:
-                        category_name = category.replace('HARM_CATEGORY_', '').lower()
-                        category_names = {
-                            'harassment': '骚扰内容',
-                            'hate_speech': '仇恨言论',
-                            'sexually_explicit': '色情内容',
-                            'dangerous_content': '危险内容'
-                        }
-                        friendly_name = category_names.get(category_name, category_name)
-                        safety_issues.append(f"{friendly_name} ({probability.lower()})")
-
-    if safety_issues:
-        error_info['details']['issues'] = safety_issues
-        issues_text = '、'.join(safety_issues)
-        blocked_at = error_info['details'].get('blocked_at', 'content')
-        if blocked_at == 'prompt':
-            error_info['user_message'] = f'您的提示词包含不适当内容: {issues_text}'
-        else:
-            error_info['user_message'] = f'生成的内容被拦截，原因: {issues_text}'
 
     return error_info
 
@@ -767,10 +655,10 @@ def get_provider():
         'current_provider': current_provider,
         'current_model': get_provider_default_model(current_provider, API_PROVIDERS.get(current_provider, {})),
         'providers': {
-            'vertex': {
-                'name': 'Vertex AI',
-                'model': API_PROVIDERS['vertex'].get('model_id', ''),
-                'available': bool(API_PROVIDERS['vertex'].get('key'))
+            'google': {
+                'name': 'Google Gemini API',
+                'model': get_provider_default_model('google', API_PROVIDERS['google']),
+                'available': bool(API_PROVIDERS['google'].get('api_key'))
             },
             'ark': {
                 'name': 'BytePlus Ark',
@@ -790,7 +678,7 @@ def switch_provider():
         if new_provider not in API_PROVIDERS:
             return jsonify({
                 'success': False,
-                'error': 'Invalid provider. Must be "vertex" or "ark"'
+                'error': 'Invalid provider. Must be "google" or "ark"'
             }), 400
 
         if new_provider == 'ark':
@@ -799,7 +687,7 @@ def switch_provider():
                     'success': False,
                     'error': 'Provider "ark" is not configured'
                 }), 400
-        elif new_provider not in API_PROVIDERS or not API_PROVIDERS[new_provider].get('key'):
+        elif not API_PROVIDERS[new_provider].get('api_key'):
             return jsonify({
                 'success': False,
                 'error': f'Provider "{new_provider}" is not configured'
@@ -809,7 +697,7 @@ def switch_provider():
         current_api = API_PROVIDERS[new_provider]
         model_id = get_provider_default_model(new_provider, current_api)
 
-        provider_names = {'vertex': 'Vertex AI', 'ark': 'BytePlus Ark'}
+        provider_names = {'google': 'Google Gemini API', 'ark': 'BytePlus Ark'}
         provider_name = provider_names.get(new_provider, new_provider)
 
         return jsonify({
@@ -939,6 +827,7 @@ def create_chat_session():
     session_id = str(uuid.uuid4())
     chat_sessions[session_id] = {
         'history': [],
+        'previous_interaction_id': None,
         'created_at': datetime.now().isoformat(),
         'last_used': datetime.now().isoformat()
     }
@@ -965,179 +854,156 @@ def get_chat_session(session_id):
         })
     return jsonify({'success': False, 'error': '会话不存在'}), 404
 
-def _parse_and_respond(prompt, aspect_ratio, resolution, use_search, enable_chat, session_id, parts, think_level='minimal', provider=None, model_id=None):
-    """统一的 Gemini API 调用和响应解析"""
-    provider, provider_config = get_image_provider_config(provider)
-    model_id = model_id or get_provider_default_model(provider, provider_config)
-    api_key = get_provider_key(provider, provider_config)
-    endpoint = provider_config.get('endpoint') or 'aiplatform.googleapis.com'
+def _generate_google_image(
+    prompt, aspect_ratio, resolution, parts, use_search=False, enable_chat=False,
+    session_id=None, think_level='medium', provider_config=None, model_id=None,
+):
+    """Generate the final Nano Banana image through the Gemini Interactions API."""
+    google_config = provider_config or API_PROVIDERS.get('google', {})
+    api_key = google_config.get('api_key', '')
+    endpoint = (
+        google_config.get('endpoint')
+        or 'https://generativelanguage.googleapis.com/v1beta/interactions'
+    ).rstrip('/')
+    model = model_id or google_config.get('model') or 'gemini-nano-banana-2.1'
+    request_timeout = max(30, int(google_config.get('request_timeout_seconds', 600) or 600))
 
-    # Chat模式：获取或创建会话
+    inputs = []
+    for part in parts:
+        inline_data = part.get('inlineData') if isinstance(part, dict) else None
+        if inline_data:
+            inputs.append({
+                'type': 'image',
+                'mime_type': inline_data.get('mimeType') or 'image/png',
+                'data': inline_data.get('data') or '',
+            })
+        elif isinstance(part, dict) and part.get('text'):
+            inputs.append({'type': 'text', 'text': part['text']})
+    if not any(item.get('type') == 'text' for item in inputs):
+        inputs.append({'type': 'text', 'text': prompt})
+
     current_session_id = None
-    history = []
+    previous_interaction_id = None
     if enable_chat:
-        current_session_id, history = get_or_create_session(session_id)
-        print(f'Using session: {current_session_id}, History length: {len(history)}')
-
-    # 构建 contents
-    if enable_chat and history:
-        contents = history + [{"role": "user", "parts": parts}]
-    else:
-        contents = [{"role": "user", "parts": parts}]
-
-    # 根据 provider 构建 imageConfig
-    if provider == 'vertex':
-        image_config = {
-            "aspectRatio": aspect_ratio, "imageSize": resolution,
-            "imageOutputOptions": {"mimeType": "image/png"},
-            "personGeneration": "ALLOW_ALL"
-        }
-    else:
-        image_config = {"aspectRatio": aspect_ratio, "imageSize": resolution}
+        current_session_id, _history = get_or_create_session(session_id)
+        previous_interaction_id = chat_sessions[current_session_id].get('previous_interaction_id')
 
     request_body = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 1, "maxOutputTokens": 32768,
-            "responseModalities": ["TEXT", "IMAGE"],
-            "topP": 0.95, "imageConfig": image_config,
-            "thinkingConfig": {
-                "thinkingLevel": think_level.capitalize(),
-                "includeThoughts": True
-            }
+        'model': model,
+        'input': inputs,
+        'response_format': {
+            'type': 'image',
+            'mime_type': 'image/jpeg',
+            'aspect_ratio': aspect_ratio,
+            'image_size': resolution,
         },
-        "safetySettings": build_safety_settings()
+        'generation_config': {'thinking_level': think_level},
     }
-
     if use_search:
-        request_body['tools'] = [{"google_search": {}}]
+        request_body['tools'] = [{'type': 'google_search'}]
+    if previous_interaction_id:
+        request_body['previous_interaction_id'] = previous_interaction_id
 
-    api_url = build_vertex_api_url(model_id, endpoint, api_key)
-    headers = {'Content-Type': 'application/json'}
-    print(f'Using API: {provider.upper()}, URL: {redact_url(api_url)}')
-
+    headers = {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': api_key,
+    }
+    request_info = {
+        'prompt': prompt,
+        'aspect_ratio': aspect_ratio,
+        'resolution': resolution,
+        'use_search': use_search,
+        'enable_chat': enable_chat,
+        'session_id': session_id,
+        'provider': 'google',
+        'model_id': model,
+        'api_url': endpoint,
+    }
     try:
-        response = HTTP.post(api_url, headers=headers, json=request_body, timeout=(10, REQUEST_TIMEOUT))
-    except requests.RequestException as e:
-        req_info = {
-            'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
-            'use_search': use_search, 'enable_chat': enable_chat, 'session_id': session_id,
-            'provider': provider, 'model_id': model_id, 'api_url': api_url
-        }
-        save_error_log('api_request_error', req_info, {}, str(e))
-        return jsonify({'success': False, 'error': f'API 请求失败: {e}', 'error_type': 'request_error'}), 500
+        response = HTTP.post(
+            endpoint, headers=headers, json=request_body, timeout=(10, request_timeout),
+        )
+    except requests.RequestException as error:
+        save_error_log('google_image_request_error', request_info, {}, str(error))
+        return jsonify({
+            'success': False,
+            'error': f'Google Gemini API 请求失败: {error}',
+            'error_type': 'request_error',
+        }), 502
 
     response_data = None
     if response.text:
-        try: response_data = response.json()
-        except: pass
-
-    req_info = {
-        'prompt': prompt, 'aspect_ratio': aspect_ratio, 'resolution': resolution,
-        'use_search': use_search, 'enable_chat': enable_chat, 'session_id': session_id,
-        'provider': provider, 'model_id': model_id
-    }
-
-    if response.status_code != 200:
+        try:
+            response_data = response.json()
+        except ValueError:
+            pass
+    if not 200 <= response.status_code < 300:
         error_info = parse_api_error(response, response_data)
-        save_error_log(f'api_error_{error_info["type"]}',
-            {**req_info, 'api_url': api_url},
+        save_error_log(
+            f'google_image_api_error_{error_info["type"]}', request_info,
             {'status_code': response.status_code, 'response_body': response_data},
-            error_info['user_message'])
-        return jsonify({'success': False, 'error': error_info['user_message'],
-            'error_type': error_info['type'], 'error_details': error_info['details']}), response.status_code
+            error_info['user_message'],
+        )
+        return jsonify({
+            'success': False,
+            'error': error_info['user_message'],
+            'error_type': error_info['type'],
+            'error_details': error_info['details'],
+        }), response.status_code
 
-    thinking = ''
-    images = []
-    model_response_content = None
-    finish_reason = None
-    safety_ratings = None
-    prompt_safety_ratings = None
+    interaction_data = response_data
+    if isinstance(response_data, list):
+        interaction_data = next(
+            (item for item in reversed(response_data) if isinstance(item, dict)), None,
+        )
 
-    try:
-        items_to_process = response_data if isinstance(response_data, list) else [response_data]
-        for item in items_to_process:
-            if 'promptFeedback' in item and 'safetyRatings' in item['promptFeedback']:
-                prompt_safety_ratings = item['promptFeedback']['safetyRatings']
+    image_blocks = []
+    output_text = []
+    if isinstance(interaction_data, dict):
+        output_image = interaction_data.get('output_image')
+        if isinstance(output_image, dict):
+            image_blocks.append(output_image)
+        for step in interaction_data.get('steps') or []:
+            if not isinstance(step, dict) or step.get('type') != 'model_output':
+                continue
+            for content in step.get('content') or []:
+                if not isinstance(content, dict):
+                    continue
+                if content.get('type') == 'image' and content.get('data'):
+                    image_blocks.append(content)
+                elif content.get('type') == 'text' and content.get('text'):
+                    output_text.append(content['text'])
 
-            if 'promptFeedback' in item and item['promptFeedback'].get('blockReason') == 'SAFETY':
-                safety_error = parse_safety_error(item)
-                save_error_log('safety_blocked_prompt', req_info, response_data, safety_error['user_message'])
-                return jsonify({'success': False, 'error': safety_error['user_message'],
-                    'error_type': safety_error['type'], 'error_details': safety_error['details']}), 400
+    if not image_blocks:
+        status = interaction_data.get('status') if isinstance(interaction_data, dict) else None
+        error_message = 'Google Gemini API 未返回生成图像'
+        save_error_log(
+            'google_image_generation_failed',
+            {**request_info, 'interaction_status': status}, response_data, error_message,
+        )
+        return jsonify({
+            'success': False,
+            'error': error_message,
+            'error_type': 'generation_failed',
+            'error_details': {'interaction_status': status},
+        }), 500
 
-            if 'candidates' in item and len(item['candidates']) > 0:
-                candidate = item['candidates'][0]
-                finish_reason = candidate.get('finishReason')
-                if 'safetyRatings' in candidate:
-                    safety_ratings = candidate['safetyRatings']
+    final_image = image_blocks[-1]
+    mime_type = final_image.get('mime_type') or 'image/png'
+    image_data = final_image.get('data') or ''
+    if enable_chat and current_session_id and isinstance(interaction_data, dict):
+        chat_sessions[current_session_id]['previous_interaction_id'] = interaction_data.get('id')
+        add_to_session(current_session_id, {'prompt': prompt, 'interaction_id': interaction_data.get('id')})
 
-                if finish_reason == 'SAFETY':
-                    safety_error = parse_safety_error(item)
-                    save_error_log('safety_blocked_response', req_info, response_data, safety_error['user_message'])
-                    return jsonify({'success': False, 'error': safety_error['user_message'],
-                        'error_type': safety_error['type'], 'error_details': safety_error['details']}), 400
-
-                if finish_reason == 'MAX_TOKENS':
-                    save_error_log('max_tokens', req_info, response_data, '生成内容超出最大长度限制')
-                    return jsonify({'success': False, 'error': '生成内容超出最大长度限制，请简化提示词或调整参数',
-                        'error_type': 'max_tokens', 'error_details': {'reason': 'MAX_TOKENS'}}), 400
-
-                if finish_reason == 'RECITATION':
-                    save_error_log('recitation', req_info, response_data, '生成内容与已知内容重复度过高')
-                    return jsonify({'success': False, 'error': '生成内容与已知内容重复度过高，请修改提示词',
-                        'error_type': 'recitation', 'error_details': {'reason': 'RECITATION'}}), 400
-
-                if finish_reason in ('IMAGE_PROHIBITED_CONTENT', 'IMAGE_SAFETY'):
-                    finish_message = candidate.get('finishMessage', '图片内容违反了安全策略')
-                    save_error_log('image_prohibited', req_info, response_data, f'图片生成被拦截：{finish_message}')
-                    return jsonify({'success': False, 'error': f'图片生成被安全过滤器拦截：{finish_message}',
-                        'error_type': 'image_safety', 'error_details': {'reason': finish_reason, 'message': finish_message}}), 400
-
-                if 'content' in candidate and 'parts' in candidate['content']:
-                    if model_response_content is None:
-                        model_response_content = candidate['content']
-                    for part in candidate['content']['parts']:
-                        if 'text' in part:
-                            thinking += part['text']
-                        elif 'inlineData' in part:
-                            inline_data = part['inlineData']
-                            mime_type = inline_data.get('mimeType', 'image/png')
-                            image_data = inline_data.get('data', '')
-                            images.append(f"data:{mime_type};base64,{image_data}")
-    except Exception as e:
-        print(f'Error parsing response: {e}')
-        import traceback
-        traceback.print_exc()
-
-    if not images:
-        error_msg = '未能生成图片'
-        error_details = {}
-        if finish_reason:
-            error_details['finish_reason'] = finish_reason
-            if finish_reason == 'OTHER':
-                error_msg = '图片生成被中断，原因未知。请稍后重试'
-            elif finish_reason not in ('STOP', 'SAFETY', 'MAX_TOKENS', 'RECITATION'):
-                error_msg = f'图片生成失败 (原因: {finish_reason})，请稍后重试'
-        else:
-            error_msg = '未能生成图片，API 响应格式不正确'
-            error_details['issue'] = 'no_candidates_or_empty_response'
-        save_error_log('generation_failed', {**req_info, 'finish_reason': finish_reason}, response_data, error_msg)
-        return jsonify({'success': False, 'error': error_msg,
-            'error_type': 'generation_failed', 'error_details': error_details}), 500
-
-    # Chat模式：保存对话历史
-    if enable_chat and current_session_id and model_response_content:
-        add_to_session(current_session_id, {"role": "user", "parts": parts})
-        add_to_session(current_session_id, {"role": "model", "parts": model_response_content.get("parts", [])})
-
-    response_payload = {
-        'success': True, 'images': images, 'thinking': thinking,
-        'safety_ratings': safety_ratings, 'prompt_safety_ratings': prompt_safety_ratings
+    payload = {
+        'success': True,
+        'images': [f'data:{mime_type};base64,{image_data}'],
+        'thinking': '\n'.join(output_text),
+        'source_urls': [],
     }
     if enable_chat:
-        response_payload['session_id'] = current_session_id
-    return response_payload, 200
+        payload['session_id'] = current_session_id
+    return payload, 200
 
 
 ARK_SEEDREAM_PRO_MAX_REFERENCES = 10
@@ -1427,17 +1293,17 @@ def execute_image_task(task_id):
                 params.get('background'),
             )
         else:
-            response = _parse_and_respond(
+            response = _generate_google_image(
                 task.get('prompt') or '',
                 params.get('aspect_ratio', '1:1'),
                 params.get('resolution', '1K'),
-                bool(params.get('use_search', False)),
-                bool(params.get('enable_chat', False)),
-                params.get('session_id'),
                 parts,
-                params.get('think_level', 'minimal'),
-                provider,
-                model_id,
+                use_search=bool(params.get('use_search', False)),
+                enable_chat=bool(params.get('enable_chat', False)),
+                session_id=params.get('session_id'),
+                think_level=params.get('think_level', 'medium'),
+                provider_config=provider_config,
+                model_id=model_id,
             )
         response_data, status_code = _response_payload(response)
     except Exception as e:
@@ -1682,7 +1548,7 @@ def generate():
             use_search = request.form.get('use_search', 'false').lower() == 'true'
             enable_chat = request.form.get('enable_chat', 'false').lower() == 'true'
             session_id = request.form.get('session_id', None)
-            think_level = request.form.get('think_level', 'minimal')
+            think_level = request.form.get('think_level', 'medium')
             provider = request.form.get('provider', get_session_image_provider())
             model_id = request.form.get('model', None)
             raw_image_urls = request.form.get('image_urls', '[]')
@@ -1703,7 +1569,7 @@ def generate():
             use_search = as_bool(data.get('use_search', False))
             enable_chat = as_bool(data.get('enable_chat', False))
             session_id = data.get('session_id', None)
-            think_level = data.get('think_level', 'minimal')
+            think_level = data.get('think_level', 'medium')
             provider = data.get('provider', get_session_image_provider())
             model_id = data.get('model')
             image_urls = data.get('image_urls') or []
@@ -1718,14 +1584,16 @@ def generate():
         aspect_ratio = str(aspect_ratio or '').strip().lower()
         valid_ratios = (set(ARK_SEEDREAM_PRO_SIZE_MAP['1K']) | {'auto', 'custom'}) if provider == 'ark' else {
             '1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4',
-            '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
+            '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '9:21',
         }
-        valid_resolutions = {'1K', '2K'} if provider == 'ark' else {'0.5K', '1K', '2K', '4K'}
+        valid_resolutions = {'1K', '2K'} if provider == 'ark' else {'1K', '2K', '4K'}
         if aspect_ratio not in valid_ratios:
             return jsonify({'success': False, 'error': f'不支持的图片比例: {aspect_ratio}'}), 400
         if not (provider == 'ark' and aspect_ratio == 'custom') and str(resolution).upper() not in valid_resolutions:
             return jsonify({'success': False, 'error': f'不支持的图片分辨率: {resolution}'}), 400
         resolution = str(resolution).upper()
+        if think_level not in {'minimal', 'medium', 'high'}:
+            return jsonify({'success': False, 'error': f'不支持的思考级别: {think_level}'}), 400
         resolved_size = None
         if provider == 'ark':
             try:
@@ -1736,12 +1604,10 @@ def generate():
                 return jsonify({'success': False, 'error': str(error)}), 400
             if aspect_ratio == 'custom':
                 custom_width, custom_height = (int(value) for value in resolved_size.split('x', 1))
-        if think_level not in ('minimal', 'high'):
-            return jsonify({'success': False, 'error': f'不支持的思考级别: {think_level}'}), 400
         provider, provider_config = get_image_provider_config(provider)
         if not get_provider_key(provider, provider_config):
             return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
-        if provider == 'ark':
+        if provider in {'ark', 'google'}:
             model_id = get_provider_default_model(provider, provider_config)
         else:
             model_id = model_id or get_provider_default_model(provider, provider_config)
@@ -1753,6 +1619,14 @@ def generate():
             if not image_path:
                 return jsonify({'success': False, 'error': '参考图片不存在或不属于当前工作区'}), 400
             workspace_image_paths.append(image_path)
+        if provider == 'google':
+            reference_sizes = [os.path.getsize(path) for path in workspace_image_paths]
+            for image_file in images_files:
+                image_file.stream.seek(0, os.SEEK_END)
+                reference_sizes.append(image_file.stream.tell())
+                image_file.stream.seek(0)
+            if any(size > 7 * 1024 * 1024 for size in reference_sizes):
+                return jsonify({'success': False, 'error': 'Google 单张参考图片不能超过 7 MB'}), 400
         if images_files or workspace_image_paths:
             max_reference_images = ARK_SEEDREAM_PRO_MAX_REFERENCES if provider == 'ark' else 14
             if len(images_files) + len(workspace_image_paths) > max_reference_images:
@@ -1788,6 +1662,8 @@ def generate():
             if aspect_ratio == 'custom':
                 params['custom_width'] = custom_width
                 params['custom_height'] = custom_height
+        else:
+            params['output_format'] = 'jpeg'
         db_task_id = task_db.create_task('image', prompt, params, provider=provider, status='preparing')
         output_dir = storage.task_output_dir('image', db_task_id)
         task_db.update_task(db_task_id, output_dir=output_dir)
@@ -4219,9 +4095,9 @@ def _poll_cupsy_audio_task(task):
             references.append({'speaker': speaker})
         for asset in assets:
             if asset['role'] == 'reference_image':
-                references.append({'image_url': {'url': asset['asset_uri']}})
+                references.append({'image_url': asset['asset_uri']})
             elif asset['role'] == 'reference_audio':
-                references.append({'audio_url': {'url': asset['asset_uri']}})
+                references.append({'audio_url': asset['asset_uri']})
 
         body = {
             'model': CUPSY_AUDIO_MODEL,
@@ -4511,11 +4387,11 @@ if __name__ == '__main__':
     print('API Providers:')
     print(f'  Current: {CURRENT_PROVIDER.upper()}')
     current_api = API_PROVIDERS[CURRENT_PROVIDER]
-    if CURRENT_PROVIDER == 'vertex':
-        print(f'    Provider: Vertex AI')
+    if CURRENT_PROVIDER == 'google':
+        print(f'    Provider: Google Gemini API')
         print(f'    Endpoint: {current_api.get("endpoint", "")}')
-        print(f'    Model: {current_api.get("model_id", CURRENT_MODEL)}')
-        print(f'    API Key: {"configured" if current_api.get("key") else "missing"}')
+        print(f'    Model: {current_api.get("model", CURRENT_MODEL)}')
+        print(f'    API Key: {"configured" if current_api.get("api_key") else "missing"}')
     else:
         print(f'    Provider: BytePlus Ark')
         print(f'    Endpoint: {current_api.get("endpoint", "")}')
@@ -4523,13 +4399,13 @@ if __name__ == '__main__':
         print(f'    API Key: {"configured" if current_api.get("api_key") else "missing"}')
     print()
     # 显示备用 provider
-    for alt_provider in ['vertex', 'ark']:
+    for alt_provider in ['google', 'ark']:
         if alt_provider == CURRENT_PROVIDER:
             continue
         alt_cfg = API_PROVIDERS.get(alt_provider, {})
         has_key = bool(alt_cfg.get('key') or alt_cfg.get('api_key'))
         if has_key:
-            alt_names = {'vertex': 'Vertex AI', 'ark': 'BytePlus Ark'}
+            alt_names = {'google': 'Google Gemini API', 'ark': 'BytePlus Ark'}
             print(f'  Backup: {alt_provider.upper()} ({alt_names[alt_provider]}) - Available')
     print('=' * 60)
     print(f'Starting server on http://{SERVER_HOST}:{SERVER_PORT}')

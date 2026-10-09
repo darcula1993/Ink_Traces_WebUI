@@ -104,7 +104,7 @@ function formatTime(value) {
 }
 
 function providerLabel(provider) {
-  return ({ ark: 'BytePlus Ark', cupsy: 'Cupsy', vertex: 'Vertex AI' })[provider] || provider
+  return ({ ark: 'BytePlus Ark', cupsy: 'Cupsy', google: 'Google Gemini API' })[provider] || provider
 }
 
 function createdAfterForRange(value) {

@@ -28,7 +28,7 @@ Ink Traces WebUI 是一个本地运行的 AI 图片 / 视频生成工作站。�
 |---|---|
 | 图片生成 | 文生图和图生图共用一个工作流，自动识别是否有参考图 |
 | 视频生成 | 支持首尾帧模式，以及图片、视频、音频参考模式 |
-| Provider | 图片支持 Google Vertex AI 与 BytePlus Ark；视频支持 BytePlus Ark Seedance 2.0/2.5 |
+| Provider | 图片支持 Google Gemini API Nano Banana 2.1 与 BytePlus Ark；视频支持 BytePlus Ark Seedance 2.0/2.5 |
 | Prompt 工作流 | Prompt Vault、全屏编辑器、多标签页、收藏复用 |
 | 任务历史 | SQLite 任务队列，支持图片/视频结果记录、恢复和删除 |
 | 参数控制 | 宽高比、分辨率、思考深度、Google 搜索增强、Chat 模式 |

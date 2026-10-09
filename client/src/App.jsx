@@ -298,7 +298,7 @@ function fitSeedreamSizeToReference(widthValue, heightValue) {
 
 function makeImgTab(id) {
   return {
-    id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'minimal',
+    id, prompt: '', aspectRatio: '1:1', resolution: '1K', useSearch: false, thinkLevel: 'medium',
     customWidth: 1024, customHeight: 1024, customAspectLocked: false, customAspectRatio: 1,
     chatMode: false, sessionId: null, uploadedImages: [], outputFormat: 'png', background: 'default', watermark: false,
     loading: false, taskId: null, dbTaskId: null, taskStatus: null, generatedImages: [], thinkingText: '', error: null, errorType: null, errorDetails: null,
@@ -513,7 +513,7 @@ function App({ onLogout }) {
   const [apiProvider, setApiProvider] = useState('ark')
   const [providerInfoReady, setProviderInfoReady] = useState(false)
   const [imageProviders, setImageProviders] = useState({})
-  const [currentModel, setCurrentModel] = useState('gemini-3.1-flash-image-preview')
+  const [currentModel, setCurrentModel] = useState('gemini-nano-banana-2.1')
   const [availableModels, setAvailableModels] = useState([])
 
   // 图片生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
@@ -918,10 +918,10 @@ function App({ onLogout }) {
   }, [activeVideoTabId, setActiveVideoTabId, setVideoTabs, videoTabs, videoWorkspace.ready])
 
   const isArk = apiProvider === 'ark'
-  const standardAspectRatios = ['1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+  const standardAspectRatios = ['1:1', '1:4', '4:1', '1:8', '8:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9', '9:21']
   const arkAspectRatios = ['auto', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', 'custom']
   const aspectRatios = isArk ? arkAspectRatios : standardAspectRatios
-  const resolutions = isArk ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
+  const resolutions = isArk ? ['1K', '2K'] : ['1K', '2K', '4K']
   const isCustomSeedreamSize = isArk && activeImgTab.aspectRatio === 'custom'
   const customWidthNumber = Number(activeImgTab.customWidth)
   const customHeightNumber = Number(activeImgTab.customHeight)
@@ -1109,7 +1109,7 @@ function App({ onLogout }) {
       if (typeof params.watermark === 'boolean') updates.watermark = params.watermark
     } else {
       if (typeof params.use_search === 'boolean') updates.useSearch = params.use_search
-      if (['minimal', 'high'].includes(params.think_level)) updates.thinkLevel = params.think_level
+      if (['minimal', 'medium', 'high'].includes(params.think_level)) updates.thinkLevel = params.think_level
     }
 
     updateImgTab(activeImgTab.id, updates)
@@ -1120,7 +1120,7 @@ function App({ onLogout }) {
   // 切换 provider 或标签页时修正不兼容的参数。
   useEffect(() => {
     if (!providerInfoReady) return
-    const validResolutions = apiProvider === 'ark' ? ['1K', '2K'] : ['0.5K', '1K', '2K', '4K']
+    const validResolutions = apiProvider === 'ark' ? ['1K', '2K'] : ['1K', '2K', '4K']
     const validRatios = apiProvider === 'ark' ? arkAspectRatios : standardAspectRatios
     const updates = {}
     if (!validResolutions.includes(activeImgTab.resolution)) updates.resolution = '1K'
@@ -1557,7 +1557,7 @@ function App({ onLogout }) {
         background: params.background || 'default',
         watermark: Boolean(params.watermark),
         useSearch: params.use_search || false,
-        thinkLevel: params.think_level || 'minimal',
+        thinkLevel: params.think_level || 'medium',
         uploadedImages: restoredRefs,
       }
       setImgTabs([tab])
@@ -1816,8 +1816,8 @@ function App({ onLogout }) {
                     <option value="ark" disabled={imageProviders.ark?.available === false} className="bg-nexus-bg">
                       BytePlus Ark{imageProviders.ark?.available === false ? ' · 未配置' : ''}
                     </option>
-                    <option value="vertex" disabled={imageProviders.vertex?.available === false} className="bg-nexus-bg">
-                      Vertex AI{imageProviders.vertex?.available === false ? ' · 未配置' : ''}
+                    <option value="google" disabled={imageProviders.google?.available === false} className="bg-nexus-bg">
+                      Google Gemini{imageProviders.google?.available === false ? ' · 未配置' : ''}
                     </option>
                   </select>
                 </div>
@@ -2034,10 +2034,12 @@ function App({ onLogout }) {
                  <div className="inspector-field-row">
                    <span className="field-label">思考深度</span>
                    <select
-                     value={activeImgTab.thinkLevel} onChange={e => updateImgTab(activeImgTab.id, { thinkLevel: e.target.value })}
+                     aria-label="图片思考深度"
+                     value={activeImgTab.thinkLevel} onChange={event => updateImgTab(activeImgTab.id, { thinkLevel: event.target.value })}
                      className="field-select"
                    >
                      <option value="minimal" className="bg-nexus-bg">快速</option>
+                     <option value="medium" className="bg-nexus-bg">标准</option>
                      <option value="high" className="bg-nexus-bg">深入</option>
                    </select>
                  </div>
