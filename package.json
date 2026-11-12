@@ -1,0 +1,15 @@
+{
+  "name": "ink-traces-webui",
+  "version": "1.0.0",
+  "description": "Ink Traces WebUI: AI image, video and audio generation workbench",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run worker\" \"npm run client\"",
+    "client": "cd client && npm run dev",
+    "server": "cd server && python3 app.py",
+    "worker": "cd server && python3 worker.py",
+    "install-all": "npm install && cd client && npm install && cd .. && pip install -r server/requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

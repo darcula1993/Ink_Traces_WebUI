@@ -1,0 +1,88 @@
+{
+  "config_version": 2,
+  "auth": {
+    "username": "",
+    "password": "",
+    "secret_key": ""
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "cors_origins": [],
+    "request_timeout_seconds": 120,
+    "poll_timeout_seconds": 30,
+    "download_timeout_seconds": 120,
+    "worker_concurrency": 3,
+    "polling_concurrency": 2,
+    "asset_concurrency": 1,
+    "worker_lease_seconds": 900,
+    "worker_heartbeat_seconds": 10,
+    "gunicorn_max_requests": 1500,
+    "gunicorn_max_requests_jitter": 150,
+    "cleanup_interval_seconds": 3600,
+    "orphan_grace_hours": 24
+  },
+  "client": {
+    "host": "0.0.0.0",
+    "port": 4545
+  },
+  "providers": {
+    "byteplus": {
+      "api_key": "",
+      "endpoint": "https://ark.ap-southeast.bytepluses.com",
+      "endpoint_ids": {
+        "seedance_2_5": "ep-your-endpoint-id"
+      },
+      "request_timeout_seconds": 600,
+      "upload_timeout_seconds": 120
+    },
+    "cupsy": {
+      "api_key": "",
+      "endpoint": "https://cupsy.io",
+      "request_timeout_seconds": 120
+    }
+  },
+  "generation": {
+    "image": {
+      "default": "byteplus",
+      "byteplus": {
+        "model": "dola-seedream-5-5-261028"
+      },
+      "cupsy": {
+        "poll_max_attempts": 1800
+      }
+    },
+    "video": {
+      "poll_interval_seconds": 4,
+      "poll_max_attempts": 1800,
+      "byteplus": {
+        "model": "",
+        "fast_model": ""
+      },
+      "cupsy": {
+        "model": "seedance-2.5"
+      }
+    },
+    "audio": {
+      "poll_interval_seconds": 4,
+      "poll_max_attempts": 1800,
+      "cupsy": {
+        "model": "seed-audio-1.0"
+      }
+    },
+    "layer": {
+      "byteplus": {
+        "model": ""
+      }
+    }
+  },
+  "deployment": {
+    "public_base_url": "",
+    "cupsy_source": {
+      "base_url": "",
+      "asset_token_ttl_seconds": 7200,
+      "auto_configure": true,
+      "certificate_email": ""
+    }
+  }
+}

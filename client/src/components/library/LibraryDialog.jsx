@@ -1,0 +1,7 @@
+import React,{useEffect,useRef} from 'react'
+import {createPortal} from 'react-dom'
+export default function LibraryDialog({title,children,onClose,onConfirm,confirmLabel='确认',busy,error,disabled=false}){
+ const ref=useRef(null)
+ useEffect(()=>{const prev=document.activeElement;ref.current?.focus();return()=>{if(prev?.isConnected)prev.focus()}},[])
+ return createPortal(<div className="ul-subdialog" onPointerDown={e=>{e.stopPropagation();if(e.target===e.currentTarget)e.preventDefault()}}><section role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref} onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape'){e.preventDefault();if(!busy)onClose()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s')e.preventDefault();if(e.key==='Tab'){const items=[...ref.current.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled)')].filter(el=>el.getClientRects().length);if(!items.length){e.preventDefault();ref.current.focus()}else if(e.shiftKey&&[ref.current,items[0]].includes(document.activeElement)){e.preventDefault();items.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===items.at(-1)){e.preventDefault();items[0].focus()}}}}><h3>{title}</h3>{children}{error&&<p role="alert" className="ul-error">{error}</p>}<footer><button disabled={busy} onClick={onClose}>取消</button>{onConfirm&&<button disabled={busy||disabled} onClick={onConfirm}>{busy?'处理中…':confirmLabel}</button>}</footer></section></div>,document.body)
+}

@@ -1,0 +1,10 @@
+import React,{useEffect,useRef} from 'react'
+import {createPortal} from 'react-dom'
+import './library.css'
+import {X} from 'lucide-react'
+export default function LibraryShell({title='素材库',navigation,children,footer,onClose,busy=false,hidden=false}){
+ const ref=useRef(null)
+ useEffect(()=>{const previous=document.activeElement,guard=e=>{if(['historyUndo','historyRedo'].includes(e.inputType)&&!ref.current?.contains(e.target))e.preventDefault()};document.addEventListener('beforeinput',guard,true);ref.current?.focus({preventScroll:true});return()=>{document.removeEventListener('beforeinput',guard,true);if(previous?.isConnected)previous.focus({preventScroll:true})}},[])
+ function keys(e){if(e.defaultPrevented)return;e.stopPropagation();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();return}if(e.key==='Escape'){e.preventDefault();if(!busy)onClose()}if(e.key==='Tab'){const items=[...ref.current.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]')].filter(el=>el.getClientRects().length&&!el.closest('[inert]'));if(!items.length){e.preventDefault();ref.current.focus()}else if(e.shiftKey&&[ref.current,items[0]].includes(document.activeElement)){e.preventDefault();items.at(-1).focus()}else if(!e.shiftKey&&document.activeElement===items.at(-1)){e.preventDefault();items[0].focus()}}}
+ return createPortal(<div className="ul-overlay" onPointerDown={e=>{e.stopPropagation();if(e.target===e.currentTarget){e.preventDefault();ref.current?.focus()}}}><section ref={ref} className="ul-library" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} inert={hidden?'':undefined} aria-hidden={hidden||undefined} onKeyDown={keys}><aside className="ul-nav"><h2>素材库</h2>{navigation}</aside><main className="ul-main"><button className="ul-close" aria-label="关闭素材库" title="关闭素材库" disabled={busy} onClick={onClose}><X size={20}/></button>{children}{footer&&<footer className="ul-footer">{footer}</footer>}</main></section></div>,document.body)
+}

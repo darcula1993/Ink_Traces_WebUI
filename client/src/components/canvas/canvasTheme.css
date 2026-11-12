@@ -1,0 +1,525 @@
+/* CANVAS-GLASS-20261108: video-workspace glass palette and rounded surfaces.
+ * Layout geometry belongs to canvas.css; no per-node backdrop blur.
+ * Import after canvas.css/sidebar.css. All rules stay within the canvas studio.
+ */
+.canvas-studio {
+  /* CANVAS-UX-20261112: pure green-black (user decision 2026-11-12, item 5). */
+  --cv-bg: #030805;
+  --cv-surface: rgba(10, 22, 15, .5);
+  --cv-glass: rgba(5, 12, 8, .5);
+  --cv-glass-strong: rgba(4, 10, 6, .66);
+  --cv-node-fill: rgba(7, 16, 10, .55);
+  --cv-glass-solid: #07110b;
+  --cv-popover-solid: #0a170f;
+  --cv-field: rgba(2, 8, 4, .4);
+  --cv-border: rgba(120, 230, 160, .2);
+  --cv-border-strong: rgba(150, 245, 185, .32);
+  --cv-text: #e3f5e8;
+  --cv-secondary: #a9c9b3;
+  --cv-green: #35d08a;
+  --cv-focus: #76e9b1;
+  --cv-green-soft: rgba(53, 208, 138, .14);
+  --cv-green-hover: rgba(53, 208, 138, .22);
+  --cv-danger: #ffa3a9;
+  --cv-warning: #f1ce82;
+  --cv-glass-shadow: 0 18px 42px rgba(0, 0, 0, .4), inset 0 1px 1px rgba(200, 255, 220, .14), inset 1px 0 0 rgba(200, 255, 220, .05);
+  /* Stationary scenery shared by sidebar, canvas and node shells. */
+  background:
+    radial-gradient(ellipse at 14% 22%, rgba(53, 208, 138, .13), transparent 46%),
+    radial-gradient(ellipse at 78% 80%, rgba(35, 150, 90, .09), transparent 50%),
+    repeating-linear-gradient(90deg, transparent 0 126px, rgba(90, 220, 140, .035) 127px 128px, transparent 129px 256px),
+    repeating-linear-gradient(0deg, transparent 0 79px, rgba(90, 220, 140, .028) 80px 81px, transparent 82px 160px),
+    linear-gradient(160deg, #04100a, #020604 60%, #030805);
+  color: var(--cv-text);
+  color-scheme: dark;
+}
+
+.canvas-studio ::selection {
+  background: #286b45;
+  color: #f0fff5;
+}
+
+.canvas-studio .cv-surface {
+  background-color: transparent;
+  background-image: radial-gradient(rgba(120, 230, 160, .16) 1px, transparent 1px);
+}
+
+/* Small,bounded glass surfaces; no per-node backdrop blur. */
+.canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
+  .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
+  .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+  .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
+  background:
+    radial-gradient(560px circle at 28% 8%, rgba(200, 255, 220, .05), transparent 44%),
+    linear-gradient(145deg, rgba(200, 255, 220, .045), rgba(255, 255, 255, .008) 46%, rgba(53, 208, 138, .02)),
+    var(--cv-glass);
+  border-color: var(--cv-border);
+  color: var(--cv-text);
+  box-shadow: var(--cv-glass-shadow);
+  -webkit-backdrop-filter: blur(20px) saturate(125%);
+  backdrop-filter: blur(20px) saturate(125%);
+}
+
+.canvas-studio :is(.cv-studio-overlay > div, .cv-connection-note, .cv-multi-selection) {
+  background: var(--cv-glass-solid);
+  border-color: var(--cv-border-strong);
+  color: var(--cv-text);
+  box-shadow: var(--cv-glass-shadow);
+}
+
+.canvas-studio :is(.cv-studio-overlay, .cv-media-overlay) {
+  background: rgba(1, 6, 3, .62);
+}
+
+.canvas-studio :is(button, input, select, textarea) {
+  background-color: var(--cv-field);
+  border-color: var(--cv-border);
+  color: var(--cv-text);
+  accent-color: var(--cv-green);
+}
+
+.canvas-studio :is(.cv-sidebar, .cv-tree-editor, .cv-node-panel) :is(input, select, textarea) {
+  border-color: var(--cv-border);
+  color: var(--cv-text);
+  background-color: var(--cv-field);
+}
+
+.canvas-studio :is(input, textarea)::placeholder {
+  color: var(--cv-secondary);
+  opacity: 1;
+}
+
+.canvas-studio select option {
+  background: var(--cv-glass-solid);
+  color: var(--cv-text);
+}
+
+.canvas-studio button:hover:not(:disabled) {
+  background-color: var(--cv-green-hover);
+  border-color: var(--cv-border-strong);
+  color: #f0fff5;
+}
+
+.canvas-studio :is(button, input, select, textarea, [tabindex]):focus-visible {
+  outline-color: var(--cv-focus);
+  outline-style: solid;
+  outline-width: 2px;
+}
+
+.canvas-studio :is(.cv-primary, .cv-panel-params .cv-primary) {
+  background: linear-gradient(145deg, #72e8af, var(--cv-green));
+  border-color: rgba(168, 255, 213, .6);
+  color: #06200e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .32), 0 0 16px rgba(64, 225, 123, .12);
+}
+
+.canvas-studio .cv-primary:hover:not(:disabled) {
+  background: #8aefbd;
+  border-color: #c3ffda;
+  color: #06200e;
+}
+
+.canvas-studio :is(.cv-tools, .cv-bottom, .cv-sidebar-menu, .cv-sidebar) button {
+  background-color: transparent;
+}
+
+.canvas-studio :is(.cv-tools, .cv-bottom, .cv-sidebar-menu, .cv-sidebar) button:hover:not(:disabled),.canvas-studio .cv-sidebar-menu button:focus-visible {
+  background-color: var(--cv-green-hover);
+  color: var(--cv-text);
+}
+
+.canvas-studio :is(.cv-tools button[aria-pressed=true], .cv-sidebar-tools button[aria-pressed=true],
+  .cv-sidebar-tabs button[aria-selected=true], .cv-sidebar-node.is-selected,
+  .cv-tree-folder.is-selected, .cv-tree-asset-row.is-selected, .cv-candidates button[aria-pressed=true]) {
+  background-color: var(--cv-green-soft);
+  color: var(--cv-focus);
+  border-color: var(--cv-border-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(126, 235, 180, .23);
+}
+
+.canvas-studio :is(.cv-sidebar-node:hover:not(.is-selected), .cv-sidebar .cv-tree-folder:hover) {
+  background-color: rgba(53, 208, 138, .1);
+}
+
+.canvas-studio .cv-sidebar :is(.cv-sidebar-node-main, .cv-folder-name) {
+  background-color: transparent;
+}
+
+.canvas-studio :is(.cv-sidebar-top, .cv-sidebar-tabs, .cv-sidebar > footer,
+  .cv-node-head, .cv-panel-actions,
+  .cv-context-menu [role=group], .cv-video-node-footer) {
+  border-color: var(--cv-border);
+}
+
+.canvas-studio :is(.cv-sidebar-menu hr, .cv-tools hr) {
+  background-color: var(--cv-border);
+  border-color: var(--cv-border);
+}
+
+.canvas-studio :is(.cv-sidebar-search, .cv-reference-thumb) {
+  background: rgba(3, 12, 6, .35);
+  border-color: var(--cv-border);
+  color: var(--cv-secondary);
+}
+
+.canvas-studio :is(.cv-sidebar-search input, .cv-sidebar-breadcrumb select,
+  .cv-panel-tools .cv-panel-title, .cv-node-panel .cv-panel-prompt) {
+  background-color: transparent;
+}
+
+.canvas-studio .cv-node {
+  background: linear-gradient(145deg, rgba(200, 255, 220, .06), rgba(255, 255, 255, .012) 48%, rgba(53, 208, 138, .04)), var(--cv-node-fill);
+  color: var(--cv-text);
+  border-color: var(--cv-border-strong);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .2), inset 1px 0 0 rgba(255, 255, 255, .06), 0 8px 22px rgba(0, 0, 0, .24);
+}
+
+.canvas-studio .cv-node.is-generating {
+  border-color: var(--cv-border-strong);
+  box-shadow: inset 0 1px 0 rgba(182, 250, 204, .08), 0 0 16px rgba(55, 207, 111, .1);
+}
+
+.canvas-studio .cv-node.is-selected {
+  border-color: var(--cv-focus);
+  box-shadow: 0 0 0 1px rgba(113, 255, 162, .5), 0 10px 28px rgba(0, 0, 0, .42);
+}
+
+/* Media pixels stay neutral: theme tint must not change a creator's preview. */
+.canvas-studio :is(.cv-media, .cv-media-empty) {
+  background-color: rgba(2, 8, 4, .45);
+  border-color: var(--cv-border);
+}
+
+.canvas-studio .cv-media-empty {
+  color: var(--cv-secondary);
+}
+
+.canvas-studio .cv-node :is(.cv-play-asset, .cv-history-button) {
+  background-color: rgba(3, 10, 5, .62);
+  color: var(--cv-text);
+}
+
+.canvas-studio .cv-port::after {
+  background: #8acaa1;
+  box-shadow: 0 0 0 2px #102017;
+}
+
+.canvas-studio :is(.cv-port:hover, .cv-port.is-pending)::after {
+  background: var(--cv-focus);
+  box-shadow: 0 0 0 2px #102017, 0 0 10px rgba(98, 242, 154, .42);
+}
+
+.canvas-studio .cv-edge {
+  stroke: #67a67f;
+}
+
+.canvas-studio .cv-edge.selected {
+  stroke: var(--cv-focus);
+}
+
+.canvas-studio .cv-edge-flow {
+  stroke: #a2ffc3;
+  filter: drop-shadow(0 0 2px rgba(98, 242, 154, .6));
+}
+
+.canvas-studio .cv-selection-box {
+  border-color: var(--cv-focus);
+  background: rgba(98, 242, 154, .12);
+}
+
+.canvas-studio :is(.cv-reference-role) {
+  background: #bcf4cd;
+  color: #0c2815;
+}
+
+.canvas-studio .cv-reference-number {
+  background: #0b2819;
+  color: #ebfff1;
+}
+
+.canvas-studio :is(.cv-node-kind, .cv-node-text, .cv-node-status, .cv-save-state, .cv-panel-params label, .cv-hint,
+  .cv-sidebar-empty, .cv-sidebar-menu-heading, .cv-sidebar > footer, .cv-asset-panel p, .cv-shortcut-help p,
+  .cv-tree-editor small, .cv-node-list small, .cv-video-estimate) {
+  color: var(--cv-secondary);
+}
+
+.canvas-studio :is(.cv-sidebar-node-actions button, .cv-sidebar > footer button,
+  .cv-sidebar .cv-tree-more, .cv-sidebar .cv-folder-toggle,
+  .cv-audio-reference, .cv-shortcut-help dt) {
+  color: #b5e8c6;
+}
+
+.canvas-studio :is(.cv-node-status.error, .cv-save-state.error, .cv-node-panel [role=alert]) {
+  color: var(--cv-danger);
+}
+
+.canvas-studio .cv-alert {
+  background: #301b21;
+  border-color: #a76270;
+  color: #ffd9de;
+}
+
+.canvas-studio .cv-sidebar-menu button.is-danger,.canvas-studio .is-danger,.cv-sidebar-menu button.is-danger {
+  color: var(--cv-danger);
+}
+
+
+
+.canvas-studio .cv-rating-editor button {
+  color: var(--cv-warning);
+}
+
+/* Component owner clips this decorative layer to preview only and keeps
+ * task text,references,price,ports and all controls outside the wrapper. */
+.canvas-studio .cv-generation-rain {
+  opacity: .78;
+  pointer-events: none;
+}
+
+/* Rounded surfaces share the video tool's glass family without moving boxes. */
+.canvas-studio :is(.cv-sidebar, .cv-node, .cv-node-panel,
+  .cv-project-settings, .cv-delete-dialog, .cv-shortcut-help, .cv-media-viewer) {
+  border-radius: 18px;
+}
+
+.canvas-studio :is(.cv-context-menu, .cv-sidebar-menu, .cv-history-popover,
+  .cv-tree-editor, .cv-parameters-popover, .cv-studio-overlay > div) {
+  border-radius: 16px;
+}
+
+.canvas-studio :is(.cv-topbar, .cv-tools, .cv-bottom, .cv-image-toolbar,
+  .cv-sidebar-tabs, .cv-sidebar-search, .cv-reference-thumb) {
+  border-radius: 12px;
+}
+
+.canvas-studio :is(button, input, select, textarea) {
+  border-radius: 10px;
+}
+
+.canvas-studio :is(.cv-sidebar-node, .cv-tree-folder, .cv-tree-asset-row) {
+  border-radius: 12px;
+}
+
+.canvas-studio :is(.cv-media, .cv-media-empty, .cv-generation-preview, .cv-play-asset) {
+  border-radius: 12px;
+}
+
+.canvas-studio .cv-node-head {
+  border-radius: 17px 17px 0 0;
+}
+
+.canvas-studio .cv-video-node-footer {
+  border-radius: 0 0 17px 17px;
+}
+
+.canvas-studio .cv-sidebar-top {
+  border-radius: 17px 17px 0 0;
+}
+
+.canvas-studio .cv-sidebar > footer {
+  border-radius: 0 0 17px 17px;
+}
+
+.canvas-studio input[type=checkbox] {
+  border-radius: 4px;
+}
+
+/* Keep text-heavy popovers readable while retaining the .54 strong-glass fill. */
+.canvas-studio :is(.cv-node-panel, .cv-sidebar-menu, .cv-context-menu,
+  .cv-parameters-popover, .cv-project-settings, .cv-tree-editor) {
+  background-color: var(--cv-glass-strong);
+}
+
+/* Output settings must obscure the node preview behind the floating panel. */
+.canvas-studio .cv-parameters-popover.cv-output-parameters {
+  background: var(--cv-popover-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Nested backdrop roots cannot blur sidebar text beneath this menu reliably.
+ * Use a denser translucent scrim here; floating editors keep the .54 fill. */
+.canvas-studio .cv-sidebar-menu {
+  background-color: rgba(3, 10, 5, .9);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .canvas-studio {
+    --cv-node-fill: var(--cv-glass-solid);
+  }
+  .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
+    .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
+    .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+    .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
+    background: var(--cv-glass-solid);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .canvas-studio {
+    --cv-glass: var(--cv-glass-solid);
+    --cv-field: #06110a;
+    --cv-node-fill: var(--cv-glass-solid);
+    --cv-glass-strong: var(--cv-glass-solid);
+  }
+
+  .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
+    .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
+    .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+    .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
+    background: var(--cv-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-studio .cv-edge-flow {
+    animation: none;
+    filter: none;
+  }
+
+  .canvas-studio .cv-generation-rain {
+    opacity: .5;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .canvas-studio {
+    --cv-border: #5fbf88;
+    --cv-border-strong: #a8f0c6;
+    --cv-secondary: #d4f2de;
+    --cv-glass: var(--cv-glass-solid);
+    --cv-glass-strong: var(--cv-glass-solid);
+    --cv-node-fill: var(--cv-glass-solid);
+  }
+
+  .canvas-studio .cv-node {
+    border-color: var(--cv-border);
+  }
+
+  .canvas-studio :is(.cv-node.is-selected, .cv-node.is-generating) {
+    border-color: var(--cv-focus);
+  }
+}
+
+/* The mention menu is portalled to body; opt in only from the canvas caller. */
+.prompt-mention-menu.cv-mention-menu {
+  background: linear-gradient(145deg, rgba(200, 255, 220, .06), rgba(53, 208, 138, .02)), rgba(4, 10, 6, .66);
+  border-color: rgba(150, 245, 185, .32);
+  border-radius: 16px;
+  color: #e3f5e8;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .3), inset 0 1px 1px rgba(255, 255, 255, .22);
+  -webkit-backdrop-filter: blur(20px) saturate(125%);
+  backdrop-filter: blur(20px) saturate(125%);
+}
+
+.cv-mention-menu .prompt-mention-option {
+  border-radius: 10px;
+  color: #e3f5e8;
+}
+
+.cv-mention-menu .prompt-mention-option[aria-selected=true] {
+  background: rgba(53, 208, 138, .18);
+  box-shadow: inset 0 0 0 1px rgba(126, 235, 180, .28);
+}
+
+.cv-mention-menu .text-nexus-muted {
+  color: #a9c9b3;
+}
+
+.canvas-studio .cv-reference-thumb.is-dragging {
+  opacity: .65;
+}
+
+.canvas-studio .cv-reference-thumb.is-drop-target {
+  border-color: var(--cv-focus);
+  box-shadow: 0 0 0 1px var(--cv-focus);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .prompt-mention-menu.cv-mention-menu {
+    background: #07110b;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .prompt-mention-menu.cv-mention-menu {
+    background: #07110b;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .canvas-studio {
+    --cv-text: CanvasText;
+    --cv-secondary: CanvasText;
+    --cv-border: CanvasText;
+    --cv-border-strong: CanvasText;
+    --cv-focus: Highlight;
+    --cv-glass: Canvas;
+    --cv-glass-strong: Canvas;
+    --cv-glass-solid: Canvas;
+    --cv-node-fill: Canvas;
+    --cv-field: Canvas;
+    background: Canvas;
+  }
+
+  .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
+    .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
+    .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+    .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover),.prompt-mention-menu.cv-mention-menu {
+    background: Canvas;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .canvas-studio :is(.cv-node.is-selected, .cv-sidebar-node.is-selected,
+    button[aria-selected=true], button[aria-pressed=true]),.cv-mention-menu .prompt-mention-option[aria-selected=true] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .canvas-studio .cv-edge {
+    stroke: CanvasText;
+  }
+
+  .canvas-studio .cv-edge.selected {
+    stroke: Highlight;
+  }
+
+  .canvas-studio .cv-edge-flow {
+    display: none;
+  }
+
+  .canvas-studio .cv-port::after {
+    background: ButtonText;
+    border: 1px solid ButtonText;
+  }
+}
+
+/* CANVAS-UX-20261112: one-row top bar,readable failures,stale markers. */
+.cv-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.canvas-studio .cv-topbar { flex-wrap: nowrap; gap: 8px; min-width: 0; }
+.canvas-studio .cv-topbar .cv-project-name { min-width: 80px; flex: 0 1 320px; text-overflow: ellipsis; }
+.canvas-studio .cv-topbar .cv-save-state { white-space: nowrap; font-size: 12px; }
+.canvas-studio .cv-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; flex-shrink: 0; }
+.canvas-studio .cv-edit-tools { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.canvas-studio .cv-retry-save { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--cv-warning); border-color: var(--cv-warning); font-size: 12px; }
+.canvas-studio .cv-more-menu button,.cv-sidebar-menu.cv-more-menu button { display: flex; align-items: center; gap: 8px; width: 100%; }
+.cv-sidebar-menu.cv-more-menu kbd { margin-left: auto; padding-left: 16px; font-family: var(--font-mono, monospace); font-size: 12px; color: var(--cv-secondary, #b6c9bb); }
+.canvas-studio .cv-bottom button { display: inline-flex; align-items: center; gap: 5px; }
+.canvas-studio .cv-task-failure { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid rgba(255, 163, 169, .45); border-radius: 10px; background: rgba(48, 16, 20, .55); color: var(--cv-danger); font-size: 12px; flex-shrink: 0; }
+.canvas-studio .cv-task-failure.is-unknown { border-color: rgba(241, 206, 130, .5); background: rgba(44, 34, 10, .55); color: var(--cv-warning); }
+.canvas-studio .cv-task-failure { gap: 2px; padding: 6px 10px; }
+.canvas-studio .cv-task-failure strong span { font-weight: 400; }
+.canvas-studio .cv-task-failure p { margin: 0; color: var(--cv-text); white-space: pre-wrap; word-break: break-word; max-height: 40px; overflow: auto; }
+.canvas-studio .cv-task-check { display: flex; align-items: center; gap: 8px; color: var(--cv-secondary); }
+.canvas-studio .cv-task-check button { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; }
+.canvas-studio .cv-stale-notice { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid rgba(241, 206, 130, .45); border-radius: 10px; color: var(--cv-warning); font-size: 12px; flex-shrink: 0; }
+.canvas-studio .cv-stale-notice button { margin-left: auto; white-space: nowrap; font-size: 12px; padding: 2px 8px; }
+.canvas-studio .cv-node-stale { position: absolute; top: 40px; right: 10px; z-index: 3; padding: 2px 8px; border: 1px solid rgba(241, 206, 130, .6); border-radius: 999px; background: #1d1806; color: var(--cv-warning); font-size: 12px; pointer-events: none; }
+.canvas-studio .cv-node-status.is-unknown { color: var(--cv-warning); }
+.canvas-studio .cv-run-selected { display: inline-flex; align-items: center; gap: 5px; }
+.canvas-studio .cv-alert.cv-alert-stack{flex-direction:column;align-items:flex-start;gap:4px}
