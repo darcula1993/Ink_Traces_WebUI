@@ -289,13 +289,8 @@ def get_image_provider_config(provider):
 
 
 def get_layer_provider_config():
-    """BytePlus account for layer decomposition with generation.layer.byteplus.model.
-
-    An empty layer model keeps the v1 behaviour of using the image model.
-    """
-    provider, provider_config = get_image_provider_config('ark')
-    layer_model = config['generation']['layer']['byteplus']['model']
-    return provider, ({**provider_config, 'model': layer_model} if layer_model else provider_config)
+    """Layer decomposition always uses the BytePlus image model (generation.image.byteplus.model)."""
+    return get_image_provider_config('ark')
 
 
 def get_provider_key(provider, provider_config):

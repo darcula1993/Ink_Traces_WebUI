@@ -103,7 +103,7 @@ def test_apply_writes_valid_v2_with_backup_and_preserves_600(tmp_path, capsys):
     assert config['providers']['cupsy']['api_key'] == 'cupsy-test-key-333'
     assert config['providers']['cupsy']['endpoint'] == 'https://cupsy.io'
     assert config['generation']['image'] == {'default': 'byteplus', 'byteplus': {'model': 'ep-fake-image-888'}, 'cupsy': {'poll_max_attempts': 1800}}
-    assert config['generation']['layer']['byteplus']['model'] == ''
+    assert 'layer' not in config['generation']
     assert config['server']['port'] == 5001 and config['client']['port'] == 4546
     assert config['auth']['password'] == 'fake-pass-666'
     assert config['deployment'] == {
@@ -313,9 +313,70 @@ def test_runtime_views_share_one_account_per_provider():
     assert config_v2.audio_cupsy(config)['source_base_url'] == config_v2.video_cupsy(config)['source_base_url']
 
 
-def test_layer_model_override_and_inheritance(monkeypatch):
+def test_layer_always_uses_image_model(monkeypatch):
     monkeypatch.setitem(application.API_PROVIDERS, 'ark', {'api_key': 'test', 'model': 'image-model'})
-    monkeypatch.setitem(application.config['generation']['layer']['byteplus'], 'model', '')
     assert application.get_layer_provider_config()[1]['model'] == 'image-model'
-    monkeypatch.setitem(application.config['generation']['layer']['byteplus'], 'model', 'layer-model')
-    assert application.get_layer_provider_config()[1]['model'] == 'layer-model'
+    assert 'layer' not in config_v2.DEFAULTS['generation']
+    data = example()
+    data['generation']['layer'] = {'byteplus': {'model': ''}}
+    with pytest.raises(config_v2.ConfigError) as error:
+        config_v2.validate(data)
+    assert 'generation.layer' in error.value.report()
+
+
+# --- scripts/config-drop-layer.py -------------------------------------------------------
+DROP_SPEC = importlib.util.spec_from_file_location('config_drop_layer', ROOT / 'scripts' / 'config-drop-layer.py')
+drop = importlib.util.module_from_spec(DROP_SPEC)
+DROP_SPEC.loader.exec_module(drop)
+
+
+def layered(model=''):
+    data = example()
+    data['providers']['byteplus']['api_key'] = 'byteplus-test-key-111'
+    data['generation']['layer'] = {'byteplus': {'model': model}}
+    return data
+
+
+def drop_run(capsys, *args):
+    code = drop.main(list(args))
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert 'byteplus-test-key-111' not in output and 'ep-fake-layer-123' not in output
+    return code, output
+
+
+def test_drop_layer_dry_run_then_apply(tmp_path, capsys):
+    path = write(tmp_path, layered(), mode=0o640)
+    before = path.read_bytes()
+    code, _ = drop_run(capsys, '--config', str(path))
+    assert code == 0 and path.read_bytes() == before and config_files(tmp_path) == ['config.json']
+    code, _ = drop_run(capsys, '--config', str(path), '--apply')
+    assert code == 0
+    assert 'layer' not in json.loads(path.read_text())['generation']
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    backup = tmp_path / 'config.json.pre-layer'
+    assert backup.read_bytes() == before and stat.S_IMODE(backup.stat().st_mode) == 0o600
+    assert config_files(tmp_path) == ['config.json', 'config.json.pre-layer']
+    config_v2.load(str(path))  # result is a valid v2 config
+    code, output = drop_run(capsys, '--config', str(path), '--apply')  # nothing left to do
+    assert code == 0 and '无需处理' in output
+
+
+def test_drop_layer_nonempty_model_stops_without_printing_value(tmp_path, capsys):
+    path = write(tmp_path, layered('ep-fake-layer-123'))
+    before = path.read_bytes()
+    code, output = drop_run(capsys, '--config', str(path), '--apply')
+    assert code == 3 and '非空' in output
+    assert path.read_bytes() == before and config_files(tmp_path) == ['config.json']
+
+
+def test_drop_layer_refuses_existing_backup_and_v1(tmp_path, capsys):
+    path = write(tmp_path, layered())
+    (tmp_path / 'config.json.pre-layer').write_text('keep')
+    before = path.read_bytes()
+    code, output = drop_run(capsys, '--config', str(path), '--apply')
+    assert code == 2 and '已存在' in output
+    assert path.read_bytes() == before and (tmp_path / 'config.json.pre-layer').read_text() == 'keep'
+    v1 = write(tmp_path, V1, name='v1.json')
+    code, output = drop_run(capsys, '--config', str(v1), '--apply')
+    assert code == 2 and 'v2' in output

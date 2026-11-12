@@ -12,7 +12,7 @@
   <a href="../README.md">English</a> · 中文
 </p>
 
-<p align="center">当前版本 1.0.0 · <a href="../CHANGELOG.md">更新日志</a></p>
+<p align="center">当前版本 1.0.1 · <a href="../CHANGELOG.md">更新日志</a></p>
 
 <p align="center">
   <img src="../screenshot.png" alt="Ink Traces WebUI Screenshot" width="100%" />
@@ -56,6 +56,7 @@ cp config.json.example config.json   # 然后填入你的凭据
 - Ark 的 Seedance 2.5 需在 `providers.byteplus.endpoint_ids.seedance_2_5` 填写你自己的接入点 ID（BytePlus 控制台的 `ep-…`）；模板只提供占位值，未替换时提交会被拒绝。
 - Cupsy 通过公网 HTTP(S) 地址回源获取参考素材：设置 `deployment.cupsy_source.base_url`（建议 HTTPS），详见 [Cupsy 适配说明](cupsy_compatibility.md)。
 - 受控部署请设置 `auth.secret_key`（或环境变量 `INK_TRACES_SECRET_KEY`）。
+- 图层使用 BytePlus 图片模型（`generation.image.byteplus.model`），无独立配置。
 - 图层工作台用法见[图层工作台说明](layer-studio.md)，运行性能见[性能说明](performance.md)。
 
 ## 开发与测试

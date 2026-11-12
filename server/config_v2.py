@@ -73,8 +73,6 @@ DEFAULTS = {
             'poll_max_attempts': 1800,
             'cupsy': {'model': 'seed-audio-1.0'},
         },
-        # Empty layer model means "same as generation.image.byteplus.model" (v1 behaviour).
-        'layer': {'byteplus': {'model': ''}},
     },
     'deployment': {
         'public_base_url': '',
@@ -205,7 +203,6 @@ SCHEMA = {
             'cupsy': {'model': _str},
         },
         'audio': {'poll_interval_seconds': _pos, 'poll_max_attempts': _pos, 'cupsy': {'model': _str}},
-        'layer': {'byteplus': {'model': _str}},
     },
     'deployment': {
         'public_base_url': _url(True),

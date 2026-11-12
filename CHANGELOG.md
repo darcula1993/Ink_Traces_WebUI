@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1 - 2026-11-13
+
+- Layer decomposition now always uses the BytePlus image model (`generation.image.byteplus.model`); the separate `generation.layer` config section was removed. Existing v2 configs that still contain an empty `generation.layer` section can be cleaned with `scripts/config-drop-layer.py --apply`.
+
 ## 1.0.0 - 2026-11-13
 
 First major release.

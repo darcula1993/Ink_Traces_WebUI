@@ -28,7 +28,7 @@ Edit `config.json` (never committed; it holds your credentials). It uses the v2 
 
 - Accounts: `providers.byteplus.api_key` (BytePlus Ark) and/or `providers.cupsy.api_key`, each with its `endpoint` and timeouts.
 - Seedance 2.5 on BytePlus: put your own endpoint ID (`ep-…` from the BytePlus console) in `providers.byteplus.endpoint_ids.seedance_2_5`; the example ships the placeholder `ep-your-endpoint-id`, which counts as not configured.
-- Image: `generation.image.default` (`byteplus` or `cupsy`) and `generation.image.byteplus.model`. Video: `generation.video.byteplus.model` / `fast_model` and `generation.video.cupsy.model`. Audio: `generation.audio.cupsy.model`. Layers: `generation.layer.byteplus.model` (empty uses the image model).
+- Image: `generation.image.default` (`byteplus` or `cupsy`) and `generation.image.byteplus.model`. Video: `generation.video.byteplus.model` / `fast_model` and `generation.video.cupsy.model`. Audio: `generation.audio.cupsy.model`. Layer decomposition uses the BytePlus image model (`generation.image.byteplus.model`); there is no separate layer setting. If an older v2 file still has `generation.layer`, remove it with `python3 scripts/config-drop-layer.py` (dry run) / `--apply`.
 - Ark reference video uploads: set `deployment.public_base_url` to the public origin of this application.
 - Cupsy references: `deployment.cupsy_source.base_url`, a public HTTP(S) origin that routes back to this application.
 - Sessions: set `auth.secret_key` (or env `INK_TRACES_SECRET_KEY`); otherwise an ignored `.flask_secret_key` file is generated.

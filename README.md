@@ -12,7 +12,7 @@
   English · <a href="./doc/README.md">中文</a>
 </p>
 
-<p align="center">Version 1.0.0 · <a href="./CHANGELOG.md">Changelog</a></p>
+<p align="center">Version 1.0.1 · <a href="./CHANGELOG.md">Changelog</a></p>
 
 <p align="center">
   <img src="./screenshot.png" alt="Ink Traces WebUI Screenshot" width="100%" />
@@ -35,7 +35,7 @@
 | Image | BytePlus Ark (Seedream 5.5), Cupsy |
 | Video | BytePlus Ark (Seedance), Cupsy |
 | Audio | Cupsy (Seed Audio) |
-| Layer decomposition | BytePlus Ark |
+| Layer decomposition | BytePlus Ark (uses the BytePlus image model) |
 
 ## Quick start
 

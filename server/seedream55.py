@@ -5,7 +5,7 @@ SIZES = {'1:1':'1536x1536','4:3':'1792x1344','3:4':'1344x1792','16:9':'2048x1152
 def enabled(model=None):
     import app
     generation = app.config['generation']
-    # Deployment-configured ep- IDs (image and layer model) are treated as Seedream 5.5.
-    configured = {str(generation['image']['byteplus']['model'] or ''), str(generation['layer']['byteplus']['model'] or '')}
+    # Deployment-configured ep- ID of the image model is treated as Seedream 5.5.
+    configured = {str(generation['image']['byteplus']['model'] or '')}
     model = str(model if model is not None else app.API_PROVIDERS.get('ark', {}).get('model', ''))
     return model.lower() in ALIASES or (model in configured and model.startswith('ep-'))
