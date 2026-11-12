@@ -1,12 +1,12 @@
+"""Project default interfaces were removed on 2026-11-13; old rows stay untouched and unused."""
+import json
+
 import pytest
+
 import app as application
 import canvas_store as store
-from canvas_project_settings import get_settings, update_settings, validate_generation
-from provider_profiles import save_profile
-
-
-def selection(provider='ark', profile_id=None):
-    return {'image': {'provider': provider, 'profile_id': profile_id}, 'video': None, 'audio': None}
+import tasks
+from canvas_project_settings import validate_generation
 
 
 def project():
@@ -15,54 +15,41 @@ def project():
     return p['id'], w['id']
 
 
-def test_api_persistence_conflict_and_project_isolation():
-    p, w = project()
-    other, _ = project()
+def test_legacy_rows_are_kept_but_not_exposed():
+    p, _ = project()
+    providers = {'image': {'provider': 'ark', 'profile_id': None}, 'video': None, 'audio': None}
+    tasks.get_db().execute('INSERT INTO canvas_project_generation_settings VALUES (?,?,?)', (p, 3, json.dumps(providers)))
+    tasks.get_db().commit()
     client = application.app.test_client()
-    url = f'/api/canvas/projects/{p}/generation-settings'
-    assert client.get(url).json['settings'] == {'revision': 0, 'providers': {'image': None, 'video': None, 'audio': None}}
-    before = store.workflow(w)
-    response = client.put(url, json={'revision': 0, 'providers': selection()})
-    assert response.status_code == 200
-    assert response.json['settings']['revision'] == 1
-    assert client.put(url, json={'revision': 0, 'providers': selection('cupsy')}).status_code == 409
-    assert client.put(url, json={'revision': 1, 'providers': selection('acme')}).status_code == 400
-    assert get_settings(p)['providers'] == selection()
-    assert get_settings(other)['revision'] == 0
-    assert store.workflow(w) == before
-    assert client.get('/api/canvas/projects/missing/generation-settings').status_code == 404
+    assert client.get(f'/api/canvas/projects/{p}/generation-settings').status_code == 404
+    row = tasks.get_db().execute('SELECT revision,providers FROM canvas_project_generation_settings WHERE project_id=?', (p,)).fetchone()
+    assert (row['revision'], json.loads(row['providers'])) == (3, providers)
 
 
 @pytest.mark.parametrize('multipart', [False, True])
-def test_generation_request_rejects_stale_node_override_and_other_project(multipart):
+def test_canvas_request_without_node_is_rejected_before_task_creation(multipart):
     p, w = project()
-    other, foreign = project()
-    update_settings(p, {'revision': 0, 'providers': selection()})
     client = application.app.test_client()
-    def post(data):
-        return client.post('/api/generate', data={k: str(v) for k,v in data.items()}, content_type='multipart/form-data') if multipart else client.post('/api/generate', json=data)
-    base = {'canvas_workflow_id': w, 'project_settings_revision': 1, 'provider': 'ark', 'prompt': 'test'}
-    assert post({**base, 'provider': 'acme'}).status_code == 409
-    assert post({**base, 'project_settings_revision': 0}).status_code == 409
-    assert post({**base, 'canvas_workflow_id': foreign}).status_code == 409
-    assert post({**base, 'profile_id': 'node-override'}).status_code == 409
-    validate_generation(base, 'image')
-    validate_generation({'provider': 'ark'}, 'image')  # legacy API remains independent
+    before = tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0]
+    data = {'canvas_workflow_id': w, 'project_settings_revision': 1, 'provider': 'ark', 'prompt': 'test'}
+    response = client.post('/api/generate', data=data, content_type='multipart/form-data') if multipart else client.post('/api/generate', json=data)
+    assert response.status_code == 400
+    assert tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0] == before
 
 
-@pytest.mark.parametrize('providers', [{}, {'image': [], 'video': None, 'audio': None}, {'image': {'provider': 'bad'}, 'video': None, 'audio': None}])
-def test_invalid_settings(providers):
-    p, _ = project()
-    with pytest.raises(store.CanvasError):
-        update_settings(p, {'revision': 0, 'providers': providers})
+def test_noncanvas_legacy_api_remains_independent():
+    validate_generation({'provider': 'ark'}, 'image')
+    validate_generation({'provider': 'cupsy', 'project_settings_revision': 9}, 'video')
 
 
-def test_profile_validation_and_disable_blocks_generation():
-    p, w = project()
-    profile = save_profile({'name': 'test', 'kind': 'image', 'adapter': 'ark', 'api_key': 'synthetic-key', 'settings': {'endpoint': 'https://example.invalid'}})
-    update_settings(p, {'revision': 0, 'providers': selection('ark', profile['id'])})
-    with pytest.raises(store.CanvasError):
-        update_settings(p, {'revision': 1, 'providers': selection('acme', profile['id'])})
-    save_profile({'revision': profile['revision'], 'enabled': False}, profile['id'])
-    with pytest.raises(store.CanvasError):
-        validate_generation({'canvas_workflow_id': w, 'project_settings_revision': 1, 'provider': 'ark', 'profile_id': profile['id']}, 'image')
+def test_provider_preferences_workspace_state_round_trip_and_shape():
+    client = application.app.test_client()
+    url = '/api/workspace/state/canvas_provider_preferences'
+    value = {'image': {'provider': 'cupsy', 'profile_id': None}, 'video': {'provider': 'ark', 'profile_id': 'a' * 32}}
+    response = client.put(url, json={'value': value})
+    assert response.status_code == 200
+    assert client.get(url).json['state']['value'] == value
+    for bad in [[], {'text': {'provider': 'ark'}}, {'audio': {'provider': 'ark'}}, {'image': {'provider': 'ark', 'profile_id': 'bad'}},
+                {'image': {'provider': 'ark', 'extra': 1}}]:
+        assert client.put(url, json={'value': bad}).status_code == 400
+    assert client.get(url).json['state']['value'] == value

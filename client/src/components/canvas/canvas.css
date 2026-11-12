@@ -607,10 +607,6 @@
 
 
 
-.cv-project-settings{max-width:520px;width:calc(100vw - 48px);padding:24px;background:#242428;border:1px solid #444;border-radius:14px;display:flex;flex-direction:column;gap:16px}
-.cv-project-settings label{display:flex;flex-direction:column;gap:6px}
-.cv-project-settings footer{display:flex;justify-content:flex-end;gap:8px}
-.cv-project-settings p{color:#bcc4bc;font-size:13px}
 .cv-tools{top:auto;left:50%;bottom:16px;transform:translateX(-50%);flex-direction:row;padding:6px;border-radius:13px;z-index:10}
 .cv-tools hr{height:24px;width:1px;margin:0 4px}
 .cv-bottom{left:16px;right:auto;bottom:20px;z-index:11}

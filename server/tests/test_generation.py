@@ -1551,13 +1551,8 @@ def test_cupsy_omni_task_type(monkeypatch, task_type, form):
 @pytest.mark.parametrize('provider', ['ark', 'cupsy'])
 @pytest.mark.parametrize('count', [0, 1, 2, 3])
 def test_canvas_keyframe_requires_one_or_two_images(monkeypatch, provider, count):
-    import canvas_store
-    from canvas_project_settings import update_settings
-    project = canvas_store.create_project('keyframe validation')
-    workflow = canvas_store.create_workflow(project['id'], 'test')
-    update_settings(project['id'], {'revision': 0, 'providers': {
-        'image': None, 'video': {'provider': provider, 'profile_id': None}, 'audio': None,
-    }})
+    from test_canvas_generate_audio import canvas, node_fields
+    workflow = canvas(provider)
     monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', {
         'api_key': 'test', 'endpoint': 'https://provider.invalid',
         'model': 'test-model', 'seedance_2_5_model': 'test-model',
@@ -1573,7 +1568,7 @@ def test_canvas_keyframe_requires_one_or_two_images(monkeypatch, provider, count
     monkeypatch.setattr(application.HTTP, 'post', fake_post)
     body = {'provider': provider, 'model': 'seedance-2.5', 'prompt': 'test',
             'video_mode': 'keyframe', 'ratio': 'adaptive', 'duration': '5',
-            'canvas_workflow_id': workflow['id'], 'project_settings_revision': '1'}
+            **{key: str(value) for key, value in node_fields(workflow).items()}}
     if count:
         body['image'] = (io.BytesIO(_rgba_png_bytes((320, 320))), 'first.png')
     if count >= 2:

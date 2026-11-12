@@ -47,7 +47,7 @@
 /* Small,bounded glass surfaces; no per-node backdrop blur. */
 .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
   .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
-  .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+  .cv-history-popover, .cv-delete-dialog,
   .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
   background:
     radial-gradient(560px circle at 28% 8%, rgba(200, 255, 220, .05), transparent 44%),
@@ -278,7 +278,7 @@
 
 /* Rounded surfaces share the video tool's glass family without moving boxes. */
 .canvas-studio :is(.cv-sidebar, .cv-node, .cv-node-panel,
-  .cv-project-settings, .cv-delete-dialog, .cv-shortcut-help, .cv-media-viewer) {
+  .cv-delete-dialog, .cv-shortcut-help, .cv-media-viewer) {
   border-radius: 18px;
 }
 
@@ -326,7 +326,7 @@
 
 /* Keep text-heavy popovers readable while retaining the .54 strong-glass fill. */
 .canvas-studio :is(.cv-node-panel, .cv-sidebar-menu, .cv-context-menu,
-  .cv-parameters-popover, .cv-project-settings, .cv-tree-editor) {
+  .cv-parameters-popover, .cv-tree-editor) {
   background-color: var(--cv-glass-strong);
 }
 
@@ -349,7 +349,7 @@
   }
   .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
     .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
-    .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+    .cv-history-popover, .cv-delete-dialog,
     .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
     background: var(--cv-glass-solid);
   }
@@ -365,7 +365,7 @@
 
   .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
     .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
-    .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+    .cv-history-popover, .cv-delete-dialog,
     .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
     background: var(--cv-glass-solid);
     -webkit-backdrop-filter: none;
@@ -468,7 +468,7 @@
 
   .canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
     .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
-    .cv-history-popover, .cv-project-settings, .cv-delete-dialog,
+    .cv-history-popover, .cv-delete-dialog,
     .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover),.prompt-mention-menu.cv-mention-menu {
     background: Canvas;
     -webkit-backdrop-filter: none;

@@ -2895,6 +2895,8 @@ WORKSPACE_STATE_KEYS = {
     'vid_tabs', 'vid_activeTab',
     'audio_form',
     'gallery_preferences',
+    # Last interface chosen per canvas generation node type (image/video/audio).
+    'canvas_provider_preferences',
 }
 
 
@@ -3133,6 +3135,20 @@ def api_download_layer_project(project_id):
     )
 
 
+def _canvas_provider_preferences_error(value):
+    """Shape-only check: a remembered profile may later be disabled; the canvas falls back."""
+    from canvas_project_settings import ADAPTERS, validate_node_selection
+    from canvas_store import CanvasError
+    if not isinstance(value, dict) or set(value) - set(ADAPTERS):
+        return '接口偏好须为图像/视频/音频对象'
+    try:
+        for kind, selection in value.items():
+            validate_node_selection(kind, selection)
+    except CanvasError as error:
+        return str(error)
+    return None
+
+
 @app.route('/api/workspace/state/<key>', methods=['GET'])
 def api_get_workspace_state(key):
     if key not in WORKSPACE_STATE_KEYS:
@@ -3148,6 +3164,10 @@ def api_set_workspace_state(key):
     data = request.get_json(silent=True)
     if not isinstance(data, dict) or 'value' not in data:
         return jsonify({'success': False, 'error': '缺少工作区状态 value'}), 400
+    if key == 'canvas_provider_preferences':
+        error = _canvas_provider_preferences_error(data['value'])
+        if error:
+            return jsonify({'success': False, 'error': error}), 400
     normalized = storage.persist_workspace_value(key, data['value'])
     state = task_db.set_workspace_state(key, normalized)
     # Preserve the request's field order so pre-fix clients do not mistake a

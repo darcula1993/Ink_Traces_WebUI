@@ -4,17 +4,23 @@ import pytest
 import app as application
 import canvas_store as store
 import tasks
-from canvas_project_settings import update_settings
 from test_generation import FakeResponse
 
 
-def canvas(provider='ark'):
+def canvas(provider='ark', kind='video', node_id='v'):
+    """Canvas with one generation node that carries its own interface selection."""
     project = store.create_project('output audio')
-    workflow = store.create_workflow(project['id'], 'video')
-    update_settings(project['id'], {'revision': 0, 'providers': {
-        'image': None, 'video': {'provider': provider, 'profile_id': None}, 'audio': None,
-    }})
-    return workflow
+    workflow = store.create_workflow(project['id'], kind)
+    document = workflow['document']
+    document['nodes'] = [{'id':node_id,'type':kind,'title':kind,'x':0,'y':0,'params':{},
+                          'providerSelection':{'provider':provider,'profile_id':None}}]
+    store.update_workflow(workflow['id'], kind, document, workflow['revision'])
+    return store.workflow(workflow['id'])
+
+
+def node_fields(workflow, node_id='v'):
+    return {'canvas_workflow_id':workflow['id'], 'canvas_node_id':node_id,
+            'canvas_workflow_revision':workflow['revision']}
 
 
 @pytest.mark.parametrize('value', [False, True, 'missing'])
@@ -24,7 +30,7 @@ def test_canvas_audio_flag_save_reload(value):
     document = workflow['document']
     document['nodes'] = [{'id':'v','type':'video','title':'video','x':0,'y':0,'params':params}]
     client = application.app.test_client()
-    response = client.put(f"/api/canvas/workflows/{workflow['id']}", json={'title':'video','document':document,'revision':1})
+    response = client.put(f"/api/canvas/workflows/{workflow['id']}", json={'title':'video','document':document,'revision':workflow['revision']})
     assert response.status_code == 200
     saved = client.get(f"/api/canvas/workflows/{workflow['id']}").json['workflow']['document']['nodes'][0]['params']
     assert saved == params
@@ -36,7 +42,7 @@ def test_canvas_audio_flag_rejects_non_boolean(value):
     document = workflow['document']
     document['nodes'] = [{'id':'v','type':'video','title':'video','x':0,'y':0,'params':{'generate_audio':value}}]
     with pytest.raises(store.CanvasError, match='布尔值'):
-        store.update_workflow(workflow['id'], 'video', document, 1)
+        store.update_workflow(workflow['id'], 'video', document, workflow['revision'])
 
 
 def configure(monkeypatch):
@@ -61,7 +67,7 @@ def test_canvas_submission_preserves_output_audio_to_provider(monkeypatch, provi
     sent = configure(monkeypatch)
     workflow = canvas(provider)
     body = {'provider':provider,'model':'seedance-2.5','video_mode':'reference','prompt':'synthetic',
-            'canvas_workflow_id':workflow['id'],'project_settings_revision':1}
+            **node_fields(workflow)}
     if value != 'missing': body['generate_audio'] = value
     client = application.app.test_client()
     if form:
@@ -94,7 +100,7 @@ def test_output_audio_off_preserves_reference_audio(monkeypatch, tmp_path):
     tasks.update_provider_asset(asset['id'],external_asset_id='remote-audio',asset_uri='asset://remote-audio',status='active',next_run_at=None)
     response = application.app.test_client().post('/api/video/generate',json={
         'provider':'cupsy','model':'seedance-2.5','video_mode':'reference','prompt':'synthetic','generate_audio':False,
-        'canvas_workflow_id':workflow['id'],'project_settings_revision':1,
+        **node_fields(workflow),
         'cupsy_assets':[{'id':asset['id'],'role':'reference_audio'}],
     })
     assert response.status_code == 202, response.json

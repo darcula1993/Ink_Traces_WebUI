@@ -2,6 +2,7 @@ import {isBusyTaskStatus} from './taskStatus.js'
 import {cleanGroups} from './canvasGroups.js'
 import {resolveNodeInputs} from './canvasReferences.js'
 import {describeCanvasChange} from './canvasHistoryDescription.js'
+import {withProviderSelection} from './canvasProviderSelection.js'
 const clone = value => value === undefined ? undefined : structuredClone(value)
 const equal = (a,b) => JSON.stringify(a) === JSON.stringify(b)
 const runtimeFields = new Set(['task','candidates'])
@@ -79,11 +80,12 @@ export function copyCanvasSelection(document,ids,workflowId) {
   const selected=new Set(ids)
   return {workflowId,groups:clone((document.groups||[]).filter(group=>group.nodeIds.every(id=>selected.has(id)))),nodes:clone(document.nodes.filter(n=>selected.has(n.id))).map(({upstreamStale,...n})=>({...n,task:null})),edges:clone(document.edges.filter(e=>selected.has(e.source)&&selected.has(e.target)))}
 }
-export function pasteCanvasSelection(document,clipboard,workflowId,uid,offset=40) {
+// selectionFor(type) fills a concrete interface into copied legacy generation nodes that have none.
+export function pasteCanvasSelection(document,clipboard,workflowId,uid,offset=40,selectionFor=null) {
   if(!clipboard||clipboard.workflowId!==workflowId)throw new Error('选区只能粘贴到原画布，请重新复制。')
   if(document.nodes.length+clipboard.nodes.length>500||document.edges.length+clipboard.edges.length>2000)throw new Error('粘贴会超过画布上限（500节点／2000连线），请减少选区。')
   if(clipboard.nodes.some(n=>!Number.isFinite(n.x+offset)||!Number.isFinite(n.y+offset)||Math.abs(n.x+offset)>1e6||Math.abs(n.y+offset)>1e6))throw new Error('粘贴位置超出画布坐标范围，请先移动原选区再复制。')
-  const ids=new Map(clipboard.nodes.map(n=>[n.id,uid()])),nodes=clone(clipboard.nodes).map(n=>({...n,id:ids.get(n.id),x:n.x+offset,y:n.y+offset,title:`${n.title.slice(0,237)} 副本`,task:null}))
+  const ids=new Map(clipboard.nodes.map(n=>[n.id,uid()])),nodes=clone(clipboard.nodes).map(n=>({...n,id:ids.get(n.id),x:n.x+offset,y:n.y+offset,title:`${n.title.slice(0,237)} 副本`,task:null})).map(n=>withProviderSelection(n,selectionFor))
   const edges=clone(clipboard.edges).map(e=>({...e,id:uid(),source:ids.get(e.source),target:ids.get(e.target)}))
   const groups=(clipboard.groups||[]).map(group=>({...group,id:uid(),title:group.title.slice(0,97)+' 副本',nodeIds:group.nodeIds.map(id=>ids.get(id)),...(group.keyframeNodeId?{keyframeNodeId:ids.get(group.keyframeNodeId)}:{})}))
   return {document:{...document,...(groups.length?{groups:[...(document.groups||[]),...groups]}:{}),nodes:[...document.nodes,...nodes],edges:[...document.edges,...edges]},ids:nodes.map(n=>n.id)}

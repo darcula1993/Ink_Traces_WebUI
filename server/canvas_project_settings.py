@@ -1,15 +1,19 @@
-"""Project-wide provider selection, separate from immutable submitted tasks."""
-import json
+"""Per-node provider selection for canvas generation, separate from immutable submitted tasks."""
 import re
 
 import tasks
-from canvas_store import CanvasError, get_project, workflow
+from canvas_store import CanvasError, workflow
 from provider_profiles import load_profile, ProfileError
 
 ADAPTERS = {'image': {'ark', 'cupsy'}, 'video': {'ark', 'cupsy'}, 'audio': {'cupsy'}}
 
 
 def init_settings_db():
+    """Keep the legacy table so old rows are neither deleted nor migrated.
+
+    Since 2026-11-13 project defaults are no longer read, written or used for
+    canvas generation; every generation node must carry its own selection.
+    """
     db = tasks.get_db()
     db.execute('''CREATE TABLE IF NOT EXISTS canvas_project_generation_settings (
         project_id TEXT PRIMARY KEY REFERENCES canvas_projects(id),
@@ -17,17 +21,11 @@ def init_settings_db():
     db.commit()
 
 
-def get_settings(project_id):
-    get_project(project_id)
-    row = tasks.get_db().execute('SELECT revision,providers FROM canvas_project_generation_settings WHERE project_id=?', (project_id,)).fetchone()
-    return {'revision': row['revision'], 'providers': json.loads(row['providers'])} if row else {'revision': 0, 'providers': dict.fromkeys(ADAPTERS)}
-
-
 def validate_selection(kind, value):
     if value is None:
         return None
     if not isinstance(value, dict) or set(value) - {'provider', 'profile_id'}:
-        raise CanvasError('项目接口配置格式无效')
+        raise CanvasError('接口配置格式无效')
     provider, profile_id = value.get('provider'), value.get('profile_id')
     if not isinstance(provider, str) or provider not in ADAPTERS[kind]:
         raise CanvasError('该生成类型不支持所选接口')
@@ -63,66 +61,34 @@ def _request_revision(value):
     return value if type(value) is int else None
 
 
-def update_settings(project_id, data):
-    get_project(project_id)
-    if set(data) != {'revision', 'providers'} or type(data.get('revision')) is not int or data['revision'] < 0:
-        raise CanvasError('请提供有效的项目配置版本和接口设置')
-    providers = data['providers']
-    if not isinstance(providers, dict) or set(providers) != set(ADAPTERS):
-        raise CanvasError('请提供图像、视频和音频三类项目接口设置')
-    validated = {kind: validate_selection(kind, providers[kind]) for kind in ADAPTERS}
-    db = tasks.get_db()
-    from canvas_store import write_transaction
-    with write_transaction():
-        get_project(project_id)
-        db.execute('INSERT OR IGNORE INTO canvas_project_generation_settings VALUES (?,0,?)', (project_id, json.dumps(dict.fromkeys(ADAPTERS))))
-        result = db.execute('UPDATE canvas_project_generation_settings SET providers=?,revision=revision+1 WHERE project_id=? AND revision=?', (json.dumps(validated), project_id, data['revision']))
-        if result.rowcount != 1:
-            raise CanvasError('项目接口设置已更新，请刷新后重试', 409)
-    return get_settings(project_id)
-
-
 def validate_generation(data, kind):
-    """Bind new node submissions to the saved selection; preserve legacy project guards."""
+    """Bind canvas submissions to the saved node's own provider selection.
+
+    Requests without canvas context belong to the legacy tools and are not
+    checked here. Project defaults and project_settings_revision are ignored.
+    """
     workflow_id = data.get('canvas_workflow_id')
-    has_node = 'canvas_node_id' in data
     if workflow_id is None:
-        if has_node or 'canvas_workflow_revision' in data:
+        if 'canvas_node_id' in data or 'canvas_workflow_revision' in data:
             raise CanvasError('节点生成请求必须指定画布')
         return
     if not isinstance(workflow_id, str) or not workflow_id:
         raise CanvasError('画布编号无效')
     saved = workflow(workflow_id)
-    selected = None
-    if has_node:
-        from canvas_store import ID
-        node_id = data.get('canvas_node_id')
-        if not isinstance(node_id, str) or not ID.fullmatch(node_id):
-            raise CanvasError('节点编号无效')
-        if _request_revision(data.get('canvas_workflow_revision')) != saved['revision']:
-            raise CanvasError('画布已改变，请保存或刷新后重新生成', 409)
-        node = next((n for n in saved['document']['nodes'] if n['id'] == node_id), None)
-        if node is None:
-            raise CanvasError('节点不存在', 404)
-        if node['type'] != kind:
-            raise CanvasError('节点类型与生成接口不匹配')
-        selected = validate_node_selection(kind, node.get('providerSelection'))
+    from canvas_store import ID
+    node_id = data.get('canvas_node_id')
+    if not isinstance(node_id, str) or not ID.fullmatch(node_id):
+        raise CanvasError('节点生成请求必须指定有效节点')
+    if _request_revision(data.get('canvas_workflow_revision')) != saved['revision']:
+        raise CanvasError('画布已改变，请保存或刷新后重新生成', 409)
+    node = next((n for n in saved['document']['nodes'] if n['id'] == node_id), None)
+    if node is None:
+        raise CanvasError('节点不存在', 404)
+    if node['type'] != kind:
+        raise CanvasError('节点类型与生成接口不匹配')
+    selected = validate_node_selection(kind, node.get('providerSelection'))
     if selected is None:
-        settings = get_settings(saved['project_id'])
-        if _request_revision(data.get('project_settings_revision')) != settings['revision']:
-            raise CanvasError('项目接口设置已改变，请刷新后重新生成', 409)
-        selected = settings['providers'][kind]
-        if selected is None:
-            raise CanvasError('请先配置节点或项目生成接口', 409)
+        raise CanvasError('请先为节点选择接口')
     if data.get('provider') != selected['provider'] or (data.get('profile_id') or None) != selected['profile_id']:
-        raise CanvasError('生成接口必须使用已保存的节点或项目配置', 409)
+        raise CanvasError('生成接口必须使用节点已保存的接口配置', 409)
     validate_selection(kind, selected)
-
-
-def register_settings_routes(blueprint, body):
-    from flask import request, jsonify
-
-    @blueprint.route('/api/canvas/projects/<project_id>/generation-settings', methods=['GET', 'PUT'])
-    def project_generation_settings(project_id):
-        settings = get_settings(project_id) if request.method == 'GET' else update_settings(project_id, body())
-        return jsonify(success=True, settings=settings)

@@ -3,6 +3,7 @@ import axios from 'axios'
 import {resolveNodeInputs} from './canvasReferences'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
 import { CUPSY_AUDIO_MODEL } from './generationSettings.js'
+import {nodeProvider,selectionKey,normalizeProviderPreferences} from './canvasProviderSelection.js'
 
 import {effectiveVideoModel,videoCapabilities,videoRatio,videoParameterError} from './videoGenerationRules.js'
 
@@ -19,12 +20,11 @@ export const createCanvasWorkflow = async (id, title) => (await data(axios.post(
 export const getCanvasWorkflow = async id => (await data(axios.get(workflowUrl(id)))).workflow
 export const saveCanvasWorkflow = async (id, value) => (await data(axios.put(workflowUrl(id), value))).workflow
 
-export const getProjectGenerationSettings = async id => (await data(axios.get(`${projectUrl(id)}/generation-settings`))).settings
-export const saveProjectGenerationSettings = async (id, settings) => (await data(axios.put(`${projectUrl(id)}/generation-settings`, settings))).settings
-export const selectedProvider = (capabilities,choice,kind) => choice ? capabilities[kind]?.find(p=>p.provider===choice.provider&&(p.profile_id||null)===(choice.profile_id||null)) : null
-export const projectProvider = (capabilities,settings,kind) => selectedProvider(capabilities,settings?.providers?.[kind],kind)
-export const nodeProvider = (capabilities,settings,node) => node?.providerSelection ? selectedProvider(capabilities,node.providerSelection,node.type) : projectProvider(capabilities,settings,node?.type)
-const selectionKey=choice=>choice?`${choice.provider}:${choice.profile_id||''}`:'inherit'
+export {selectedProvider,nodeProvider,defaultProviderSelection} from './canvasProviderSelection.js'
+// Last interface chosen per node type; server workspace state keeps it consistent across devices.
+const PREFERENCES_URL = '/api/workspace/state/canvas_provider_preferences'
+export const getCanvasProviderPreferences = async () => normalizeProviderPreferences((await data(axios.get(PREFERENCES_URL))).state?.value)
+export const saveCanvasProviderPreferences = async value => normalizeProviderPreferences((await data(axios.put(PREFERENCES_URL, { value }))).state?.value)
 
 async function upload(url, file) {
   const body = new FormData()
@@ -95,16 +95,16 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   const savedNode=workflow.document.nodes.find(item=>item.id===node.id)
   if(!savedNode||savedNode.type!==node.type)invalid('节点已不存在或类型已改变，请重新载入画布')
   if(selectionKey(savedNode.providerSelection)!==selectionKey(node.providerSelection))invalid('节点接口已被其他窗口修改，请重新载入画布后确认；尚未提交生成')
-  const settings = savedNode.providerSelection ? null : await getProjectGenerationSettings(workflow.project_id).catch(() => invalid('无法读取项目默认接口，尚未提交生成'))
-  const provider = nodeProvider(capabilities, settings, savedNode)
-  if (!provider) invalid(savedNode.providerSelection?'节点所选接口已停用或不可用，请重新选择':'尚未配置可用的项目默认接口，请选择节点接口或项目默认接口')
+  if(!savedNode.providerSelection)invalid('请先为节点选择接口')
+  const provider = nodeProvider(capabilities, savedNode)
+  if (!provider) invalid('节点所选接口已停用或不可用，请重新选择')
   const images = assets.filter(a => a.kind === 'image')
   const videos = assets.filter(a => a.kind === 'video')
   const audios = assets.filter(a => a.kind === 'audio')
   if (assets.some(a => !['image', 'video', 'audio'].includes(a.kind))) invalid('不支持的参考素材类型')
   let path
   const adapter = provider.provider || provider.id
-  const fields = { prompt, canvas_workflow_id: workflowId, canvas_node_id:node.id, canvas_workflow_revision:workflow.revision, ...(settings?{project_settings_revision:settings.revision}:{}), provider: adapter, ...(provider.profile_id ? { profile_id: provider.profile_id } : {}) }
+  const fields = { prompt, canvas_workflow_id: workflowId, canvas_node_id:node.id, canvas_workflow_revision:workflow.revision, provider: adapter, ...(provider.profile_id ? { profile_id: provider.profile_id } : {}) }
   if (node.type === 'image') {
     if (videos.length || audios.length) invalid('图像生成只接受图片参考；请调整素材或素材组')
     let references=images

@@ -5,7 +5,7 @@ import pytest
 import app as application
 import canvas_store as store
 import tasks
-from canvas_project_settings import validate_generation, update_settings
+from canvas_project_settings import validate_generation
 from provider_profiles import save_profile
 from test_canvas_generate_audio import configure
 
@@ -71,23 +71,66 @@ def test_asset_node_rejects_reference_order_before_asset_validation():
         store.update_workflow(workflow['id'], 'canvas', workflow['document'], 2)
 
 
-def test_inherit_guards_project_and_ignores_legacy_params():
-    project, workflow, node = make(selected=None)
-    node['params'] = {'provider':'cupsy', 'profile_id':'a'*32}
+def legacy_project_default(project_id, kind, provider):
+    """Write a pre-2026-11-13 project default row directly; it must no longer be read."""
+    providers = dict.fromkeys(('image', 'video', 'audio'))
+    providers[kind] = {'provider':provider, 'profile_id':None}
+    tasks.get_db().execute('INSERT OR REPLACE INTO canvas_project_generation_settings VALUES (?,?,?)',
+                           (project_id, 1, __import__('json').dumps(providers)))
+    tasks.get_db().commit()
+
+
+@pytest.mark.parametrize('kind', ['image', 'video', 'audio'])
+def test_node_without_selection_is_rejected_even_with_legacy_project_default(kind):
+    project, workflow, node = make(kind, selected=None)
+    node['params'] = {'provider':'cupsy', 'profile_id':'a'*32} if kind != 'image' else {}
     workflow['document']['nodes'] = [node]
     store.update_workflow(workflow['id'], 'canvas', workflow['document'], 2)
     workflow = store.workflow(workflow['id'])
-    providers = {'image':None, 'audio':None, 'video':{'provider':'ark', 'profile_id':None}}
-    update_settings(project['id'], {'revision':0, 'providers':providers})
-    body = {**request_for(workflow, node), 'project_settings_revision':1}
-    validate_generation(body, 'video')
-    for changed in [{'provider':'cupsy'}, {'project_settings_revision':0}, {'profile_id':'a'*32}]:
+    legacy_project_default(project['id'], kind, 'cupsy')
+    provider = 'cupsy'
+    for extra in [{}, {'project_settings_revision':1}, {'profile_id':'a'*32}]:
         with pytest.raises(store.CanvasError) as error:
-            validate_generation({**body, **changed}, 'video')
-        assert error.value.status == 409
-    update_settings(project['id'], {'revision':1, 'providers':providers})
-    with pytest.raises(store.CanvasError):
-        validate_generation(body, 'video')
+            validate_generation({**request_for(workflow, node), 'provider':provider, **extra}, kind)
+        assert error.value.status == 400
+        assert str(error.value) == '请先为节点选择接口'
+
+
+def test_explicit_selection_wins_over_legacy_project_default_and_ignores_its_revision():
+    project, workflow, node = make('video')
+    legacy_project_default(project['id'], 'video', 'cupsy')
+    body = request_for(workflow, node)
+    assert body['provider'] == 'ark'
+    validate_generation(body, 'video')
+    validate_generation({**body, 'project_settings_revision':0}, 'video')
+    with pytest.raises(store.CanvasError) as error:
+        validate_generation({**body, 'provider':'cupsy'}, 'video')
+    assert error.value.status == 409
+
+
+def test_project_generation_settings_routes_are_removed():
+    project, _, _ = make()
+    client = application.app.test_client()
+    url = f"/api/canvas/projects/{project['id']}/generation-settings"
+    assert client.get(url).status_code == 404
+    assert client.put(url, json={'revision':0, 'providers':{'image':None,'video':None,'audio':None}}).status_code in (404, 405)
+
+
+@pytest.mark.parametrize('form', [False, True])
+def test_real_submission_without_selection_creates_no_task(monkeypatch, form):
+    configure(monkeypatch)
+    project, workflow, node = make('video', selected=None)
+    legacy_project_default(project['id'], 'video', 'ark')
+    body = {**request_for(workflow, node), 'project_settings_revision':1, 'prompt':'synthetic', 'video_mode':'reference'}
+    client = application.app.test_client()
+    before = tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0]
+    if form:
+        response = client.post('/api/video/generate', data={k:str(v) for k,v in body.items()}, content_type='multipart/form-data')
+    else:
+        response = client.post('/api/video/generate', json=body)
+    assert response.status_code == 400
+    assert response.json['error'] == '请先为节点选择接口'
+    assert tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0] == before
 
 
 @pytest.mark.parametrize('mutation,status', [
@@ -136,9 +179,9 @@ def test_node_selection_real_submission_and_conflicts(monkeypatch, kind, form):
     monkeypatch.setitem(application.API_PROVIDERS, 'ark', {'api_key':'synthetic', 'endpoint':'https://ark.invalid', 'model':'synthetic'})
     monkeypatch.setattr(application, 'CUPSY_AUDIO_CONFIG', {'endpoint':'https://cupsy.invalid', 'model':'seed-audio-1.0'})
     project, workflow, node = make(kind)
-    # Independent node remains valid after unrelated project defaults are changed.
-    update_settings(project['id'], {'revision':0, 'providers':{'image':None,'video':None,'audio':None}})
-    body = {**request_for(workflow,node), 'project_settings_revision':0, 'prompt':'synthetic', 'video_mode':'reference'}
+    # Independent node remains valid whatever a legacy project default row says.
+    legacy_project_default(project['id'], kind, 'cupsy')
+    body = {**request_for(workflow,node), 'prompt':'synthetic', 'video_mode':'reference'}
     url = {'image':'/api/generate', 'video':'/api/video/generate', 'audio':'/api/audio/generate'}[kind]
     client = application.app.test_client()
     def post(data):
@@ -179,7 +222,7 @@ def test_node_fields_do_not_bypass_global_login(monkeypatch):
     assert response.status_code == 401
 
 
-def test_two_nodes_choose_independently_and_old_requests_keep_project_guard():
+def test_two_nodes_choose_independently_and_requests_without_node_are_rejected():
     project, workflow, node = make()
     second = {**node, 'id':'second', 'providerSelection':{'provider':'cupsy','profile_id':None}}
     workflow['document']['nodes'] = [node, second]
@@ -189,10 +232,11 @@ def test_two_nodes_choose_independently_and_old_requests_keep_project_guard():
     validate_generation(request_for(saved,second), 'video')
     with pytest.raises(store.CanvasError):
         validate_generation({**request_for(saved,second), 'provider':'ark'}, 'video')
-    # Omitting node context never activates the saved independent selection.
+    # Canvas requests without node context are rejected; there is no project fallback.
     legacy = {'canvas_workflow_id':workflow['id'],'provider':'ark','project_settings_revision':0}
-    with pytest.raises(store.CanvasError):
+    with pytest.raises(store.CanvasError) as error:
         validate_generation(legacy, 'video')
+    assert error.value.status == 400
     # Noncanvas legacy API still works, but orphan context is rejected.
     validate_generation({'provider':'ark'}, 'video')
     with pytest.raises(store.CanvasError):

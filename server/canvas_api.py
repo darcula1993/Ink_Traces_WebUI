@@ -134,9 +134,6 @@ def import_task_results(workflow_id):
 from canvas_library import register_library_routes
 register_library_routes(canvas_api, body)
 
-from canvas_project_settings import register_settings_routes
-register_settings_routes(canvas_api, body)
-
 from canvas_cleanup import register_cleanup_routes
 register_cleanup_routes(canvas_api, body)
 

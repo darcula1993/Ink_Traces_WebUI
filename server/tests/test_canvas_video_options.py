@@ -4,7 +4,7 @@ import pytest
 import app as application
 import canvas_store as store
 import tasks
-from test_canvas_generate_audio import canvas, configure
+from test_canvas_generate_audio import canvas, configure, node_fields
 
 
 @pytest.mark.parametrize('duration', [-1, 0, 4, 12, 3600, '-1', None, ''])
@@ -15,7 +15,7 @@ def test_video_duration_save_reload(duration):
     document['nodes'] = [{'id':'v', 'type':'video', 'x':0, 'y':0, 'params':params}]
     client = application.app.test_client()
     url = '/api/canvas/workflows/' + workflow['id']
-    assert client.put(url, json={'title':'video', 'document':document, 'revision':1}).status_code == 200
+    assert client.put(url, json={'title':'video', 'document':document, 'revision':workflow['revision']}).status_code == 200
     assert client.get(url).json['workflow']['document']['nodes'][0]['params'] == params
 
 
@@ -28,7 +28,7 @@ def test_duration_boundaries_unchanged(node_type, duration):
     document = workflow['document']
     document['nodes'] = [{'id':'n', 'type':node_type, 'x':0, 'y':0, 'params':{'duration':duration}}]
     with pytest.raises(store.CanvasError, match='时长'):
-        store.update_workflow(workflow['id'], 'video', document, 1)
+        store.update_workflow(workflow['id'], 'video', document, workflow['revision'])
 
 
 @pytest.mark.parametrize('provider,model,remote_model', [
@@ -42,7 +42,7 @@ def test_auto_480p_all_ratios_reach_actual_provider(monkeypatch, provider, model
     sent = configure(monkeypatch)
     workflow = canvas(provider)
     body = {'provider':provider, 'model':model, 'video_mode':'reference', 'prompt':'synthetic',
-            'canvas_workflow_id':workflow['id'], 'project_settings_revision':1,
+            **node_fields(workflow),
             'ratio':ratio, 'duration':-1, 'resolution':'480p'}
     client = application.app.test_client()
     if form:
