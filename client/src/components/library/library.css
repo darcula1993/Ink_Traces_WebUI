@@ -35,3 +35,23 @@
 .ul-scroll { display: flex; flex-direction: column; padding-bottom: 0; }
 .ul-scroll > .ul-grid { flex: 1 0 auto; padding-bottom: 12px; }
 .ul-scroll > .ul-pager { position: sticky; bottom: 0; z-index: 2; flex-shrink: 0; margin-top: auto; padding: 10px 20px; background: var(--surface-solid); border-top: 1px solid var(--border); }
+
+/* UI-ITER-R2B: compact folder rows, pager baseline, wide-screen grid and dialog sizing. */
+.ul-grid .ul-folder{align-self:start;display:flex;align-items:center;gap:2px;min-height:44px;background:var(--field);border:1px solid var(--border);border-radius:var(--r-md)}
+.ul-grid .ul-folder:hover{border-color:var(--border-strong);background:rgba(255,255,255,.05)}
+.ul-library .ul-folder .ul-card{flex:1;min-width:0;flex-direction:row;align-items:center;gap:var(--sp-2);height:44px;padding:0 var(--sp-2) 0 var(--sp-3);background:transparent;border:0;border-radius:var(--r-md)}
+.ul-folder .ul-folder-icon{width:auto;height:auto;flex-shrink:0;background:transparent;display:inline-flex}
+.ul-library .ul-folder .ul-card strong{flex:1;min-width:0;padding:0;font-size:var(--fs-control)}
+.ul-folder .ul-item-tools{margin:0 var(--sp-1) 0 0;flex-shrink:0}
+.ul-folder>small{display:block;flex-shrink:0;padding-right:var(--sp-3);margin:0}
+.ul-scroll>.ul-pager{align-items:center;gap:var(--sp-3);line-height:1}
+.ul-pager button:where(:not(.btn)){min-height:32px;display:inline-flex;align-items:center;line-height:1}
+.ul-pager span{display:inline-flex;align-items:center;min-height:32px;line-height:1;font-size:var(--fs-control);color:var(--text-2)}
+@media(min-width:1921px){
+  .ul-library{width:min(clamp(960px,86vw,2240px),100%);height:min(100%,clamp(640px,90vh,1360px))}
+  .ul-grid{grid-template-columns:repeat(auto-fill,minmax(clamp(130px,9vw,240px),1fr))}
+  .ul-grid .ul-card img,.ul-grid .ul-card video,.ul-grid .ul-audio,.ul-grid .ul-video-thumb{height:clamp(160px,11vw,260px)}
+  .ul-grid .ul-folder .ul-folder-icon{height:auto}
+  .ul-main{padding:26px 28px 0}
+}
+.ul-scroll>.ul-grid{align-content:start;grid-auto-rows:min-content}

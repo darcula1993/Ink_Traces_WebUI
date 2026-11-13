@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0 - 2026-11-14
+
+- Image and video nodes now follow the real aspect ratio of their result (or the chosen ratio before generation); connections, tidy layout, selection, dragging and node groups use the new sizes. Opening an older canvas whose nodes now overlap shows a one-time hint to tidy the canvas (undoable); nodes are never moved automatically.
+- Themed audio and video player on nodes and in asset previews, keyboard accessible.
+- The node panel places itself below, right, left or above the node to avoid covering other nodes and stays in view while panning and zooming.
+- Video parameter pills always show ratio, resolution and duration in full.
+- Panning or zooming the canvas no longer marks it as unsaved.
+- At low zoom, nodes show only their icon and title, and titles stay readable.
+- Batch-adding assets lays nodes out by their real sizes without overlaps.
+- Themed dropdowns replace native selects in the asset library and provider settings; folders use compact rows; empty folders have no expand arrow; the library grid adapts to large screens.
+- Screens 2200px and wider scale the whole shell (top bars, toolbars, sidebar, dialogs) consistently.
+- The provider setting formerly called "default for this generation type" is now "initial preselection for new nodes": it only applies when you have not picked a provider for that node type yet.
+
 ## 1.2.0 - 2026-11-14
 
 - New design language: restrained neutral near-black base with green used only as an accent (focus, selection, primary actions, generating state); glass effects limited to floating panels and menus.

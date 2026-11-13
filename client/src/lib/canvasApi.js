@@ -52,7 +52,7 @@ export async function getCanvasCapabilities() {
   const profiles = (saved.profiles || []).filter(p => p.enabled && p.has_api_key).sort((a, b) => Number(b.is_default) - Number(a.is_default))
   return Object.fromEntries(['image', 'video', 'audio'].map(kind => [kind, [
     ...profiles.filter(p => p.kind === kind).map(p => ({
-      id: `profile:${p.id}`, provider: p.adapter, profile_id: p.id,
+      id: `profile:${p.id}`, provider: p.adapter, profile_id: p.id, is_default: !!p.is_default,
       name: `${p.name}${p.is_default ? ' · 默认' : ''}`, revision: p.revision,
       capability_model: p.adapter==='ark' && p.settings.model===image.providers?.ark?.model ? image.providers.ark.capability_model : p.settings.model,
       model: kind === 'video' ? (p.adapter === 'cupsy' ? p.settings.model || 'seedance-2.5' : 'seedance-2.0') : p.settings.model || (kind === 'audio' ? CUPSY_AUDIO_MODEL : image.providers?.[p.adapter]?.model),

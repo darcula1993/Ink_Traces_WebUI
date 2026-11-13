@@ -1,5 +1,6 @@
 import React,{useEffect,useState} from 'react'
 import LibraryDialog from './LibraryDialog'
+import Select from '../ui/Select'
 import {listProjectFolders,createProjectFolder,updateProjectFolder,deleteProjectFolder,updateProjectAsset,createProjectAssetGroup,listProjectAssets} from '../../lib/canvasApi'
 import {createLibraryTag,updateLibraryTag,deleteLibraryTag,setLibraryItemTags,saveLibraryItems,previewLocalDelete,deleteLocalItems} from '../../lib/libraryApi'
 import axios from 'axios'
@@ -28,10 +29,10 @@ export default function LibraryOrganization({action,projects,projectId,tags,sele
   onDone()
  }catch(e){setError(e?.response?.data?.error||e.message)}finally{setBusy(false)}}
  return <LibraryDialog title={title} busy={busy} error={error} onClose={onClose} onConfirm={run} disabled={(kind==='remove'&&!plan)||(requiresProject&&!destination)||(['folder','newFolder','newTag','tag','asset','group'].includes(kind)&&!name.trim())} confirmLabel={kind==='remove'?'确认删除':kind==='recycle'?'确认移入回收站':kind==='selectGroup'?'选择组内素材':'确认保存'}>
- {requiresProject&&<label>目标项目<select aria-label="目标项目" disabled={busy||['folder','asset'].includes(kind)} value={destination} onChange={e=>{setDestination(e.target.value);setFolder('')}}><option value="">请选择项目</option>{projects.map(p=><option key={p.id} value={p.id}>{p.title}</option>)}</select></label>}
+ {requiresProject&&<label>目标项目<Select ariaLabel="目标项目" disabled={busy||['folder','asset'].includes(kind)} value={destination} options={[{value:'',label:'请选择项目'},...projects.map(p=>({value:p.id,label:p.title}))]} onChange={v=>{setDestination(v);setFolder('')}}/></label>}
  {['folder','newFolder','newTag','tag','asset','group'].includes(kind)&&<label>名称<input aria-label="名称" value={name} maxLength={kind==='asset'?240:100} disabled={busy} onChange={e=>setName(e.target.value)}/></label>}
- {['folder','newFolder','asset'].includes(kind)&&<label>文件夹<select aria-label="目标文件夹" disabled={busy||!destination} value={folder} onChange={e=>setFolder(e.target.value)}><option value="">根目录</option>{folders.filter(f=>!forbiddenFolder(f.id)).map(f=><option key={f.id} value={f.id}>{f.title}</option>)}</select></label>}
- {kind==='folder'&&<label>图标<select aria-label="文件夹图标" value={icon} onChange={e=>setIcon(e.target.value)}>{Object.entries(icons).map(([key,value])=><option key={key} value={key}>{value}</option>)}</select></label>}
+ {['folder','newFolder','asset'].includes(kind)&&<label>文件夹<Select ariaLabel="目标文件夹" disabled={busy||!destination} value={folder} options={[{value:'',label:'根目录'},...folders.filter(f=>!forbiddenFolder(f.id)).map(f=>({value:f.id,label:f.title}))]} onChange={setFolder}/></label>}
+ {kind==='folder'&&<label>图标<Select ariaLabel="文件夹图标" value={icon} options={Object.entries(icons).map(([key,value])=>({value:key,label:value}))} onChange={setIcon}/></label>}
  {kind==='deleteFolder'&&<p>删除“{action.item.title}”？仅可删除空文件夹，请先移出其中素材和子文件夹。</p>}
  {kind==='remove'&&(plan?<div className="ul-delete-plan" role="status"><p>将永久删除 <b>{plan.items}</b> 个本地素材及其原文件。</p><p>{plan.canvas_copies?<>同时删除由其复制到画布的 <b>{plan.canvas_copies}</b> 个画布副本，涉及 {plan.workflows} 个画布、<b>{plan.affected_nodes}</b> 个受影响节点{plan.removed_nodes?`（其中 ${plan.removed_nodes} 个素材节点将被移除）`:''}，节点内对这些副本的参考与提及会被清除。</>:'没有画布副本引用这些素材。'}</p>{plan.archived_copies_retained>0&&<p>已归档画布中的 {plan.archived_copies_retained} 个副本按归档保留规则不删除。</p>}{plan.rejected.length>0&&<p>{plan.rejected.length} 项（生成历史或 Cupsy 远端）不在本地删除范围，将跳过。</p>}{plan.missing.length>0&&<p>{plan.missing.length} 项已不存在。</p>}<p><strong>此操作不可恢复。</strong>生成历史与 Cupsy 远端素材不受影响。</p></div>:!error&&<p role="status">正在统计将删除的画布副本…</p>)}
  {kind==='recycle'&&<p>将所选产物所属的 {new Set(selection.map(i=>i.task_id)).size} 个完整任务移入回收站；同任务的其他产物也会受影响。已有画布引用保留，不永久删除文件。</p>}

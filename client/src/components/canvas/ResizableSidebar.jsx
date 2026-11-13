@@ -1,13 +1,15 @@
 import React, {useEffect, useRef, useState} from 'react'
 
 const STORAGE_KEY = 'ink-traces.canvas.sidebar-width.v1'
-const DEFAULT_WIDTH = 300
+const BASE_DEFAULT_WIDTH = 300
+// UI-ITER-R2-FIX: >=2200px the sidebar content is zoomed 1.2, so its default/limits scale with it.
+const scaleFactor = () => (typeof window !== 'undefined' && window.innerWidth >= 2200 ? 1.2 : 1)
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 function readWidth() {
   try {
     const saved = Number(localStorage.getItem(STORAGE_KEY))
-    return Number.isFinite(saved) && saved >= 160 && saved <= 640 ? saved : DEFAULT_WIDTH
-  } catch { return DEFAULT_WIDTH }
+    return Number.isFinite(saved) && saved >= 160 && saved <= 640 ? saved : Math.round(BASE_DEFAULT_WIDTH * scaleFactor())
+  } catch { return Math.round(BASE_DEFAULT_WIDTH * scaleFactor()) }
 }
 
 export default function ResizableSidebar({children}) {
@@ -15,7 +17,7 @@ export default function ResizableSidebar({children}) {
   const [preferred, setPreferred] = useState(readWidth)
   const [available, setAvailable] = useState(1440)
   const [dragging, setDragging] = useState(false)
-  const max = Math.min(640, Math.max(160, available - 480)), min = Math.min(280, max)
+  const scale = scaleFactor(), max = Math.min(640 * scale, Math.max(160, available - 480)), min = Math.min(280, max)
   const width = clamp(preferred, min, max)
 
   useEffect(() => {
@@ -92,7 +94,7 @@ export default function ResizableSidebar({children}) {
       }}
       onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
       onLostPointerCapture={event => finish(event, true)}
-      onDoubleClick={() => persist(DEFAULT_WIDTH)}
+      onDoubleClick={() => persist(Math.round(BASE_DEFAULT_WIDTH * scaleFactor()))}
       onKeyDown={event => {
         if (event.key === 'Escape' && gesture.current) {
           event.preventDefault(); event.stopPropagation()

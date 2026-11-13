@@ -6,7 +6,7 @@ export default function LibraryPopover({label,role='group',trigger,onClose,child
  closeRef.current=onClose
  useEffect(()=>{
   ref.current?.querySelector('button:not(:disabled),select:not(:disabled),input:not(:disabled)')?.focus({preventScroll:true})
-  const outside=e=>{if(!ref.current?.contains(e.target)&&!trigger?.current?.contains(e.target))closeRef.current()}
+  const outside=e=>{if(e.target.closest?.('.ui-select-menu'))return;if(!ref.current?.contains(e.target)&&!trigger?.current?.contains(e.target))closeRef.current()}
   document.addEventListener('pointerdown',outside)
   return()=>document.removeEventListener('pointerdown',outside)
  },[trigger])

@@ -1,3 +1,4 @@
+import {mediaSize} from './mediaSizes.js'
 export const NODE_WIDTH = 290
 export const NODE_HEIGHT = 240
 export const NODE_PORT_Y = 120
@@ -5,14 +6,80 @@ export const NODE_PORT_Y = 120
 export const LOCATE_ZOOM = 1
 export const FIT_MIN_ZOOM = .75
 export const LOD_ZOOM = 10/12
-export const nodeGeometry = node => node?.type==='video'?{width:420,height:300,portY:150}:{width:NODE_WIDTH,height:NODE_HEIGHT,portY:NODE_PORT_Y}
-export const editorPanelSize = size => ({width:Math.min(720,Math.max(240,size.width-32)),height:Math.min(240,Math.max(160,size.height-160))})
-export function generationPanelStyle(node,view,size) {
- const geometry=nodeGeometry(node),panel=editorPanelSize(size)
- return {width:panel.width,height:panel.height,left:Math.max(16,Math.min(size.width-panel.width-16,node.x*view.zoom+view.x+geometry.width*view.zoom/2-panel.width/2)),top:(node.y+geometry.height)*view.zoom+view.y+12}
+// UI-ITER-R2A #2: image/video nodes take the shape of their media. The media box follows the measured
+// result aspect (runtime cache), else the selected output ratio, within per-kind bounds; text keeps the
+// legacy 290×240 card. Derived only from the node, so old documents need no migration.
+export const NODE_HEAD=40,NODE_PAD=8,NODE_FOOTER=26,NODE_BORDER=1
+const MEDIA_BOUNDS={image:{maxW:272,minW:182,maxH:240,minH:120,fallback:1},video:{maxW:402,minW:242,maxH:300,minH:160,fallback:16/9}}
+const AUDIO_MEDIA_HEIGHT=112
+export function ratioAspect(params={}){
+ if(params.ratio==='custom'){const w=Number(params.custom_width),h=Number(params.custom_height);return w>0&&h>0?w/h:null}
+ const match=/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(params.ratio||'');return match&&Number(match[2])>0?Number(match[1])/Number(match[2]):null
 }
-export function nodeEditorViewport(node,view,size,center=false) {
+export function nodeMediaKind(node){return node?.type==='asset'?node.asset?.kind:node?.type}
+export function nodeAspect(node){
+ const kind=nodeMediaKind(node),size=mediaSize(node?.asset?.id)
+ if(size)return size.width/size.height
+ if(node?.type==='asset')return kind==='video'?16/9:4/3
+ return ratioAspect(node?.params)||MEDIA_BOUNDS[kind]?.fallback||1
+}
+const legacyGeometry={width:NODE_WIDTH,height:NODE_HEIGHT,portY:NODE_PORT_Y}
+export function nodeGeometry(node){
+ const kind=nodeMediaKind(node)
+ if(!node||node.type==='text'||!['image','video','audio','asset'].includes(node.type)||!['image','video','audio'].includes(kind))return legacyGeometry
+ const footer=node.type!=='asset'&&node.task?NODE_FOOTER:0,chrome=2*NODE_BORDER+NODE_HEAD+2*NODE_PAD+footer
+ if(kind==='audio'){const mediaHeight=AUDIO_MEDIA_HEIGHT;return {width:NODE_WIDTH,height:chrome+mediaHeight,portY:NODE_BORDER+NODE_HEAD+NODE_PAD+mediaHeight/2,mediaWidth:NODE_WIDTH-2*NODE_BORDER-2*NODE_PAD,mediaHeight}}
+ // Asset video thumbnails stay compact (image bounds); generated video keeps the larger stage.
+ const bounds=MEDIA_BOUNDS[node.type==='video'?'video':'image'],aspect=Math.min(4,Math.max(.25,nodeAspect(node)))
+ const mediaWidth=Math.round(Math.max(bounds.minW,Math.min(bounds.maxW,bounds.maxH*aspect)))
+ const mediaHeight=Math.round(Math.max(bounds.minH,Math.min(bounds.maxH,mediaWidth/aspect)))
+ return {width:mediaWidth+2*NODE_BORDER+2*NODE_PAD,height:chrome+mediaHeight,portY:NODE_BORDER+NODE_HEAD+NODE_PAD+mediaHeight/2,mediaWidth,mediaHeight}
+}
+export const editorPanelSize = size => ({width:Math.min(720,Math.max(240,size.width-32)),height:Math.min(240,Math.max(160,size.height-160))})
+const screenBox=(node,view)=>{const g=nodeGeometry(node),left=node.x*view.zoom+view.x,top=node.y*view.zoom+view.y;return {left,top,right:left+g.width*view.zoom,bottom:top+g.height*view.zoom}}
+const overlapArea=(a,b)=>Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left))*Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top))
+export const PANEL_SIDES=['below','right','left','above']
+// UI-ITER-R2A #1: the editor panel goes below the node when that spot is free and on screen,
+// otherwise to the right, left or above — whichever covers the least of the selected node (weighted)
+// and of other on-screen nodes. Always clamped inside the surface (above the bottom toolbar);
+// recomputed from the viewport on every render, so it follows pan and zoom.
+export function generationPanelPlacement(node,view,size,nodes=[]) {
+ const panel=editorPanelSize(size),margin=16,gap=12,bottom=size.height-72,box=screenBox(node,view)
+ const clampX=x=>Math.max(margin,Math.min(size.width-panel.width-margin,x)),clampY=y=>Math.max(margin,Math.min(bottom-panel.height,y))
+ const centerX=(box.left+box.right)/2-panel.width/2
+ const ideal={below:[centerX,box.bottom+gap],right:[box.right+gap,box.top],left:[box.left-gap-panel.width,box.top],above:[centerX,box.top-gap-panel.height]}
+ const viewportBox={left:0,top:0,right:size.width,bottom:size.height}
+ const others=nodes.filter(other=>other.id!==node.id).map(other=>screenBox(other,view)).filter(other=>overlapArea(other,viewportBox)>0)
+ let best=null
+ PANEL_SIDES.forEach((side,index)=>{
+  const [x,y]=ideal[side],left=clampX(x),top=clampY(y),rect={left,top,right:left+panel.width,bottom:top+panel.height}
+  // Sliding along the node's own edge is fine; being pushed onto it is not.
+  const self=overlapArea(rect,box),covered=others.reduce((sum,other)=>sum+overlapArea(rect,other),0)
+  const offAxis=side==='below'||side==='above'?Math.abs(top-y):Math.abs(left-x)
+  const score=self*4+covered+offAxis*panel.width*.01+index
+  if(!best||score<best.score)best={score,side,free:self===0&&covered===0,style:{width:panel.width,height:panel.height,left,top}}
+ })
+ return {side:best.side,free:best.free,style:best.style}
+}
+export const generationPanelStyle=(node,view,size,nodes=[])=>generationPanelPlacement(node,view,size,nodes).style
+export function nodeEditorViewport(node,view,size,center=false,nodes=[]) {
  const geometry=nodeGeometry(node),generation=['image','video','audio','text'].includes(node.type),panel=generation?editorPanelSize(size):{width:0,height:0},margin=16,bottom=generation?72:0
+ // UI-ITER-R2A #1: when locating, frame the node together with a free panel side (below first, then
+ // right/left/above) so the editor does not land on a neighbour; fall back to the legacy below layout.
+ if(center&&generation&&nodes.length>1){
+  const gap=12,availW=size.width-2*margin,availH=size.height-margin-bottom-margin
+  for(const side of PANEL_SIDES){
+   const vertical=side==='below'||side==='above'
+   const zoom=Math.max(.2,Math.min(LOCATE_ZOOM,vertical?availW/geometry.width:(availW-panel.width-gap)/geometry.width,vertical?(availH-panel.height-gap)/geometry.height:availH/geometry.height))
+   const w=geometry.width*zoom,h=geometry.height*zoom,groupW=vertical?Math.max(w,panel.width):w+gap+panel.width,groupH=vertical?h+gap+panel.height:Math.max(h,panel.height)
+   // Alternatives must keep the readable locate zoom (UI-ITER-R1); only the legacy below layout may zoom out.
+   if(side!=='below'&&zoom<LOCATE_ZOOM||groupW>availW+1||groupH>availH+1)continue
+   const groupLeft=(size.width-groupW)/2,groupTop=margin+(availH-groupH)/2
+   const left=side==='left'?groupLeft+panel.width+gap:vertical?groupLeft+(groupW-w)/2:groupLeft,top=side==='above'?groupTop+panel.height+gap:vertical?groupTop:groupTop+(groupH-h)/2
+   const next={...view,zoom,x:left-node.x*zoom,y:top-node.y*zoom}
+   const placed=generationPanelPlacement(node,next,size,nodes);if(placed.side===side&&placed.free)return next
+  }
+ }
  // Locating (center) targets a readable 100%; following a selection only ever zooms out to fit the editor.
  const target=center?LOCATE_ZOOM:view.zoom
  const zoom=generation?Math.max(.2,Math.min(target,(size.width-2*margin)/geometry.width,(size.height-margin-bottom-panel.height-12)/geometry.height)):target

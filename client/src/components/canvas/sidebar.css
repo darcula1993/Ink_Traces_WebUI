@@ -51,3 +51,4 @@
 .canvas-studio .cv-node-list-status.is-busy{background:var(--accent)}
 .canvas-studio .cv-node-list-status.is-failed{background:var(--danger)}
 .canvas-studio .cv-sidebar-menu [role=group]>hr{margin:4px 0}
+.cv-folder-toggle-empty{display:inline-block;pointer-events:none}

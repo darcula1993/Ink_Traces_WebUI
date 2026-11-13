@@ -534,7 +534,7 @@
 .canvas-studio .cv-node :is(.cv-node-kind, .cv-node-status, .cv-video-estimate) { font-size: 12px; }
 /* Below LOD_ZOOM (12px would render under 10px) keep only the title and the media state. */
 .canvas-studio .cv-world.is-lod-low .cv-node :is(.cv-node-kind, .cv-node-status, .cv-video-estimate, .cv-media-state-reason, .cv-media-state-elapsed, .cv-media-empty > span) { visibility: hidden; }
-.canvas-studio .cv-world.is-lod-low .cv-node-title { font-size: 16px; }
+.canvas-studio .cv-world.is-lod-low .cv-node-title { font-size: max(16px, calc(10px / var(--cv-zoom, 1))); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } /* L2: >=10px on screen */
 .canvas-studio .cv-media-state { position: relative; z-index: 2; gap: 4px; padding: 8px 12px; text-align: center; }
 .canvas-studio .cv-media-state strong { font-size: 14px; font-weight: 600; }
 .canvas-studio .cv-media-state-reason { font-size: 12px; line-height: 1.4; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
@@ -640,3 +640,17 @@
   display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   -webkit-line-clamp: unset; line-clamp: unset; position: static; padding: 0; box-shadow: none; background: transparent;
 }
+
+/* UI-ITER-R2A #3: the output chip always shows ratio · resolution · duration in full; the provider and
+ * mode chips give way first (provider shrinks hardest, its full name stays in title/aria-label). */
+.canvas-studio .cv-panel-params .cv-output-summary { flex-shrink: 0; max-width: none; overflow: visible; }
+.canvas-studio .cv-panel-params .cv-output-summary span { overflow: visible; text-overflow: clip; }
+.canvas-studio .cv-panel-params .cv-chip-select[aria-label="视频生成模式"] { flex-shrink: 1; }
+
+/* UI-ITER-R2A P2-1: below LOD_ZOOM (12px text would render <10px on screen) nodes and the failure /
+ * in-progress card keep only their icon and title; every secondary text or control is hidden. */
+.canvas-studio .cv-world.is-lod-low .cv-node :is(.cv-media-state button, .cv-node-stale, .cv-reference-number, .cv-reference-role,
+  .cv-audio-reference, .cv-play-asset b, .cv-node-text, .cv-media-player-time, .cv-media-player-volume, .cv-media-player-title) { visibility: hidden; }
+.canvas-studio .cv-world.is-lod-low .cv-node .cv-media-badge { font-size: 0; gap: 0; padding: 4px; }
+.canvas-studio .cv-world.is-lod-low .cv-node .cv-media-state strong { font-size: 16px; }
+.canvas-studio .cv-world.is-lod-low .cv-node .cv-media-state svg { width: 32px; height: 32px; }

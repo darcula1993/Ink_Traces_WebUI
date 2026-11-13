@@ -22,6 +22,9 @@ export function defaultProviderSelection(capabilities, kind, preferences) {
   const remembered = selectedProvider(capabilities, preferences?.[kind], kind)
   if (remembered) return toSelection(remembered)
   const options = capabilities?.[kind] || []
+  // UI-ITER-R2-FIX L5: the interface-management "first preselection" profile applies only while the
+  // user has never chosen an interface for this type; it never touches existing nodes.
+  if (!preferences?.[kind]) { const first = options.find(p => p.is_default && p.profile_id); if (first) return toSelection(first) }
   return toSelection(options.find(p => p.provider === FIRST_ADAPTER[kind]) || options[0])
 }
 

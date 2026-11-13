@@ -1,0 +1,86 @@
+/* UI-ITER-R2A #2: media-shaped nodes. Node width/height and --cv-media-h come from nodeGeometry
+ * (inline style), so CSS only lays the parts out: 40px head, 8px inset, media box, optional
+ * 26px status footer. Text nodes keep the legacy card (no .cv-node-sized). */
+.canvas-studio .cv-node.cv-node-sized .cv-node-body { height: auto; padding: 8px; overflow: visible; }
+.canvas-studio .cv-node.cv-node-sized .cv-node-media {
+  position: relative; isolation: isolate; height: var(--cv-media-h); border-radius: var(--r-sm);
+  overflow: hidden; background: var(--bg);
+}
+.canvas-studio .cv-node.cv-node-sized .cv-node-media > :is(.cv-media, .cv-media-empty, .cv-play-asset, .cv-media-player) {
+  width: 100%; height: 100%; max-height: none; min-height: 0; margin: 0;
+}
+.canvas-studio .cv-node.cv-node-sized .cv-node-media img.cv-media,
+.canvas-studio .cv-node.cv-node-sized .cv-node-media video.cv-media { object-fit: contain; border-radius: 0; background: transparent; }
+.canvas-studio .cv-node.cv-node-sized .cv-play-asset { padding: 0; border: 0; border-radius: 0; position: relative; display: grid; place-items: center; background: transparent; }
+.canvas-studio .cv-node.cv-node-sized .cv-play-asset > video { width: 100%; height: 100%; object-fit: contain; }
+.canvas-studio .cv-node.cv-node-sized .cv-play-asset > b {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: var(--r-pill); background: rgba(12, 13, 14, .78); border: 1px solid var(--border-strong); color: var(--text); font-size: 12px; font-weight: 500;
+}
+.canvas-studio .cv-node.cv-node-sized .cv-media-empty { border-radius: var(--r-sm); }
+
+/* References ride on the media's bottom edge instead of shrinking it (geometry stays node-only). */
+.canvas-studio .cv-node.cv-node-sized .cv-node-media > .cv-reference-thumbnails.is-compact {
+  position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; height: auto; margin: 0; padding: 18px 6px 6px; gap: 4px;
+  background: linear-gradient(to top, rgba(12, 13, 14, .85), rgba(12, 13, 14, 0));
+}
+.canvas-studio .cv-node.cv-node-sized .cv-node-media > .cv-reference-thumbnails.is-compact .cv-reference-thumb { padding: 1px; max-width: 64px; }
+.canvas-studio .cv-node.cv-node-sized .cv-node-media > .cv-reference-thumbnails.is-compact :is(img, video) { width: 40px; height: 28px; }
+.canvas-studio .cv-node.cv-node-sized.has-references .cv-media-empty { padding-bottom: 36px; }
+/* Audio stacks references above the player inside its fixed media box. */
+.canvas-studio .cv-node.cv-node-sized[data-media-kind=audio] .cv-node-media { display: flex; flex-direction: column; gap: 6px; background: transparent; overflow: visible; }
+.canvas-studio .cv-node.cv-node-sized[data-media-kind=audio] .cv-node-media > .cv-reference-thumbnails.is-compact { flex-shrink: 0; height: 38px; margin: 0; }
+.canvas-studio .cv-node.cv-node-sized[data-media-kind=audio] .cv-node-media > :is(.cv-media-empty, .cv-media-player, .cv-play-asset) { flex: 1; height: auto; }
+.canvas-studio .cv-node.cv-node-sized[data-media-kind=audio].has-references .cv-media-empty { padding-bottom: 0; }
+
+.canvas-studio .cv-node.cv-node-sized .cv-node-footer {
+  position: absolute; left: 10px; right: 10px; bottom: 3px; height: 20px; display: flex; align-items: center; gap: 8px;
+}
+.canvas-studio .cv-node.cv-node-sized .cv-node-footer .cv-node-status { flex: 1; min-width: 0; margin: 0; line-height: 20px; }
+
+/* UI-ITER-R2A #5: themed player. Tokens only; no native control chrome. */
+.canvas-studio .cv-media-player { position: relative; display: flex; flex-direction: column; justify-content: flex-end; background: var(--bg); border-radius: var(--r-sm); overflow: hidden; }
+.canvas-studio .cv-media-player > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.canvas-studio .cv-media-player-center {
+  position: absolute; z-index: 2; left: 50%; top: 50%; width: 44px; height: 44px; min-height: 0; padding: 0; transform: translate(-50%, -50%);
+  display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--border-strong); background: rgba(12, 13, 14, .72); color: var(--text);
+}
+.canvas-studio .cv-media-player-center:hover { color: var(--accent); border-color: var(--accent); }
+.canvas-studio .cv-media-player-bar {
+  position: relative; z-index: 3; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px;
+  background: linear-gradient(to top, rgba(12, 13, 14, .9), rgba(12, 13, 14, .55)); color: var(--text-2);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+/* Video: controls appear on hover/focus or while paused-with-progress; the centered button covers the idle state. */
+.canvas-studio .cv-media-player.is-video .cv-media-player-bar { opacity: 0; }
+.canvas-studio .cv-media-player.is-video:is(:hover, :focus-within, .is-playing:hover) .cv-media-player-bar { opacity: 1; }
+.canvas-studio .cv-media-player.is-audio { justify-content: center; gap: 4px; padding: 6px 4px 2px; background: var(--surface-raised); border: 1px solid var(--border); }
+.canvas-studio .cv-media-player.is-audio .cv-media-player-bar { background: transparent; padding: 0 4px; }
+.canvas-studio .cv-media-player-title { padding: 0 8px; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-studio .cv-media-player-bar button {
+  flex-shrink: 0; width: 26px; height: 26px; min-height: 0; padding: 0; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: transparent; color: var(--text); box-shadow: none;
+}
+.canvas-studio .cv-media-player-bar .cv-media-player-toggle { background: var(--accent-soft); color: var(--accent); }
+.canvas-studio .cv-media-player-bar button:hover { background: rgba(255, 255, 255, .08); }
+.canvas-studio .cv-media-player-bar button:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.canvas-studio .cv-media-player-time { flex-shrink: 0; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.canvas-studio .cv-media-player-bar input[type=range] {
+  -webkit-appearance: none; appearance: none; height: 4px; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 2px; cursor: pointer;
+  background: linear-gradient(to right, var(--accent) var(--cv-progress, 0%), rgba(255, 255, 255, .16) var(--cv-progress, 0%));
+}
+.canvas-studio .cv-media-player-bar .cv-media-player-progress { flex: 1; min-width: 40px; }
+.canvas-studio .cv-media-player-bar .cv-media-player-volume { width: 44px; flex-shrink: 0; }
+.canvas-studio .cv-media-player-bar input[type=range]:disabled { cursor: default; opacity: .5; }
+.canvas-studio .cv-media-player-bar input[type=range]:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.canvas-studio .cv-media-player-bar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; border-radius: 50%; background: var(--text); border: 0; }
+.canvas-studio .cv-media-player-bar input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border-radius: 50%; background: var(--text); border: 0; }
+.canvas-studio .cv-media-player-error { position: absolute; z-index: 4; left: 8px; right: 8px; top: 8px; font-size: 12px; color: var(--cv-danger, #df8a90); }
+@media (prefers-reduced-motion: reduce) {
+  .canvas-studio .cv-media-player-bar { transition: none; }
+}
+.canvas-studio .cv-node.cv-node-sized .cv-media-player > video.cv-media { height: 100%; max-height: none; min-height: 0; object-fit: contain; border-radius: 0; background: transparent; }
+/* With an in-node player the bottom edge belongs to its controls, so references move to the top edge. */
+.canvas-studio .cv-node.cv-node-sized .cv-node-media:has(> .cv-media-player.is-video) > .cv-reference-thumbnails.is-compact { top: 0; bottom: auto; padding: 6px 6px 18px; background: linear-gradient(to bottom, rgba(12, 13, 14, .85), rgba(12, 13, 14, 0)); }
+/* Canvas notices stay above the node editor (z 8) so their close button is always reachable. */
+.canvas-studio .cv-alert { z-index: 9; }

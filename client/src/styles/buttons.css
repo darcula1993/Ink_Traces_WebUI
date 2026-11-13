@@ -125,3 +125,16 @@
   .btn:focus-visible { outline: 2px solid Highlight; }
   .btn.is-active, .btn[aria-pressed=true] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+
+/* UI-ITER-R2B: >=2200px viewports scale the shell chrome (top bar, canvas sidebar) one step up so
+ * 12px labels stay legible on 2560x1440; 1280-1920 are untouched. */
+@media (min-width: 2200px) {
+  .app-header { zoom: 1.25; }
+  .canvas-studio .cv-sidebar-shell>.cv-sidebar { zoom: 1.2; width: 100%; height: 100%; }
+  /* UI-ITER-R2-FIX M2: canvas chrome, dialogs and portal menus join the same step. */
+  .canvas-studio .cv-topbar, .canvas-studio .cv-tools, .canvas-studio .cv-bottom, .canvas-studio .cv-hint { zoom: 1.2; }
+  .cv-sidebar-menu { zoom: 1.2; }
+  .ul-library { zoom: 1.2; width: min(calc(clamp(960px, 86vw, 1680px) / 1.2), calc(100% / 1.2)); height: min(calc(100% / 1.2), calc(clamp(640px, 90vh, 1240px) / 1.2)); }
+  .ul-subdialog>section { zoom: 1.2; }
+  .provider-settings { zoom: 1.2; width: min(calc(clamp(960px, 72vw, 1280px) / 1.2), calc(100% / 1.2)); height: min(calc(clamp(640px, 82vh, 1000px) / 1.2), calc((100dvh - 16px) / 1.2)); }
+}
