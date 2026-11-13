@@ -12,7 +12,7 @@
   <a href="../README.md">English</a> · 中文
 </p>
 
-<p align="center">当前版本 1.3.0 · <a href="../CHANGELOG.md">更新日志</a></p>
+<p align="center">当前版本 1.3.1 · <a href="../CHANGELOG.md">更新日志</a></p>
 
 <p align="center">
   <img src="../screenshot.png" alt="Ink Traces WebUI Screenshot" width="100%" />

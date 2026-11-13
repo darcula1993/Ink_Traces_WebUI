@@ -1,7 +1,7 @@
 .canvas-studio .cv-sidebar .cv-sidebar-more{width:28px;height:26px;padding:3px;background:transparent;border:0}
 .canvas-studio .cv-sidebar-breadcrumb{gap:8px}
 .canvas-studio .cv-sidebar-breadcrumb .cv-sidebar-more{margin-left:auto;flex:0 0 28px}
-.canvas-studio .cv-sidebar-breadcrumb .cv-project-name{height:30px;min-width:0;width:auto;max-width:45%;flex:0 1 auto;padding:0 4px;background:transparent;border:0;border-radius:7px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;text-align:left}
+.canvas-studio .cv-sidebar-breadcrumb .cv-project-name{height:30px;min-width:0;width:auto;max-width:none;flex:0 1 auto;padding:0 4px;background:transparent;border:0;border-radius:7px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;text-align:left}
 .canvas-studio .cv-sidebar-workflow{min-width:0;max-width:60%}
 .canvas-studio .cv-sidebar-breadcrumb .cv-workflow-name{display:flex;gap:5px;min-width:0;max-width:100%;height:32px;padding:3px 9px;border:0;border-radius:8px;background:rgba(255,255,255,.09);font-size:14px}
 .canvas-studio .cv-workflow-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 - 2026-11-14
+
+- Audio asset nodes stack the file name above the play button instead of overlapping it.
+- The sidebar project name uses the free width next to the canvas name before truncating (full name still on hover).
+
 ## 1.3.0 - 2026-11-14
 
 - Image and video nodes now follow the real aspect ratio of their result (or the chosen ratio before generation); connections, tidy layout, selection, dragging and node groups use the new sizes. Opening an older canvas whose nodes now overlap shows a one-time hint to tidy the canvas (undoable); nodes are never moved automatically.
