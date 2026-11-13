@@ -428,14 +428,15 @@
 
 .cv-alert {
   position:absolute;
-  top:15px;
-  right:16px;
+  bottom:76px;
+  left:50%;
+  transform:translateX(-50%);
   z-index:7;
   background:#35292c;
   border:1px solid #805159;
   border-radius:9px;
   padding:10px 14px;
-  max-width:440px;
+  max-width:min(440px,calc(100% - 32px));
   display:flex;
   gap:10px;
   align-items:center;
@@ -597,7 +598,8 @@
 .cv-node{height:240px;overflow:visible}
 .cv-node-body{height:198px;padding:8px;overflow:hidden}
 .cv-node .cv-media,.cv-node .cv-media-empty{height:162px;max-height:162px;min-height:0;object-fit:contain}
-.cv-node-status{font-size:12px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.cv-node-status{font-size:12px;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;overflow:hidden;line-height:1.35}
+.cv-node-status:hover,.cv-node-status:focus{display:block;overflow:visible;position:relative;z-index:5;background:#1b221c;border-radius:6px;padding:2px 4px;box-shadow:0 4px 14px #0009}
 .cv-node-head{height:40px}
 .cv-port{top:60px}
 .cv-node-panel{position:absolute;z-index:8;background:#222225;border:1px solid #414941;border-radius:16px;box-shadow:0 16px 50px #0006;overflow:auto;overscroll-behavior:contain;touch-action:auto;font-size:13px}

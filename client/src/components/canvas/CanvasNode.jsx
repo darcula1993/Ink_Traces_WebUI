@@ -31,7 +31,7 @@ export default function CanvasNode({ node, selected, pendingConnection, onSelect
   const statusLabel=task&&(task.status==='failed'&&resultUnknown?'结果未知，可能已计费':taskStatusLabel(task.status))
   const progressText=generating?[Number.isFinite(task.progress)&&task.progress>0?`${Math.min(100,Math.round(task.progress))}%`:'',elapsed==null?'':`已用 ${formatElapsed(elapsed)}`].filter(Boolean).join(' · '):''
   const statusText=task&&`${statusLabel}${progressText?` · ${progressText}`:''}${statusAnomaly?` · ${INVALID_STATUS_LABEL}（服务端返回“${statusAnomaly}”，已保留原状态）`:''}${task.error ? ` · ${task.error}` : ''}`
-  const status=task && <div className={`cv-node-status ${isFailureTaskStatus(task.status) ? 'error' : ''} ${resultUnknown&&task.status==='failed'?'is-unknown':''}`} role="status" title={statusText} data-result-unknown={resultUnknown&&task.status==='failed'?'true':undefined}>{statusText}</div>
+  const status=task && <div className={`cv-node-status ${isFailureTaskStatus(task.status) ? 'error' : ''} ${resultUnknown&&task.status==='failed'?'is-unknown':''}`} role="status" tabIndex={0} title={statusText} data-result-unknown={resultUnknown&&task.status==='failed'?'true':undefined}>{statusText}</div>
   const stale=node.upstreamStale&&<div className="cv-node-stale" role="status" title="上游的选定结果或输入已变化，此节点结果可能已过期；不会自动重新生成">上游已更新</div>
   // Selecting on pointerdown can mount a panel over this port before pointerup.
   // Keep left-click connection gestures intact; right drag still bubbles to pan.

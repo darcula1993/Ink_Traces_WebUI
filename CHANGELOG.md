@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 - 2026-11-13
+
+- Canvas status alerts now sit above the bottom toolbar and can be dismissed, so they no longer cover node titles.
+- Node status messages wrap up to three lines and show the full text on hover or focus.
+
 ## 1.1.0 - 2026-11-13
 
 - Every image, video and audio generation node now chooses its own provider. The project-level default provider and the "inherit project default" option were removed; new nodes preselect the provider you last chose for that node type (BytePlus first, Cupsy for audio). Generating from a node without a provider is rejected with a clear message.
