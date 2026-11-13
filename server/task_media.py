@@ -9,6 +9,11 @@ import tasks as task_db
 
 
 def _task_download_name(task, filename, original=False):
+    from result_names import result_display_name, task_result_name
+    custom = result_display_name(task_result_name(task.get('params')), task['id'], filename,
+                                 '_original' if original else '')
+    if custom:
+        return custom
     extension = os.path.splitext(filename)[1].lower().lstrip('.') or 'bin'
     if extension == 'jpeg':
         extension = 'jpg'
@@ -50,7 +55,8 @@ def _task_asset_response(task, asset, filename, as_attachment, raw=False):
             mimetype='image/png',
         )
         disposition = 'attachment' if as_attachment else 'inline'
-        response.headers['Content-Disposition'] = f'{disposition}; filename="{download_name}"'
+        from result_names import content_disposition
+        response.headers['Content-Disposition'] = content_disposition(disposition, download_name)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         if as_attachment:
             response.headers['Cache-Control'] = 'no-store'

@@ -14,6 +14,29 @@ export const CUPSY_AUDIO_MODEL = 'seed-audio-1.0'
 
 export const AUDIO_SAMPLE_RATES = [8000, 16000, 24000, 32000, 44100, 48000]
 
+export const AUDIO_OUTPUT_FORMATS = [{ value: 'mp3', label: 'MP3' }, { value: 'wav', label: 'WAV' }, { value: 'ogg_opus', label: 'OGG Opus' }]
+// V140 #13: canvas audio node output defaults (unchanged from the previous fixed submission).
+export const CANVAS_AUDIO_DEFAULTS = Object.freeze({ speaker: '', output_format: 'mp3', sample_rate: 48000, enable_subtitle: true })
+export function canvasAudioParams(params = {}) {
+  return {
+    speaker: params.speaker ?? CANVAS_AUDIO_DEFAULTS.speaker,
+    output_format: params.output_format ?? CANVAS_AUDIO_DEFAULTS.output_format,
+    sample_rate: params.sample_rate ?? CANVAS_AUDIO_DEFAULTS.sample_rate,
+    enable_subtitle: params.enable_subtitle ?? CANVAS_AUDIO_DEFAULTS.enable_subtitle,
+  }
+}
+// Returns a user-facing reason when the audio node cannot be submitted as configured, else null.
+export function canvasAudioIssue(params = {}, counts = { image: 0, audio: 0 }) {
+  const audio = canvasAudioParams(params)
+  if (!AUDIO_SPEAKERS.some(item => item.value === audio.speaker)) return '不支持的预设声线，请重新选择'
+  if (!AUDIO_OUTPUT_FORMATS.some(item => item.value === audio.output_format)) return '不支持的音频格式，请重新选择'
+  if (!AUDIO_SAMPLE_RATES.includes(audio.sample_rate)) return '不支持的采样率，请重新选择'
+  if (typeof audio.enable_subtitle !== 'boolean') return '字幕开关无效，请重新设置'
+  if (audio.speaker && counts.image) return '预设声线不能与图片参考同时使用：请改为“模型自动”或移除图片参考'
+  if (audio.speaker && counts.audio > 2) return '使用预设声线时最多再接入 2 段音频参考'
+  return null
+}
+
 export const AUDIO_SPEAKERS = [
   { value: '', label: '模型自动' },
   { value: 'vivi', label: 'Vivi' },

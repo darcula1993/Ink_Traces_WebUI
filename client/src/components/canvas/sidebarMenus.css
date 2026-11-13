@@ -29,3 +29,7 @@
 .canvas-studio .cv-sidebar-name-editor [role=alert]{position:absolute;top:52px;left:10px;right:10px;background:#262928;color:#e7c0c0;font-size:12px;padding:5px 8px;border-radius:8px;z-index:20;white-space:normal;overflow-wrap:anywhere}
 
 .canvas-studio .cv-sidebar-top{position:relative}
+/* V140 #3: the canvas chip keeps its natural width (up to half the row) so a long project name
+   ellipsizes first; both keep their full name in title. */
+.canvas-studio .cv-sidebar-breadcrumb .cv-sidebar-workflow{flex:0 0 auto;max-width:50%}
+.canvas-studio .cv-sidebar-breadcrumb .cv-project-name{flex:0 1 auto;min-width:3em}

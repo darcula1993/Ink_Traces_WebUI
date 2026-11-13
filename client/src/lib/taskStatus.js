@@ -49,7 +49,16 @@ export function documentTask(task) {
 // Final safety net before a save: an invalid status (should never happen)
 // becomes "unknown" so the node is held for manual checking and the rest of
 // the canvas still saves.
+const DOCUMENT_TASK_KEYS = new Set(['id', 'status', 'error'])
+const hasRuntimeTaskKeys = task => Object.keys(task).some(key => !DOCUMENT_TASK_KEYS.has(key))
+const needsTaskSanitize = task => Boolean(task) && (!isDocumentTaskStatus(task.status) || hasRuntimeTaskKeys(task))
+
 export function sanitizeDocumentTasks(document) {
-  if (!document.nodes.some(node => node.task && !isDocumentTaskStatus(node.task.status))) return document
-  return { ...document, nodes: document.nodes.map(node => node.task && !isDocumentTaskStatus(node.task.status) ? { ...node, task: { id: node.task.id ?? null, status: 'unknown', error: `${INVALID_STATUS_LABEL}：${String(node.task.status).slice(0, 40)}，请到任务记录核查` } } : node) }
+  if (!document.nodes.some(node => needsTaskSanitize(node.task))) return document
+  return { ...document, nodes: document.nodes.map(node => {
+    if (!needsTaskSanitize(node.task)) return node
+    // Runtime-only fields (progress, resultUnknown, ...) never reach the server: its schema keeps task to id/status/error.
+    if (isDocumentTaskStatus(node.task.status)) return { ...node, task: documentTask(node.task) }
+    return { ...node, task: { id: node.task.id ?? null, status: 'unknown', error: `${INVALID_STATUS_LABEL}：${String(node.task.status).slice(0, 40)}，请到任务记录核查` } }
+  }) }
 }

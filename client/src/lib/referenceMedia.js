@@ -2,13 +2,35 @@ export const VIDEO_REFERENCE_EXTENSIONS = new Set(['mp4', 'mov'])
 
 export const AUDIO_REFERENCE_EXTENSIONS = new Set(['wav', 'mp3'])
 
+// V140 #15 (user 2026-11-14): references are written like the sd25-pe skill:
+// @图片N / @视频N / @音频N, numbered per kind in reference order. The old
+// [ImageN] form is no longer recognized (plain text); nothing is migrated.
+export const REFERENCE_KIND_LABELS = Object.freeze({ image: '图片', video: '视频', audio: '音频' })
+const ENGLISH_KIND = Object.freeze({ image: 'Image', video: 'Video', audio: 'Audio' })
+export const REFERENCE_TOKEN_SOURCE = '@(图片|视频|音频)([1-9]\\d*)'
+// Greedy digits: "@图片12" is reference 12, never "@图片1" followed by "2".
+export const referenceTokenPattern = new RegExp(REFERENCE_TOKEN_SOURCE, 'g')
+export function referenceTokenRanges(text) {
+  const ranges = [], pattern = new RegExp(REFERENCE_TOKEN_SOURCE, 'g'), value = String(text || '')
+  for (let match = pattern.exec(value); match; match = pattern.exec(value)) ranges.push({ start: match.index, end: match.index + match[0].length, token: match[0] })
+  return ranges
+}
+// V140 #16: Backspace right after / Delete right before a whole reference removes it
+// in one keystroke. Returns the range to select (the browser then deletes it
+// natively, so the textarea's own undo keeps working), or null for default behavior.
+export function referenceDeletionRange(text, selectionStart, selectionEnd, key) {
+  if (selectionStart !== selectionEnd || !['Backspace', 'Delete'].includes(key)) return null
+  return referenceTokenRanges(text).find(range => key === 'Backspace' ? range.end === selectionStart : range.start === selectionStart) || null
+}
+
 export function promptMentionItem(type, number, item, source) {
-  const label = `${type[0].toUpperCase()}${type.slice(1)}${number}`
+  const label = `${REFERENCE_KIND_LABELS[type] || type}${number}`
   return {
     id: `${source}-${number}-${item?.cupsyAssetId || item?.uid || item?.name || label}`,
     type,
     label,
-    token: `[${label}]`,
+    alias: `${ENGLISH_KIND[type] || type}${number}`,
+    token: `@${label}`,
     name: item?.name || item?.file?.name || label,
     preview: type === 'image' ? item?.preview : null,
     thumbnail: type === 'video' ? item?.thumbnail : null,

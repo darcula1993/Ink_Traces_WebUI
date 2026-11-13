@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.4.0 - 2026-11-14
+
+- Prompt references now use the `@图片1` / `@视频1` / `@音频1` form (per media type, in reference order), matching the Seedance 2.5 prompt guide. References behave as one unit: Backspace/Delete removes the whole reference, arrow keys and clicks never stop inside it, double-click selects it, and undo still works. Valid references are highlighted green, broken ones amber; hovering a reference previews its thumbnail. The old `[Image1]` form is no longer recognised and is treated as plain text.
+- Reordering references still renumbers them in the prompt and now says so (undoable).
+- Audio nodes expose voice (Vivi, Mindy, Kian, Jess, Opal or automatic), format (MP3/WAV/OGG Opus), sample rate and subtitles; length is decided by the content (up to 120 s).
+- Canvas generation results are named "node name_task id" (with _2, _3… for extra images) in the asset library, cross-canvas import and downloads. Files on disk and older results keep their names.
+- Duplicating a generation node keeps its references and upstream connections (not its results or stale marker).
+- Refreshing returns to the last project and canvas.
+- New projects ask for a name; the name dialogs accept Enter and Escape; long project names no longer squeeze the canvas name.
+- Newly added nodes find free space instead of overlapping other nodes or groups.
+- The "upstream updated" marker clears when the upstream returns to the original version.
+- Fixed: remote asset cards overlapped their ID and status text; the last row was hidden behind the pager at 2560px.
+- Fixed: the node-overlap hint blocked the connection ports beneath it.
+- Fixed: progress updates saved the canvas on every tick, which could make a second open window report a conflict and leave a node stuck as generating.
+- Keyframe groups show "尾帧" once both frames are set; asset library dates use local time like the task center.
+
+## 1.3.2 - 2026-11-14
+
+- Fixed: a canvas could stop saving while a generation was running, and permanently after a generation failed (task progress was sent with the document). Affected canvases save normally again.
+- Audio asset nodes keep the note icon on the same line as the file name.
+- On screens 2200px and wider the top bar now lines up with the sidebar and canvas edges.
+
 ## 1.3.1 - 2026-11-14
 
 - Audio asset nodes stack the file name above the play button instead of overlapping it.

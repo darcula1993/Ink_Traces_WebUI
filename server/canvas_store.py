@@ -165,6 +165,30 @@ def _number(value, minimum=-1000000, maximum=1000000):
     return type(value) in (float, int) and minimum <= value <= maximum and math.isfinite(value)
 
 
+# Prompt reference mentions use the skill-style @图片N/@视频N/@音频N labels (user 2026-11-14).
+MENTION_KEY = re.compile(r'@(?:图片|视频|音频)[1-9][0-9]*')
+LEGACY_MENTION_KEY = re.compile(r'\[(?:Image|Video|Audio)[1-9][0-9]*\]')
+# Canvas audio node options mirror the Cupsy Seed Audio 1.0 values accepted by /api/audio/generate.
+AUDIO_FIELDS = {'speaker', 'output_format', 'sample_rate', 'enable_subtitle'}
+AUDIO_SPEAKERS = ('vivi', 'mindy', 'kian', 'jess', 'opal')
+AUDIO_FORMATS = ('mp3', 'wav', 'ogg_opus')
+AUDIO_SAMPLE_RATES = (8000, 16000, 24000, 32000, 44100, 48000)
+
+
+def _validate_audio_field(key, value):
+    if key == 'speaker':
+        if value not in (None, '') and (not isinstance(value, str) or value not in AUDIO_SPEAKERS):
+            raise CanvasError('预设声线仅支持自动或 ' + '、'.join(AUDIO_SPEAKERS))
+    elif key == 'output_format':
+        if not isinstance(value, str) or value not in AUDIO_FORMATS:
+            raise CanvasError('音频格式仅支持 MP3、WAV 或 OGG Opus')
+    elif key == 'sample_rate':
+        if type(value) is not int or value not in AUDIO_SAMPLE_RATES:
+            raise CanvasError('音频采样率仅支持 8000、16000、24000、32000、44100 或 48000')
+    elif key == 'enable_subtitle' and type(value) is not bool:
+        raise CanvasError('字幕开关必须为布尔值')
+
+
 def validate_document(document, workflow_id):
     if not isinstance(document, dict) or type(document.get('version')) is not int or document['version'] != 1:
         raise CanvasError('不支持的画布文档版本')
@@ -174,6 +198,7 @@ def validate_document(document, workflow_id):
         raise CanvasError('无效画布文档')
     if len(encoded.encode('utf-8')) > MAX_DOCUMENT_BYTES:
         raise CanvasError('画布文档过大', 413)
+    legacy_dropped = False
     nodes, edges, viewport = document.get('nodes'), document.get('edges'), document.get('viewport')
     if not isinstance(nodes, list) or len(nodes) > 500 or not isinstance(edges, list) or len(edges) > 2000:
         raise CanvasError('画布最多500个节点和2000条连线')
@@ -213,7 +238,12 @@ def validate_document(document, workflow_id):
         if not isinstance(order, list) or len(order) > 600 or any(not isinstance(i, str) or not re.fullmatch(r'[0-9a-f]{32}', i) for i in order) or len(set(order)) != len(order):
             raise CanvasError('参考素材排序须为最多600个不重复的素材编号')
         mentions = node.get('referenceMentions', {})
-        if not isinstance(mentions, dict) or len(mentions) > 600 or any(not isinstance(k, str) or not re.fullmatch(r'\[(?:Image|Video|Audio)[1-9][0-9]*\]', k) or not isinstance(v, str) or not re.fullmatch(r'[0-9a-f]{32}', v) for k, v in mentions.items()):
+        if isinstance(mentions, dict) and any(isinstance(k, str) and LEGACY_MENTION_KEY.fullmatch(k) for k in mentions):
+            # User 2026-11-14: legacy [Image1] keys are not migrated; drop them so old canvases stay savable.
+            mentions = {k: v for k, v in mentions.items() if not (isinstance(k, str) and LEGACY_MENTION_KEY.fullmatch(k))}
+            node['referenceMentions'] = mentions
+            legacy_dropped = True
+        if not isinstance(mentions, dict) or len(mentions) > 600 or any(not isinstance(k, str) or not MENTION_KEY.fullmatch(k) or not isinstance(v, str) or not re.fullmatch(r'[0-9a-f]{32}', v) for k, v in mentions.items()):
             raise CanvasError('参考素材提及须为最多600项的有效标签与素材编号映射')
         if node['type'] == 'asset' and mentions:
             raise CanvasError('素材节点不能包含参考素材提及')
@@ -228,10 +258,14 @@ def validate_document(document, workflow_id):
                 raise CanvasError('节点标题或文本无效')
         params = node.get('params', {})
         from canvas_image_params import IMAGE_FIELDS, validate_field
-        if not isinstance(params, dict) or set(params) - IMAGE_FIELDS - {'provider', 'model', 'ratio', 'resolution', 'duration', 'profile_id', 'profile_revision', 'video_mode', 'first_frame', 'last_frame', 'omni_reference_task_type', 'generate_audio'}:
+        if not isinstance(params, dict) or set(params) - IMAGE_FIELDS - AUDIO_FIELDS - {'provider', 'model', 'ratio', 'resolution', 'duration', 'profile_id', 'profile_revision', 'video_mode', 'first_frame', 'last_frame', 'omni_reference_task_type', 'generate_audio'}:
             raise CanvasError('节点参数无效')
         for key, value in params.items():
-            if key in IMAGE_FIELDS:
+            if node['type'] == 'audio' and key in AUDIO_FIELDS:
+                _validate_audio_field(key, value)
+            elif key in AUDIO_FIELDS - IMAGE_FIELDS:
+                raise CanvasError('此参数仅适用于音频生成节点')
+            elif key in IMAGE_FIELDS:
                 validate_field(node['type'], key, value)
             elif key == 'generate_audio':
                 if type(value) is not bool:
@@ -367,7 +401,7 @@ def validate_document(document, workflow_id):
                 queue.append(target)
     if visited != len(nodes):
         raise CanvasError('节点连接不能形成循环')
-    return encoded
+    return json.dumps(document, ensure_ascii=False, allow_nan=False) if legacy_dropped else encoded
 
 
 def create_workflow(project_id, title, document=None):

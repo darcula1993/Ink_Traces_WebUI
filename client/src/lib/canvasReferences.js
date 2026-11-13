@@ -1,4 +1,5 @@
-import {promptMentionItem} from './referenceMedia.js'
+import {promptMentionItem,referenceTokenPattern} from './referenceMedia.js'
+export {referenceTokenPattern}
 // One ordering and compatibility contract for cards, controls and submission.
 export const mediaKind = node => node?.type === 'asset' ? node.asset?.kind : node?.type
 export function canConnect(source, target) {
@@ -33,7 +34,6 @@ export function resolveKeyframeRoles(node, assets) {
   return {first,last,issues}
 }
 
-export const referenceTokenPattern = /\[(Image|Video|Audio)([1-9]\d*)\]/g
 export const referenceTokens = text => [...new Set((text||'').match(referenceTokenPattern)||[])]
 export function canvasMentionItems(node,assets) {
  const frames=resolveKeyframeRoles(node,assets),ordered=node.type==='video'&&node.params?.video_mode==='keyframe'?[frames.first,frames.last].filter(Boolean):assets
@@ -54,4 +54,10 @@ export function referenceMentionIssues(node,assets,upstreamText='') {
   else if(!current.has(token))issues.push(`提及 ${token} 没有对应素材，请删除或重新选择`)
  }
  return issues
+}
+// V140 #18: highlight state per token — "valid" only when the token resolves to
+// a current reference and any saved binding still points at that same reference.
+export function referenceTokenState(node,assets) {
+ const current=new Map(canvasMentionItems(node,assets).map(item=>[item.token,item.assetId]))
+ return token=>{const id=current.get(token),bound=node.referenceMentions?.[token];return id&&(!bound||bound===id)?'valid':'invalid'}
 }

@@ -80,3 +80,16 @@ export function applyTaskUpdates(document, patches) {
     }),
   }
 }
+
+// V140 #14: progress is runtime-only (sanitized before every save). A poll whose
+// patches only move progress must not write the canvas: each write bumps the
+// revision, and a second window open on the same canvas would then be forced
+// into the conflict flow by pure progress ticks.
+export function patchesNeedSave(document, patches) {
+  for (const [id, patch] of patches) {
+    const node = document.nodes.find(item => item.id === id)
+    if (!node || Number(node.task?.id) !== Number(patch.task.id)) continue
+    if (patch.additions.length || node.task?.status !== patch.task.status || (node.task?.error || null) !== (patch.task.error || null)) return true
+  }
+  return false
+}

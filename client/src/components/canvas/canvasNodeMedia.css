@@ -22,7 +22,7 @@
 .canvas-studio .cv-node .cv-play-asset.is-audio,
 .canvas-studio .cv-node.cv-node-sized .cv-play-asset.is-audio { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px; }
 .canvas-studio .cv-node .cv-play-asset.is-audio > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.canvas-studio .cv-node .cv-play-asset.is-audio > span > svg { vertical-align: -3px; margin-right: 4px; }
+.canvas-studio .cv-node .cv-play-asset.is-audio > span > svg { display: inline-block; vertical-align: -3px; margin-right: 4px; }
 .canvas-studio .cv-node .cv-play-asset.is-audio > b,
 .canvas-studio .cv-node.cv-node-sized .cv-play-asset.is-audio > b { position: static; transform: none; }
 

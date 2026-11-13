@@ -90,3 +90,20 @@ export function pasteCanvasSelection(document,clipboard,workflowId,uid,offset=40
   const groups=(clipboard.groups||[]).map(group=>({...group,id:uid(),title:group.title.slice(0,97)+' 副本',nodeIds:group.nodeIds.map(id=>ids.get(id)),...(group.keyframeNodeId?{keyframeNodeId:ids.get(group.keyframeNodeId)}:{})}))
   return {document:{...document,...(groups.length?{groups:[...(document.groups||[]),...groups]}:{}),nodes:[...document.nodes,...nodes],edges:[...document.edges,...edges]},ids:nodes.map(n=>n.id)}
 }
+// V140 #6: duplicating one generation node keeps its references (direct
+// reference assets and the incoming upstream edges) but never its result,
+// task or "上游已更新" marker. Downstream edges and group membership are not copied.
+const GENERATION_TYPES=new Set(['image','video','audio'])
+export function duplicateCanvasNode(document,nodeId,uid,position=null,selectionFor=null) {
+  const source=document.nodes.find(n=>n.id===nodeId)
+  if(!source)throw new Error('节点已不存在，请重新选择')
+  const incoming=GENERATION_TYPES.has(source.type)?document.edges.filter(e=>e.target===nodeId):[]
+  if(document.nodes.length+1>500||document.edges.length+incoming.length>2000)throw new Error('复制会超过画布上限（500节点／2000连线）。')
+  const {upstreamStale,...rest}=clone(source),id=uid()
+  const point=position||{x:source.x+40,y:source.y+40}
+  let node={...rest,id,x:point.x,y:point.y,title:`${source.title.slice(0,237)} 副本`,task:null}
+  if(GENERATION_TYPES.has(source.type))node={...node,asset:null,candidates:[],selectedCandidateId:null}
+  node=withProviderSelection(node,selectionFor)
+  const edges=incoming.map(e=>({...clone(e),id:uid(),target:id}))
+  return {document:{...document,nodes:[...document.nodes,node],edges:[...document.edges,...edges]},ids:[id]}
+}

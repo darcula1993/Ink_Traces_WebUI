@@ -15,16 +15,32 @@ function inputSignatures(document) {
   return new Map([...inputs].map(([id, set]) => [id, [...set].sort().join('|')]))
 }
 
-export function markStaleDownstream(before, after) {
+// baselines (optional, runtime-only Map nodeId -> input signature) remembers the
+// inputs a result was produced from when a node is first marked; returning to
+// exactly those inputs (e.g. switching the upstream back to its original
+// version) removes the marker again (V140 #7). The map is not persisted, so a
+// marker restored from the server can only be cleared by regenerating or dismissing.
+export function markStaleDownstream(before, after, baselines = null) {
   if (before === after || !before?.nodes || !after?.nodes) return after
   const previous = inputSignatures(before), next = inputSignatures(after)
   const oldNodes = new Map(before.nodes.map(node => [node.id, node]))
   let changed = false
   const nodes = after.nodes.map(node => {
     const old = oldNodes.get(node.id)
-    if (!old || node.upstreamStale || !GENERATION.has(node.type) || !node.asset) return node
+    if (!old || !GENERATION.has(node.type) || !node.asset) { baselines?.delete(node.id); return node }
+    if (node.upstreamStale) {
+      if (!old.upstreamStale) { baselines?.delete(node.id); return node }
+      if (baselines?.has(node.id) && baselines.get(node.id) === next.get(node.id)) {
+        baselines.delete(node.id); changed = true
+        const { upstreamStale, ...rest } = node
+        return rest
+      }
+      return node
+    }
+    baselines?.delete(node.id)
     if (previous.get(node.id) === next.get(node.id)) return node
     changed = true
+    baselines?.set(node.id, previous.get(node.id))
     return { ...node, upstreamStale: true }
   })
   return changed ? { ...after, nodes } : after

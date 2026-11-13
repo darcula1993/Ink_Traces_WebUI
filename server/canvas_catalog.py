@@ -126,7 +126,10 @@ def resolve(value, check_file=True):
     path, root = Path(row['path']).absolute(), Path(storage.OUTPUT_DIR).absolute()
     if path.resolve() != path or root.resolve() != root or not path.is_relative_to(root) or not path.is_file():
         raise store.CanvasError('任务产物文件不可读取',409)
-    return dict(row), path, projects
+    row = dict(row)
+    from result_names import result_display_name, task_result_name
+    row['name'] = result_display_name(task_result_name(task.get('params')), task['id'], path.name) or path.name
+    return row, path, projects
 
 
 def tags_for(key):

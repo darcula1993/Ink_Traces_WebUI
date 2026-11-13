@@ -122,7 +122,8 @@ def import_task_results(workflow_id):
     for path in sources:
         try:
             with path.open('rb') as handle:
-                assets.append(store.save_asset(workflow_id, handle, path.name))
+                from result_names import result_display_name, task_result_name
+                assets.append(store.save_asset(workflow_id, handle, result_display_name(task_result_name(task.get('params')), task_id, path.name) or path.name))
         except OSError:
             raise store.CanvasError('任务输出文件已改变，请重新检查', 409)
     from canvas_cleanup import record_task_reference

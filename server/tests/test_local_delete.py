@@ -28,8 +28,8 @@ def doc_with_reference(w, asset, extra_nodes=()):
     current = store.workflow(w)
     nodes = [
         {'id': 'src', 'type': 'asset', 'title': 'a', 'x': 0, 'y': 0, 'asset': asset, 'candidates': [asset], 'selectedCandidateId': asset['id']},
-        {'id': 'gen', 'type': 'image', 'title': 'g', 'x': 300, 'y': 0, 'text': '参考 [Image1]', 'params': {},
-         'referenceAssets': [asset], 'referenceOrder': [asset['id']], 'referenceMentions': {'[Image1]': asset['id']},
+        {'id': 'gen', 'type': 'image', 'title': 'g', 'x': 300, 'y': 0, 'text': '参考 @图片1', 'params': {},
+         'referenceAssets': [asset], 'referenceOrder': [asset['id']], 'referenceMentions': {'@图片1': asset['id']},
          'referenceGroups': [{'id': 'grp', 'title': '组', 'asset_ids': [asset['id']]}]},
         *extra_nodes]
     document = {'version': 1, 'nodes': nodes, 'edges': [{'id': 'e1', 'source': 'src', 'target': 'gen'}],
@@ -73,7 +73,7 @@ def test_delete_cascades_canvas_copies_and_rewrites_documents():
     assert [n['id'] for n in gen] == ['gen']
     node = gen[0]
     assert node['referenceAssets'] == [] and node['referenceOrder'] == [] and node['referenceMentions'] == {} and node['referenceGroups'] == []
-    assert node['text'] == '参考 [Image1]'  # user prompt text is never rewritten
+    assert node['text'] == '参考 @图片1'  # user prompt text is never rewritten
     assert updated['document']['edges'] == [] and updated['document']['groups'] == [{'id': 'g1', 'title': '节点组1', 'nodeIds': ['gen']}]
     assert client.get('/api/canvas/library/items?scope=all&source=local').json['total'] == 0
 

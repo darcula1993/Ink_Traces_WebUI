@@ -55,3 +55,11 @@
   .ul-main{padding:26px 28px 0}
 }
 .ul-scroll>.ul-grid{align-content:start;grid-auto-rows:min-content}
+/* V140 #1: remote cards keep the long remote ID on one ellipsized line; status never wraps per character. */
+.ul-item-meta .ul-status{flex-shrink:0;white-space:nowrap}
+.ul-item-meta small{margin:0}
+/* V140 #1: on wide screens the thumbnail height also follows the viewport height, so two rows
+   (seven remote items at 2560×1440) fit above the pinned pager instead of being cut by it. */
+@media(min-width:1921px){
+  .ul-grid .ul-card img,.ul-grid .ul-card video,.ul-grid .ul-audio,.ul-grid .ul-video-thumb{height:clamp(150px,min(11vw,calc(9vh + 60px)),260px)}
+}

@@ -1,6 +1,8 @@
 import React, { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { AudioLines, Film, Image as ImageIcon } from 'lucide-react'
+import { referenceTokenRanges, referenceDeletionRange } from '../lib/referenceMedia.js'
+import { arrowSelection, snapSelection, referenceAt } from '../lib/referenceCaret.js'
 
 const MENU_WIDTH = 288
 const MENU_MAX_HEIGHT = 280
@@ -12,7 +14,8 @@ export function findPromptMention(value, cursor) {
   if (atIndex < 0) return null
 
   const candidate = safeValue.slice(atIndex, safeCursor)
-  const match = candidate.match(/^@([a-zA-Z]*\d*)$/)
+  // V140 #15: Chinese queries (@图 / @图片1 / @视频) as well as the English alias.
+  const match = candidate.match(/^@([a-zA-Z\u4e00-\u9fff]*\d*)$/)
   if (!match) return null
   return { start: atIndex, end: safeCursor, query: match[1].toLowerCase() }
 }
@@ -63,6 +66,67 @@ function caretViewportPosition(textarea) {
   return position
 }
 
+// Text index of the reference token under a viewport point, via a mirror of the textarea's text layout.
+function tokenAtPoint(textarea, ranges, clientX, clientY) {
+  if (!ranges.length) return null
+  const style = window.getComputedStyle(textarea), rect = textarea.getBoundingClientRect()
+  const mirror = document.createElement('div')
+  for (const property of ['boxSizing', 'borderLeftWidth', 'borderRightWidth', 'borderTopWidth', 'borderBottomWidth', 'borderStyle', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'letterSpacing', 'lineHeight', 'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'textAlign', 'textIndent', 'textTransform', 'wordSpacing', 'tabSize', 'overflowWrap', 'wordBreak']) mirror.style[property] = style[property]
+  Object.assign(mirror.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`, visibility: 'hidden', overflowX: 'hidden', overflowY: textarea.scrollHeight > textarea.clientHeight ? 'scroll' : 'hidden', whiteSpace: 'pre-wrap', wordWrap: 'break-word', borderColor: 'transparent' })
+  const value = textarea.value, spans = []
+  let cursor = 0
+  for (const range of ranges) {
+    mirror.appendChild(document.createTextNode(value.slice(cursor, range.start)))
+    const span = document.createElement('span'); span.textContent = value.slice(range.start, range.end); mirror.appendChild(span); spans.push([span, range]); cursor = range.end
+  }
+  mirror.appendChild(document.createTextNode(value.slice(cursor) || ' '))
+  document.body.appendChild(mirror)
+  mirror.scrollTop = textarea.scrollTop
+  let hit = null
+  for (const [span, range] of spans) if ([...span.getClientRects()].some(box => clientX >= box.left && clientX <= box.right && clientY >= box.top && clientY <= box.bottom)) { hit = { range, box: span.getBoundingClientRect() }; break }
+  mirror.remove()
+  return hit
+}
+
+// V140 #18: a mirror layer above the textarea tints valid references green and stale ones amber.
+// It copies the textarea's font, padding, wrapping and scroll, is aria-hidden and never takes pointer
+// events, so typing, IME, selection and screen readers keep working on the textarea itself.
+const MIRROR_PROPERTIES = ['boxSizing', 'borderLeftWidth', 'borderRightWidth', 'borderTopWidth', 'borderBottomWidth', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'fontVariantLigatures', 'letterSpacing', 'lineHeight', 'paddingLeft', 'paddingRight', 'paddingTop', 'paddingBottom', 'textAlign', 'textIndent', 'textTransform', 'wordSpacing', 'tabSize', 'overflowWrap', 'wordBreak', 'whiteSpace']
+function ReferenceHighlight({ textareaRef, value, tokenState }) {
+  const layerRef = useRef(null), [box, setBox] = useState(null)
+  const ranges = useMemo(() => referenceTokenRanges(value), [value])
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || !ranges.length) return undefined
+    const sync = () => {
+      const style = window.getComputedStyle(textarea), copied = {}
+      for (const property of MIRROR_PROPERTIES) copied[property] = style[property]
+      const borders = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth)
+      const scrollbar = Math.max(0, textarea.offsetWidth - textarea.clientWidth - borders)
+      setBox({ ...copied, left: textarea.offsetLeft, top: textarea.offsetTop, width: textarea.offsetWidth - scrollbar, height: textarea.offsetHeight })
+      if (layerRef.current) layerRef.current.scrollTop = textarea.scrollTop
+    }
+    sync()
+    const scroll = () => { if (layerRef.current) layerRef.current.scrollTop = textarea.scrollTop }
+    const observer = new ResizeObserver(sync)
+    observer.observe(textarea)
+    textarea.addEventListener('scroll', scroll)
+    return () => { observer.disconnect(); textarea.removeEventListener('scroll', scroll) }
+  }, [textareaRef, ranges])
+  useLayoutEffect(() => { if (layerRef.current && textareaRef.current) layerRef.current.scrollTop = textareaRef.current.scrollTop })
+  if (!ranges.length || !box) return null
+  const parts = []
+  let cursor = 0
+  for (const range of ranges) {
+    parts.push(value.slice(cursor, range.start))
+    parts.push(<mark key={range.start} className={`prompt-reference-token is-${tokenState(range.token)}`}>{value.slice(range.start, range.end)}</mark>)
+    cursor = range.end
+  }
+  parts.push(`${value.slice(cursor)}\u200b`)
+  const { left, top, width, height, ...font } = box
+  return <div ref={layerRef} aria-hidden="true" className="prompt-reference-highlight" data-testid="prompt-reference-highlight" style={{ ...font, position: 'absolute', left, top, width, height, overflow: 'hidden', pointerEvents: 'none', color: 'transparent', borderStyle: 'solid', borderColor: 'transparent', background: 'transparent', margin: 0, zIndex: 1 }}>{parts}</div>
+}
+
 function MentionThumbnail({ item }) {
   if (item.type === 'image' && item.preview) {
     return <img src={item.preview} alt="" className="size-full object-cover" />
@@ -85,18 +149,35 @@ export default function PromptMentionTextarea({
   className = '',
   onKeyDown,
   onChange,
+  referenceTokenState,
   ...textareaProps
 }) {
-  const textareaRef = useRef(null), dismissedMention = useRef(null)
+  const textareaRef = useRef(null), dismissedMention = useRef(null), composing = useRef(false)
   const menuId = useId()
   const [mention, setMention] = useState(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [menuPosition, setMenuPosition] = useState({ left: 8, top: 8 })
+  // V140 #12: hovering a reference (or putting the caret on it) previews the referenced item; no inline thumbnails.
+  const [peek, setPeek] = useState(null), peekFrame = useRef(0), peekId = useId()
+  const itemsByToken = useMemo(() => new Map(mentionItems.map(item => [item.token, item])), [mentionItems])
+  const showPeek = (range, anchor, source) => {
+    if (!range) { setPeek(current => current?.source === source ? null : current); return }
+    const item = itemsByToken.get(range.token)
+    setPeek({ source, token: range.token, item, left: Math.max(8, Math.min(anchor.left, window.innerWidth - 248)), top: anchor.top })
+  }
+  const peekAtCaret = textarea => {
+    if (!textarea || textarea.selectionStart !== textarea.selectionEnd) { showPeek(null, null, 'caret'); return }
+    const range = referenceTokenRanges(textarea.value).find(item => textarea.selectionStart > item.start && textarea.selectionStart <= item.end)
+    if (!range) { showPeek(null, null, 'caret'); return }
+    const caret = caretViewportPosition(textarea)
+    showPeek(range, { left: caret.left, top: caret.top + caret.lineHeight + 6 }, 'caret')
+  }
 
   const filteredItems = useMemo(() => {
     if (!mention?.query) return mentionItems
     return mentionItems.filter(item => (
       item.label.toLowerCase().includes(mention.query)
+      || String(item.alias || '').toLowerCase().includes(mention.query)
       || String(item.name || '').toLowerCase().includes(mention.query)
     ))
   }, [mention?.query, mentionItems])
@@ -104,7 +185,13 @@ export default function PromptMentionTextarea({
   const updateMention = (nextValue, cursor) => {
     if(dismissedMention.current===`${nextValue}\u0000${cursor}`){setMention(null);return}
     dismissedMention.current=null
-    const nextMention = findPromptMention(nextValue, cursor)
+    let nextMention = findPromptMention(nextValue, cursor)
+    // A complete reference (just inserted or typed out) does not reopen the menu.
+    if (nextMention?.query && mentionItems.some(item => item.label.toLowerCase() === nextMention.query)) nextMention = null
+    // Ordinary Chinese text after @ (not a reference query) does not open an empty menu.
+    if (nextMention?.query && /[\u4e00-\u9fff]/.test(nextMention.query) && !mentionItems.some(item => [item.label, item.alias, item.name].some(text => String(text || '').toLowerCase().includes(nextMention.query)))) nextMention = null
+    // A repeated select event for the same query keeps the highlighted option.
+    if (nextMention && mention && nextMention.start === mention.start && nextMention.query === mention.query) return
     setMention(nextMention)
     setActiveIndex(0)
   }
@@ -152,7 +239,22 @@ export default function PromptMentionTextarea({
     updateMention(event.target.value, event.target.selectionStart)
   }
 
+  const isComposing = event => composing.current || event.nativeEvent?.isComposing || event.key === 'Process'
+  // V140 #17: after clicks, Ctrl+arrows, ↑/↓ etc. a caret inside a reference snaps to its nearest boundary.
+  const snapCaret = textarea => {
+    if (!textarea) return
+    const next = snapSelection(textarea.value, textarea.selectionStart, textarea.selectionEnd)
+    if (next.start !== textarea.selectionStart || next.end !== textarea.selectionEnd) textarea.setSelectionRange(next.start, next.end, textarea.selectionDirection)
+  }
   const handleKeyDown = event => {
+    if (!isComposing(event) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const textarea = event.currentTarget, range = referenceDeletionRange(textarea.value, textarea.selectionStart, textarea.selectionEnd, event.key)
+      // Select the whole reference and let the browser delete it natively (native undo keeps working).
+      if (range) textarea.setSelectionRange(range.start, range.end, event.key === 'Backspace' ? 'backward' : 'forward')
+      // ←/→ jump over a whole reference; Shift+←/→ extend over it. Selection only, the text is unchanged.
+      const jump = arrowSelection(textarea.value, textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection, event.key, event.shiftKey)
+      if (jump) { event.preventDefault(); textarea.setSelectionRange(jump.start, jump.end, jump.direction) }
+    }
     if (mention) {
       if (event.key === 'Escape') {
         dismissedMention.current=`${event.currentTarget.value}\u0000${event.currentTarget.selectionStart}`
@@ -217,7 +319,7 @@ export default function PromptMentionTextarea({
   )
 
   return (
-    <div className={wrapperClassName}>
+    <div className={wrapperClassName} style={{ position: 'relative' }}>
       <textarea
         {...textareaProps}
         ref={textareaRef}
@@ -225,19 +327,44 @@ export default function PromptMentionTextarea({
         className={className}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        onClick={event => updateMention(event.currentTarget.value, event.currentTarget.selectionStart)}
+        onClick={event => { if (!composing.current && event.detail < 2) snapCaret(event.currentTarget); updateMention(event.currentTarget.value, event.currentTarget.selectionStart); peekAtCaret(event.currentTarget) }}
         onSelect={event => {
           if (document.activeElement === event.currentTarget) {
             updateMention(event.currentTarget.value, event.currentTarget.selectionStart)
           }
         }}
-        onScroll={updateMenuPosition}
-        onBlur={() => setMention(null)}
+        onScroll={() => { updateMenuPosition(); setPeek(null) }}
+        onBlur={() => { setMention(null); setPeek(null) }}
+        onKeyUp={event => { if (!isComposing(event) && !event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) snapCaret(event.currentTarget); peekAtCaret(event.currentTarget) }}
+        onMouseUp={event => { const textarea = event.currentTarget; if (!composing.current) requestAnimationFrame(() => { if (document.activeElement === textarea && event.detail < 2) snapCaret(textarea) }) }}
+        onDoubleClick={event => { const textarea = event.currentTarget, range = referenceAt(textarea.value, textarea.selectionStart, textarea.selectionEnd); if (range) textarea.setSelectionRange(range.start, range.end, 'forward') }}
+        onCompositionStart={() => { composing.current = true }}
+        onCompositionEnd={() => { composing.current = false }}
+        onMouseMove={event => {
+          const textarea = event.currentTarget, x = event.clientX, y = event.clientY
+          cancelAnimationFrame(peekFrame.current)
+          peekFrame.current = requestAnimationFrame(() => {
+            const hit = tokenAtPoint(textarea, referenceTokenRanges(textarea.value), x, y)
+            showPeek(hit?.range, hit && { left: hit.box.left, top: hit.box.bottom + 6 }, 'pointer')
+          })
+        }}
+        onMouseLeave={() => { cancelAnimationFrame(peekFrame.current); showPeek(null, null, 'pointer') }}
+        aria-describedby={[textareaProps['aria-describedby'], peek && !mention ? peekId : null].filter(Boolean).join(' ') || undefined}
         aria-autocomplete="list"
         aria-controls={mention ? menuId : undefined}
         aria-expanded={Boolean(mention)}
       />
+      <ReferenceHighlight textareaRef={textareaRef} value={String(value || '')} tokenState={referenceTokenState || (token => itemsByToken.has(token) ? 'valid' : 'invalid')} />
       {menu}
+      {peek && !mention && ReactDOM.createPortal(
+        <div id={peekId} role="tooltip" data-testid="prompt-reference-preview" className={`prompt-mention-menu prompt-reference-preview ${menuClassName}`} style={{ left: peek.left, top: peek.top, width: 240 }}>
+          {peek.item ? <div className="prompt-mention-option">
+            <span className={`prompt-mention-thumbnail prompt-mention-thumbnail-${peek.item.type}`}><MentionThumbnail item={peek.item} /></span>
+            <span className="min-w-0 flex-1 text-left"><span className="block font-mono text-xs font-semibold text-nexus-text-light">{peek.token}</span><span className="block truncate text-xs text-nexus-muted" title={peek.item.name}>{peek.item.name || peek.item.label}</span></span>
+          </div> : <div className="px-3 py-2 text-xs text-nexus-muted">{peek.token}：没有对应的参考素材</div>}
+        </div>,
+        document.body,
+      )}
     </div>
   )
 }

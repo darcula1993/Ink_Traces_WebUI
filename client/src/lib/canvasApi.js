@@ -2,7 +2,7 @@ import {isServerTaskStatus,isTerminalTaskStatus} from './taskStatus.js'
 import axios from 'axios'
 import {resolveNodeInputs} from './canvasReferences'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
-import { CUPSY_AUDIO_MODEL } from './generationSettings.js'
+import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue } from './generationSettings.js'
 import {nodeProvider,selectionKey,normalizeProviderPreferences} from './canvasProviderSelection.js'
 
 import {effectiveVideoModel,videoCapabilities,videoRatio,videoParameterError} from './videoGenerationRules.js'
@@ -104,7 +104,7 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   if (assets.some(a => !['image', 'video', 'audio'].includes(a.kind))) invalid('不支持的参考素材类型')
   let path
   const adapter = provider.provider || provider.id
-  const fields = { prompt, canvas_workflow_id: workflowId, canvas_node_id:node.id, canvas_workflow_revision:workflow.revision, provider: adapter, ...(provider.profile_id ? { profile_id: provider.profile_id } : {}) }
+  const fields = { prompt, canvas_workflow_id: workflowId, canvas_node_id:node.id, ...(node.title ? { result_name: String(node.title) } : {}), canvas_workflow_revision:workflow.revision, provider: adapter, ...(provider.profile_id ? { profile_id: provider.profile_id } : {}) }
   if (node.type === 'image') {
     if (videos.length || audios.length) invalid('图像生成只接受图片参考；请调整素材或素材组')
     let references=images
@@ -133,7 +133,10 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   } else if (node.type === 'audio') {
     if (videos.length || (images.length && audios.length) || images.length > 1 || audios.length > 3) invalid('音频参考支持 1 张图片或最多 3 段音频，不能混用；请调整素材组')
     if (prompt.length > 3000) invalid('音频提示词不能超过 3000 个字符')
-    Object.assign(fields, { model: provider.model, output_format: 'mp3', sample_rate: 48000, enable_subtitle: true, reference_mode: images.length ? 'image' : audios.length ? 'audio' : 'none' })
+    // V140 #13: output parameters come from node.params (defaults: model-chosen voice, mp3, 48000, subtitles on).
+    const audio = canvasAudioParams(params), issue = canvasAudioIssue(params, { image: images.length, audio: audios.length })
+    if (issue) invalid(issue)
+    Object.assign(fields, { model: provider.model, output_format: audio.output_format, sample_rate: audio.sample_rate, enable_subtitle: audio.enable_subtitle, reference_mode: images.length ? 'image' : audios.length || audio.speaker ? 'audio' : 'none', ...(audio.speaker ? { speaker: audio.speaker } : {}) })
     path = '/api/audio/generate'
   } else invalid('该节点不支持生成')
 

@@ -243,8 +243,8 @@ def test_two_nodes_choose_independently_and_requests_without_node_are_rejected()
         validate_generation({'canvas_workflow_revision':saved['revision']}, 'video')
 
 
-@pytest.mark.parametrize('mentions', [{}, {'[Image1]':'a'*32,'[Video2]':'b'*32,'[Audio999]':'c'*32},
-                                     {f'[Image{i+1}]':f'{i:032x}' for i in range(600)}])
+@pytest.mark.parametrize('mentions', [{}, {'@图片1':'a'*32,'@视频2':'b'*32,'@音频999':'c'*32},
+                                     {f'@图片{i+1}':f'{i:032x}' for i in range(600)}])
 def test_reference_mentions_round_trip_stale_ids(mentions):
     _, workflow, node = make()
     node['referenceMentions'] = mentions
@@ -253,9 +253,10 @@ def test_reference_mentions_round_trip_stale_ids(mentions):
     assert store.workflow(workflow['id'])['document']['nodes'][0]['referenceMentions'] == mentions
 
 
-@pytest.mark.parametrize('mentions', [None, [], {'Image1':'a'*32}, {'[image1]':'a'*32},
-    {'[Image0]':'a'*32}, {'[Video01]':'a'*32}, {'[Audio-1]':'a'*32}, {'[Image1]':'bad'},
-    {'[Image1]':None}, {'[Image1]':'A'*32}, {f'[Image{i+1}]':f'{i:032x}' for i in range(601)}])
+@pytest.mark.parametrize('mentions', [None, [], {'图片1':'a'*32}, {'@Image1':'a'*32}, {'@图片 1':'a'*32},
+    {'@图片0':'a'*32}, {'@视频01':'a'*32}, {'@音频-1':'a'*32}, {'@图片1':'bad'},
+    {'@图片1':None}, {'@图片1':'A'*32}, {'[image1]':'a'*32}, {'[Image0]':'a'*32},
+    {'[Image1]':'a'*32, '@图片1':'bad'}, {f'@图片{i+1}':f'{i:032x}' for i in range(601)}])
 def test_reference_mentions_reject_invalid(mentions):
     _, workflow, node = make()
     node['referenceMentions'] = mentions
@@ -264,9 +265,29 @@ def test_reference_mentions_reject_invalid(mentions):
         store.update_workflow(workflow['id'], 'canvas', workflow['document'], 2)
 
 
+@pytest.mark.parametrize('mentions, kept', [
+    ({'[Image1]':'a'*32, '[Video2]':'b'*32, '[Audio999]':'c'*32}, {}),
+    ({'[Image1]':'a'*32, '@图片1':'b'*32}, {'@图片1':'b'*32}),
+    ({'[Image1]':'bad'}, {}),
+    ({f'[Image{i+1}]':f'{i:032x}' for i in range(601)}, {}),
+])
+def test_legacy_mention_keys_dropped_on_save(mentions, kept):
+    # User 2026-11-14: [ImageN] keys are not migrated; old canvases must still save.
+    _, workflow, node = make()
+    node['referenceMentions'] = mentions
+    node['text'] = '参考 [Image1]'
+    workflow['document']['nodes'] = [node]
+    client = application.app.test_client()
+    response = client.put('/api/canvas/workflows/'+workflow['id'], json={'title':'canvas','document':workflow['document'],'revision':2})
+    assert response.status_code == 200, response.json
+    saved = store.workflow(workflow['id'])['document']['nodes'][0]
+    assert saved['referenceMentions'] == kept
+    assert saved['text'] == '参考 [Image1]'  # prompt text is never rewritten
+
+
 def test_asset_node_cannot_have_mentions():
     _, workflow, node = make()
-    node.update(type='asset', providerSelection=None, referenceMentions={'[Image1]':'a'*32})
+    node.update(type='asset', providerSelection=None, referenceMentions={'@图片1':'a'*32})
     workflow['document']['nodes'] = [node]
     with pytest.raises(store.CanvasError, match='提及'):
         store.update_workflow(workflow['id'], 'canvas', workflow['document'], 2)

@@ -5,7 +5,9 @@ export function switchAssetVersion(document, nodeId, asset, append = false) {
   const candidates=asset.kind==='image' ? [...new Map([...(source.candidates || []),...(append?[asset]:[])].map(item=>[item.id,item])).values()] : [asset]
   if(candidates.length>100) throw new Error('图片历史版本最多保留100个，请创建新的素材节点继续编辑')
   if(!candidates.some(item=>item.id===asset.id)) throw new Error('历史版本不存在')
-  const nodes=document.nodes.map(node=>node.id===nodeId?{...node,asset,candidates,selectedCandidateId:asset.id}:node)
+  // V140 #8: a title that still is the previous file name follows the new file; a custom title is kept.
+  const followsName=!source.title||source.title===source.asset?.name
+  const nodes=document.nodes.map(node=>node.id===nodeId?{...node,asset,candidates,selectedCandidateId:asset.id,...(followsName&&asset.name?{title:String(asset.name).slice(0,240)}:{})}:node)
   return {document:{...document,nodes},warnings:[]}
 }
 export async function rotateImageFile(asset) {

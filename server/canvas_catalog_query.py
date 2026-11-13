@@ -47,7 +47,7 @@ raw_items AS (
 ), items AS (
  SELECT r.*,CASE WHEN source='library' AND origins='[]' THEN '["saved"]' ELSE origins END AS effective_origins,
  CASE WHEN source='library' AND origins='[]' THEN 1 ELSE 0 END AS origin_unknown,
- CASE WHEN source='task' THEN catalog_basename(path) ELSE name END AS display_name
+ CASE WHEN source='task' THEN catalog_result_name(path,task_id,(SELECT params FROM tasks WHERE id=r.task_id)) ELSE name END AS display_name
  FROM raw_items r WHERE NOT EXISTS (SELECT 1 FROM canvas_catalog_hidden h WHERE h.item_key=r.key)
 ), filtered AS (SELECT * FROM items WHERE
  (:scope='all' OR EXISTS (SELECT 1 FROM json_each(project_ids) j WHERE j.value=:project_id))
@@ -121,7 +121,8 @@ def _query(args, max_limit=100):
     def available(raw,source):
         path=Path(raw).absolute(); root=roots[source]
         return int(path.resolve()==path and root.resolve()==root and path.is_relative_to(root) and path.is_file())
-    db.create_function('catalog_basename',1,lambda raw:Path(raw).name)
+    from result_names import result_display_name, task_result_name
+    db.create_function('catalog_result_name',3,lambda raw,tid,prm:result_display_name(task_result_name(prm),tid,Path(raw).name) or Path(raw).name)
     params={'source':source,'scope':scope,'kind':kind,'project_id':pid,'folder_filter':int(folder is not None),
             'folder_id':folder or None,'q':args.get('q','').strip(),'tag_id':args.get('tag_id') or None,
             'local_root':str(roots['local'])+'/', 'canvas_root':str(roots['library'])+'/', 'library_root':str(roots['library'])+'/library/', 'limit':limit,'offset':offset}

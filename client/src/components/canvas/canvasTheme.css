@@ -654,3 +654,6 @@
 .canvas-studio .cv-world.is-lod-low .cv-node .cv-media-badge { font-size: 0; gap: 0; padding: 4px; }
 .canvas-studio .cv-world.is-lod-low .cv-node .cv-media-state strong { font-size: 16px; }
 .canvas-studio .cv-world.is-lod-low .cv-node .cv-media-state svg { width: 32px; height: 32px; }
+/* V140 #4: floating notices never swallow clicks meant for node ports underneath; only their buttons are interactive. */
+.canvas-studio .cv-alert.cv-alert-stack{pointer-events:none}
+.canvas-studio .cv-alert.cv-alert-stack :is(button,a){pointer-events:auto}
