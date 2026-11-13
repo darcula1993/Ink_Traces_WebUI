@@ -3,9 +3,9 @@ import CodeRainCanvas from '../CodeRainCanvas'
 import { ACTIVE_STATUSES, STATUS } from './taskModel.js'
 
 export function TaskTypeIcon({ type, size = 15 }) {
-  if (type === 'video') return <Film size={size} className="text-nexus-violet" />
-  if (type === 'audio') return <AudioLines size={size} className="text-nexus-cyan" />
-  return <ImageIcon size={size} className="text-nexus-blue" />
+  if (type === 'video') return <Film size={size} className="text-[var(--kind-video)]" />
+  if (type === 'audio') return <AudioLines size={size} className="text-[var(--kind-audio)]" />
+  return <ImageIcon size={size} className="text-[var(--kind-image)]" />
 }
 
 export function AudioArtwork({ compact = false }) {
@@ -26,7 +26,7 @@ export function TaskPreview({ item, compact = true }) {
       <div className="absolute inset-0 overflow-hidden bg-black">
         <CodeRainCanvas status={item.status} compact={compact} />
         <div className="absolute inset-x-0 bottom-0 z-10 bg-black/80 px-3 py-2">
-          <div className="mb-1 flex items-center justify-between font-mono text-[10px] text-[#9fffc2]">
+          <div className="mb-1 flex items-center justify-between font-mono text-xs text-[#9fffc2]">
             <span>{STATUS[item.status]?.label || '生成中'}</span>
             {item.progress > 0 && <span>{Math.min(100, item.progress)}%</span>}
           </div>

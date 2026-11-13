@@ -8,7 +8,7 @@ function TextToImage({ prompt, setPrompt, mentionItems, isGenerating, onSaveProm
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
         <span className="text-xs font-medium text-nexus-text-light">图片提示词</span>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] text-nexus-muted">{prompt.length}</span>
+          <span className="font-mono text-xs text-nexus-muted">{prompt.length}</span>
         </div>
       </div>
       
@@ -33,7 +33,7 @@ function TextToImage({ prompt, setPrompt, mentionItems, isGenerating, onSaveProm
           title="保存到提示词库"
           onClick={onSavePrompt}
           disabled={!prompt.trim() || isGenerating}
-          className="icon-button border-nexus-border bg-nexus-surface shadow-lg hover:text-nexus-green disabled:opacity-40"
+          className="btn btn-icon btn-outlined"
         >
           <Save size={16} />
         </button>

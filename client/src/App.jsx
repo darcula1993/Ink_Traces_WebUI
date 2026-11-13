@@ -12,7 +12,6 @@ import ReferenceMediaModal from './components/ReferenceMediaModal'
 import ToolAssetLibrary from './components/library/ToolAssetLibrary'
 import PromptMentionTextarea from './components/PromptMentionTextarea'
 import SortableReferenceItem, { moveArrayItem } from './components/SortableReferenceItem'
-import GlassBackdrop from './components/GlassBackdrop'
 import IconButton from './components/ui/IconButton'
 import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
@@ -1119,7 +1118,6 @@ function App({ onLogout }) {
 
   return (
     <div ref={appShellRef} className={`app-shell ${appMode === 'canvas' ? 'is-canvas' : ''} bg-nexus-bg text-nexus-text-light font-sans flex flex-col overflow-hidden relative`}>
-      {appMode !== 'canvas' && <GlassBackdrop />}
       
       {/* 极简顶栏 */}
       <header className="app-header liquid-glass flex items-center justify-between px-3 z-50 shrink-0">
@@ -1130,7 +1128,7 @@ function App({ onLogout }) {
             </div>
             <div className="leading-tight">
               <div className="text-sm font-semibold text-white">Ink Traces</div>
-              <div className="brand-version font-mono text-[10px] text-nexus-muted">VISUAL WORKSPACE</div>
+              <div className="brand-version font-mono text-xs text-nexus-muted">VISUAL WORKSPACE</div>
             </div>
           </div>
           <SegmentedControl
@@ -1150,8 +1148,8 @@ function App({ onLogout }) {
           <div className="glass-control-group flex items-center gap-0.5">
             <IconButton label="接口管理" onClick={() => setShowProviderSettings(true)}><Settings size={16} /></IconButton>
             <IconButton label="PNG Info" onClick={() => setShowPngInfo(true)}><FileSearch size={16} /></IconButton>
-            <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'text-nexus-green' : ''}><Library size={16} /></IconButton>
-            <IconButton label="退出登录" onClick={handleLogout} className="hover:text-nexus-red"><LogOut size={16} /></IconButton>
+            <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'is-active' : ''}><Library size={16} /></IconButton>
+            <IconButton label="退出登录" onClick={handleLogout}><LogOut size={16} /></IconButton>
           </div>
         </div>
       </header>
@@ -1182,7 +1180,7 @@ function App({ onLogout }) {
           <div className="prompt-actions p-3 border-t border-nexus-border z-10">
             <button
               onClick={handleGenerate}
-              className="btn-base btn-primary w-full min-h-11"
+              className="btn btn-primary btn-lg btn-block"
             >
               <Play size={14} fill="currentColor" /> <span>生成图片</span>
             </button>
@@ -1218,7 +1216,7 @@ function App({ onLogout }) {
         <aside className="inspector-pane custom-scrollbar">
           <div className="inspector-header">
             <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />图片参数</div>
-            <span className="font-mono text-[11px] text-nexus-muted">{imageSizeSummary}</span>
+            <span className="font-mono text-xs text-nexus-muted">{imageSizeSummary}</span>
           </div>
 
             <div className="inspector-section">
@@ -1275,7 +1273,7 @@ function App({ onLogout }) {
                 <HardDrive size={14} className="text-nexus-violet" /> 参考素材
               </div>
               <div className="flex-grow min-h-0">
-                 <button className="cupsy-library-button" onClick={openToolLibrary}><Library size={13}/>素材库</button>
+                 <button className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13}/>素材库</button>
                  <ImageToImage
                    uploadedImages={activeImgTab.uploadedImages}
                    createPreviewUrl={createReferencePreview}
@@ -1305,7 +1303,7 @@ function App({ onLogout }) {
               <div className="flex-grow flex flex-col min-h-0 relative bg-transparent">
                 <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
                   <span className="text-xs font-medium text-nexus-text-light">视频提示词</span>
-                  <span className="font-mono text-[11px] text-nexus-muted">{activeTab.prompt.length}</span>
+                  <span className="font-mono text-xs text-nexus-muted">{activeTab.prompt.length}</span>
                 </div>
                 <div className="flex-grow min-h-0 relative overflow-hidden">
                   <PromptMentionTextarea
@@ -1324,7 +1322,7 @@ function App({ onLogout }) {
             <div className="prompt-actions p-3 border-t border-nexus-border z-10">
               <button
                 onClick={handleVideoGenerate}
-                className="btn-base btn-primary w-full min-h-11"
+                className="btn btn-primary btn-lg btn-block"
               >
                 <Play size={14} fill="currentColor" /> <span>生成视频</span>
               </button>
@@ -1359,7 +1357,7 @@ function App({ onLogout }) {
           <aside className="inspector-pane custom-scrollbar">
             <div className="inspector-header">
               <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />视频参数</div>
-              <span className="font-mono text-[11px] text-nexus-muted">{activeTab.resolution} · {effectiveVideoDuration === -1 ? 'Auto' : `${effectiveVideoDuration}s`}</span>
+              <span className="font-mono text-xs text-nexus-muted">{activeTab.resolution} · {effectiveVideoDuration === -1 ? 'Auto' : `${effectiveVideoDuration}s`}</span>
             </div>
 
               {/* 生成模式 */}
@@ -1481,7 +1479,7 @@ function App({ onLogout }) {
                   {!isSeedance25 && (
                     <div className="inspector-field-row">
                       <span className="field-label" title={videoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}>
-                        快速模式{!videoFastAvailable && <span className="ml-1 text-[9px] text-nexus-muted">未配置</span>}
+                        快速模式{!videoFastAvailable && <span className="ml-1 text-xs text-nexus-muted">未配置</span>}
                       </span>
                       <ToggleSwitch label="快速模式" checked={activeTab.fast} disabled={!videoFastAvailable} onChange={fast => updateTab(activeTab.id, { fast })} />
                     </div>
@@ -1516,7 +1514,7 @@ function App({ onLogout }) {
                 <div className="inspector-title justify-between">
                   <span className="flex items-center gap-2"><Film size={14} className="text-nexus-violet" /> {activeTab.mode === 'keyframe' ? '关键帧' : '参考素材'}</span>
                   {(
-                    <button type="button" className="cupsy-library-button" onClick={openToolLibrary}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}>
                       <Library size={13} /> 素材库
                     </button>
                   )}
@@ -1632,7 +1630,7 @@ function App({ onLogout }) {
                         </SortableReferenceItem>
                       ))}
                       {activeTab.refImages.length < videoCapabilities.maxRefImages && (
-                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
+                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
                           <Plus size={14} />
                           <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={event => {
                             addVideoReferenceImages(activeTab.id, event.target.files)
@@ -1695,7 +1693,7 @@ function App({ onLogout }) {
                         </SortableReferenceItem>
                       ))}
                       {activeTab.refVideos.length < videoCapabilities.maxRefVideos && (
-                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
+                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
                           <Plus size={14} />
                           <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={event => {
                             addVideoReferenceVideos(activeTab.id, event.target.files)
@@ -1747,7 +1745,7 @@ function App({ onLogout }) {
                         </SortableReferenceItem>
                       ))}
                       {activeTab.refAudios.length < videoCapabilities.maxRefAudios && (
-                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-[10px] font-mono">
+                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
                           <Plus size={14} />
                           <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={event => {
                             addVideoReferenceAudios(activeTab.id, event.target.files)
@@ -1808,7 +1806,7 @@ function App({ onLogout }) {
             <div className="flex min-h-0 flex-grow flex-col">
               <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
                 <span className="text-xs font-medium text-nexus-text-light">音频场景提示词</span>
-                <span className={`font-mono text-[11px] ${audioForm.prompt.length > 3000 ? 'text-nexus-red' : 'text-nexus-muted'}`}>{audioForm.prompt.length} / 3000</span>
+                <span className={`font-mono text-xs ${audioForm.prompt.length > 3000 ? 'text-nexus-red' : 'text-nexus-muted'}`}>{audioForm.prompt.length} / 3000</span>
               </div>
               <PromptMentionTextarea
                 aria-label="音频提示词"
@@ -1822,7 +1820,7 @@ function App({ onLogout }) {
               />
             </div>
             <div className="prompt-actions z-10 border-t border-nexus-border p-3">
-              <button type="button" onClick={handleAudioGenerate} className="btn-base btn-primary min-h-11 w-full">
+              <button type="button" onClick={handleAudioGenerate} className="btn btn-primary btn-lg btn-block">
                 <Play size={14} fill="currentColor" /> <span>生成音频</span>
               </button>
             </div>
@@ -1849,7 +1847,7 @@ function App({ onLogout }) {
           <aside className="inspector-pane custom-scrollbar">
             <div className="inspector-header">
               <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-cyan" />音频参数</div>
-              <span className="font-mono text-[11px] text-nexus-muted">{audioForm.outputFormat.toUpperCase()} · {(audioForm.sampleRate / 1000).toFixed(audioForm.sampleRate % 1000 ? 1 : 0)} kHz</span>
+              <span className="font-mono text-xs text-nexus-muted">{audioForm.outputFormat.toUpperCase()} · {(audioForm.sampleRate / 1000).toFixed(audioForm.sampleRate % 1000 ? 1 : 0)} kHz</span>
             </div>
 
             <div className="inspector-section">
@@ -1885,7 +1883,7 @@ function App({ onLogout }) {
             <div className="inspector-section">
               <div className="inspector-title justify-between">
                 <span className="flex items-center gap-2"><HardDrive size={14} className="text-nexus-violet" /> 参考素材</span>
-                <button type="button" className="cupsy-library-button" onClick={openToolLibrary}><Library size={13} /> 素材库</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13} /> 素材库</button>
               </div>
               <SegmentedControl
                 label="音频参考模式"
@@ -1916,7 +1914,7 @@ function App({ onLogout }) {
                       <div key={`${reference.cupsyAssetId}-${index}`} className="audio-reference-card group relative">
                         <button type="button" className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2" onClick={() => setReferenceMedia({ type: reference.kind, src: reference.preview, name: reference.name })}>
                           {reference.kind === 'image' ? <img src={reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
-                          {reference.kind === 'audio' && <span className="w-full truncate text-center text-[9px] text-nexus-muted">[Audio{index + (audioForm.speaker ? 2 : 1)}]</span>}
+                          {reference.kind === 'audio' && <span className="w-full truncate text-center text-xs text-nexus-muted">[Audio{index + (audioForm.speaker ? 2 : 1)}]</span>}
                         </button>
                         <button type="button" aria-label={`删除参考素材 ${index + 1}`} onClick={() => updateAudioForm(form => ({ references: form.references.filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white opacity-0 group-hover:opacity-100 hover:bg-nexus-red"><X size={10} /></button>
                       </div>
@@ -1929,7 +1927,7 @@ function App({ onLogout }) {
                       </label>
                     )}
                   </div>
-                  <div className="mt-2 font-mono text-[9px] text-nexus-muted">
+                  <div className="mt-2 font-mono text-xs text-nexus-muted">
                     {audioForm.referenceMode === 'audio' ? '按顺序对应 [Audio1]–[Audio3]' : '图片用于引导完整音频场景'}
                   </div>
                 </div>
@@ -1999,10 +1997,10 @@ function App({ onLogout }) {
                 <div className="flex min-w-0 items-center gap-2 text-sm text-nexus-text-light">
                   <Maximize2 size={15} className="shrink-0 text-nexus-blue" />
                   <span className="font-semibold">提示词编辑器</span>
-                  <span className="truncate font-mono text-[11px] text-nexus-muted">{appMode === 'video' ? 'video_prompt' : appMode === 'audio' ? 'audio_prompt' : 'image_prompt'}</span>
+                  <span className="truncate font-mono text-xs text-nexus-muted">{appMode === 'video' ? 'video_prompt' : appMode === 'audio' ? 'audio_prompt' : 'image_prompt'}</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <IconButton label="提示词库" onClick={() => setShowEditorVault(!showEditorVault)} className={showEditorVault ? 'border-nexus-violet/35 bg-nexus-violet/10 text-nexus-violet' : ''}><Library size={16} /></IconButton>
+                  <IconButton label="提示词库" onClick={() => setShowEditorVault(!showEditorVault)} className={showEditorVault ? 'is-active' : ''}><Library size={16} /></IconButton>
                   <IconButton label="保存提示词" onClick={handleSavePrompt} disabled={!currentEditorPrompt.trim()}><Save size={16} /></IconButton>
                   <IconButton label="关闭编辑器" onClick={() => { setShowFullEditor(false); setShowEditorVault(false) }}><X size={17} /></IconButton>
                 </div>

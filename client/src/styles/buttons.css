@@ -1,0 +1,127 @@
+/* UI-ITER-R1: the single button system for the whole app.
+ * Classes: .btn + one variant (.btn-primary | .btn-secondary | .btn-ghost | .btn-danger | .btn-icon),
+ * optional size (.btn-sm 28px | default 32px | .btn-lg 36px), .btn-block, .btn-round (circular icon),
+ * state .is-active / [aria-pressed=true] / [aria-expanded=true].
+ * Direction (user 2026-11-13, Linear-like on neutral near-black): almost no fill, 1px low-contrast
+ * rims, primary = low-saturation deep green (green only as accent), hierarchy by lightness
+ * (hover +4%, press darker), thin 2px green focus ring, no glow / heavy shadow, faint inner
+ * highlight only. Transitions 120ms, disabled under prefers-reduced-motion.
+ * Unstyled <button>s inside the canvas fall back to the secondary look via canvasTheme.css
+ * using the same --btn-* tokens below. */
+:root {
+  --btn-h: 30px;
+  --btn-h-sm: 28px;
+  --btn-h-lg: 32px;
+  --btn-px: 12px;
+  --btn-radius: 7px;
+  --btn-font: 500 13px/1 var(--font-sans, Inter, system-ui, sans-serif);
+  --btn-tracking: -.01em;
+  --btn-highlight: inset 0 1px 0 rgba(255, 255, 255, .03);
+  --btn-rim: rgba(255, 255, 255, .09);
+  --btn-rim-hover: rgba(255, 255, 255, .14);
+  --btn-fill: rgba(255, 255, 255, .02);
+  --btn-fill-hover: rgba(255, 255, 255, .06);
+  --btn-fill-press: rgba(0, 0, 0, .14);
+  --btn-text: #e4e5e7;
+  --btn-text-muted: #a1a4a9;
+  --btn-primary-fill: #1c3d2d;
+  --btn-primary-fill-hover: #224834;
+  --btn-primary-fill-press: #183426;
+  --btn-primary-rim: rgba(79, 196, 140, .32);
+  --btn-primary-text: #eef7f1;
+  --btn-active-fill: rgba(69, 192, 136, .10);
+  --btn-active-rim: rgba(79, 196, 140, .30);
+  --btn-active-text: #9fe0c0;
+  --btn-danger-text: #d9959a;
+  --btn-danger-fill-hover: rgba(223, 138, 144, .10);
+  --btn-danger-rim-hover: rgba(223, 138, 144, .30);
+  --btn-ring: var(--ring-focus);
+  --btn-transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--btn-h);
+  padding: 0 var(--btn-px);
+  border: 1px solid var(--btn-rim);
+  border-radius: var(--btn-radius);
+  background: var(--btn-fill);
+  box-shadow: var(--btn-highlight);
+  color: var(--btn-text);
+  font: var(--btn-font);
+  letter-spacing: var(--btn-tracking);
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition: var(--btn-transition);
+  -webkit-tap-highlight-color: transparent;
+}
+.btn svg { flex-shrink: 0; width: 15px; height: 15px; }
+.btn:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); color: #f4f5f6; }
+.btn:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-fill-press); }
+.btn:focus-visible { outline: none; box-shadow: var(--btn-highlight), var(--btn-ring); }
+.btn:disabled, .btn[aria-disabled=true] { opacity: .4; cursor: not-allowed; box-shadow: none; }
+.btn.is-active, .btn[aria-pressed=true], .btn-ghost[aria-expanded=true], .btn-icon[aria-expanded=true] {
+  border-color: var(--btn-active-rim);
+  background: var(--btn-active-fill);
+  color: var(--btn-active-text);
+}
+
+/* sizes */
+.btn.btn-sm { min-height: var(--btn-h-sm); padding: 0 10px; font-size: 12px; gap: 4px; }
+.btn.btn-sm svg { width: 14px; height: 14px; }
+.btn.btn-lg { min-height: var(--btn-h-lg); padding: 0 14px; }
+.btn.btn-lg svg { width: 16px; height: 16px; }
+.btn.btn-block { display: flex; width: 100%; }
+
+/* primary: low-saturation deep green fill; green stays an accent */
+.btn.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); }
+.btn.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(79, 196, 140, .45); background: var(--btn-primary-fill-hover); color: #fff; }
+.btn.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); }
+
+/* secondary is the base look */
+.btn.btn-secondary { }
+
+/* ghost: no rim, no fill until hovered */
+.btn.btn-ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--btn-text-muted); }
+.btn.btn-ghost:hover:not(:disabled):not([aria-disabled=true]) { border-color: transparent; background: var(--btn-fill-hover); color: var(--btn-text); }
+
+/* danger: identical to secondary at rest; only text/icon are a muted red; red fill appears on hover */
+.btn.btn-danger { color: var(--btn-danger-text); }
+.btn.btn-danger:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-danger-rim-hover); background: var(--btn-danger-fill-hover); color: #efb3b7; }
+.btn.btn-danger:focus-visible { box-shadow: var(--btn-highlight), 0 0 0 2px rgba(223, 138, 144, .45); }
+
+/* icon: square, ghost visuals; hit area >= 28px */
+.btn.btn-icon { width: var(--btn-h); min-width: var(--btn-h); height: var(--btn-h); min-height: var(--btn-h); padding: 0; border-color: transparent; background: transparent; box-shadow: none; color: var(--btn-text-muted); }
+.btn.btn-icon:hover:not(:disabled):not([aria-disabled=true]) { border-color: transparent; background: var(--btn-fill-hover); color: var(--btn-text); }
+.btn.btn-icon.btn-sm { width: var(--btn-h-sm); min-width: var(--btn-h-sm); height: var(--btn-h-sm); min-height: var(--btn-h-sm); }
+.btn.btn-icon.btn-lg { width: var(--btn-h-lg); min-width: var(--btn-h-lg); height: var(--btn-h-lg); min-height: var(--btn-h-lg); }
+.btn.btn-icon.btn-outlined { border-color: var(--btn-rim); background: var(--btn-fill); box-shadow: var(--btn-highlight); }
+.btn.btn-icon.btn-outlined:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); }
+.btn.btn-icon.btn-danger { color: var(--btn-danger-text); }
+.btn.btn-icon.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); }
+.btn.btn-icon.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(79, 196, 140, .45); background: var(--btn-primary-fill-hover); color: #fff; }
+.btn.btn-icon.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); }
+.btn.btn-round { border-radius: var(--r-pill); }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+}
+
+@media (prefers-contrast: more) {
+  :root { --btn-rim: rgba(255, 255, 255, .45); --btn-rim-hover: rgba(255, 255, 255, .7); --btn-text-muted: #cfd1d4; }
+}
+
+@media (forced-colors: active) {
+  .btn, .btn.btn-ghost, .btn.btn-icon { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; }
+  .btn.btn-primary { border-color: Highlight; }
+  .btn:focus-visible { outline: 2px solid Highlight; }
+  .btn.is-active, .btn[aria-pressed=true] { outline: 2px solid Highlight; outline-offset: -2px; }
+}

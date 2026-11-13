@@ -189,7 +189,7 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, createPrev
                 >
                   <X size={12} />
                 </button>
-                <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-[10px] text-nexus-text">
+                <div className="pointer-events-none absolute bottom-1 right-1 rounded bg-black/80 px-1 font-mono text-xs text-nexus-text">
                   {img.hasAlpha ? 'α' : index + 1}
                 </div>
               </SortableReferenceItem>
@@ -215,7 +215,7 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, createPrev
           >
             <UploadCloud size={20} />
             <span className="text-xs">添加参考图片</span>
-            <span className="font-mono text-[10px] text-nexus-muted">0 / {maxImages}</span>
+            <span className="font-mono text-xs text-nexus-muted">0 / {maxImages}</span>
           </button>
         )}
       </div>

@@ -1,6 +1,6 @@
 {
   "name": "ink-traces-webui-server",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Legacy npm wrapper for the Flask backend",
   "private": true,
   "scripts": {

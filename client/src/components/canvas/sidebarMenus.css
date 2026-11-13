@@ -3,30 +3,29 @@
 .canvas-studio .cv-sidebar-breadcrumb .cv-sidebar-more{margin-left:auto;flex:0 0 28px}
 .canvas-studio .cv-sidebar-breadcrumb .cv-project-name{height:30px;min-width:0;width:auto;max-width:45%;flex:0 1 auto;padding:0 4px;background:transparent;border:0;border-radius:7px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;text-align:left}
 .canvas-studio .cv-sidebar-workflow{min-width:0;max-width:60%}
-.canvas-studio .cv-sidebar-breadcrumb .cv-workflow-name{display:flex;gap:5px;min-width:0;max-width:100%;height:32px;padding:3px 9px;border:0;border-radius:11px;background:rgba(255,255,255,.09);font-size:14px}
+.canvas-studio .cv-sidebar-breadcrumb .cv-workflow-name{display:flex;gap:5px;min-width:0;max-width:100%;height:32px;padding:3px 9px;border:0;border-radius:8px;background:rgba(255,255,255,.09);font-size:14px}
 .canvas-studio .cv-workflow-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.canvas-studio .cv-sidebar-menu.cv-workflow-dropdown{width:267px;padding:9px 16px;border-radius:20px}
-.canvas-studio .cv-workflow-menu-heading{height:38px;display:flex;align-items:center;justify-content:space-between;color:#aaa;font-size:14px}
-.canvas-studio .cv-workflow-dropdown .cv-workflow-menu-heading button{width:32px;height:32px;flex:0 0 32px;justify-content:center}
+.canvas-studio .cv-sidebar-menu.cv-workflow-dropdown{width:267px;padding:9px 16px;border-radius:8px}
+.canvas-studio .cv-workflow-menu-heading{height:38px;display:flex;align-items:center;justify-content:space-between;color:#aaaaaa;font-size:14px}
+.canvas-studio .cv-workflow-dropdown .cv-workflow-menu-heading button:where(:not(.btn)){width:32px;height:32px;flex:0 0 32px;justify-content:center}
 .canvas-studio .cv-workflow-menu-heading>span{white-space:nowrap}
 .canvas-studio.cv-sidebar-menu-portal{display:contents;font-family:inherit}
-.canvas-studio .cv-workflow-dropdown>button{height:40px;min-width:0}
-.canvas-studio .cv-workflow-dropdown>button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.canvas-studio .cv-workflow-dropdown>button svg{flex-shrink:0}
-.cv-menu-empty{font-size:14px;color:#aaa}
-.cv-project-overview-backdrop{position:fixed;inset:0;z-index:3200;background:rgba(9,11,14,.84);backdrop-filter:blur(18px);color:#f2f4f8;overflow:auto;padding:clamp(20px,5vw,72px);font-family:inherit}
-.cv-project-overview{max-width:1100px;min-height:75vh;margin:auto;outline:none}
-.cv-project-overview header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px}
-.cv-project-overview h1{font-size:30px;margin:8px 0}.cv-project-overview header p{color:#aabab0;margin:0}
-.cv-project-overview button{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:rgba(255,255,255,.08);border:1px solid #ffffff25;color:inherit;border-radius:13px;padding:10px 16px;cursor:pointer;font:inherit}
-.cv-project-overview button:disabled{opacity:.45;cursor:wait}.cv-project-overview button:hover:not(:disabled){background:rgba(255,255,255,.14)}.cv-project-overview button:focus-visible,.cv-project-overview input:focus-visible{outline:2px solid #9effd5;outline-offset:3px}
-.cv-project-overview-tools{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:24px}.cv-project-overview-tools h2{font-size:19px;margin:0 auto 0 0}.cv-project-overview input{flex:1;min-width:180px;background:#ffffff0c;color:inherit;padding:12px;border:1px solid #ffffff30;border-radius:12px;font:inherit}
-.cv-project-overview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:18px}.cv-project-overview .cv-project-tile{height:130px;align-items:flex-start;justify-content:space-between;flex-direction:column;text-align:left;min-width:0}.cv-project-tile strong{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:500;font-size:20px}.cv-project-tile span{display:flex;gap:6px;align-items:center;font-size:13px;color:#b1c7ba}.cv-project-tile[aria-current=page]{border-color:#a2dfc970}.cv-project-overview [role=alert]{color:#ff9c9c}.cv-project-empty{color:#b1c7ba}
+.canvas-studio .cv-workflow-dropdown>button:where(:not(.btn)){height:40px;min-width:0}
+.canvas-studio .cv-workflow-dropdown>button:where(:not(.btn)) span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.canvas-studio .cv-workflow-dropdown>button:where(:not(.btn)) svg{flex-shrink:0}
+.cv-menu-empty{font-size:14px;color:#aaaaaa}
+.cv-project-overview-backdrop{position:fixed;inset:0;z-index:3200;background:radial-gradient(ellipse at 14% 22%,rgba(69,192,136,.1),transparent 46%),rgba(4,5,4,.9);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);color:var(--text);overflow:auto;padding:clamp(20px,5vw,72px);font-family:inherit}
+.cv-project-overview{max-width:clamp(960px,80vw,1600px);min-height:75vh;margin:auto;outline:none}
+.cv-project-overview header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-6)}
+.cv-project-overview h1{font-size:28px;line-height:36px;font-weight:600;margin:var(--sp-2) 0}.cv-project-overview header p{color:var(--text-2);margin:0;font-size:var(--fs-control)}
+.cv-project-overview :is(button:where(:not(.btn)),input):focus-visible{outline:2px solid var(--border-focus);outline-offset:2px}
+.cv-project-overview-tools{display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap;margin-bottom:var(--sp-5)}.cv-project-overview-tools h2{font-size:var(--fs-title);margin:0 auto 0 0}.cv-project-overview input{flex:1;min-width:180px;min-height:var(--btn-h-lg);background:var(--field);color:inherit;padding:0 var(--sp-3);border:1px solid var(--border);border-radius:var(--r-md);font:inherit;font-size:var(--fs-body)}.cv-project-overview input:hover{border-color:var(--border-strong)}.cv-project-overview input::placeholder{color:var(--text-3)}
+.cv-project-overview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(clamp(220px,16vw,300px),1fr));gap:var(--sp-4)}.cv-project-overview .cv-project-tile{display:flex;height:132px;align-items:flex-start;justify-content:space-between;flex-direction:column;text-align:left;min-width:0;padding:var(--sp-4);border:1px solid var(--border);border-radius:var(--r-lg);background:linear-gradient(145deg,rgba(226,229,227,.05),rgba(255,255,255,.01) 48%,rgba(69,192,136,.035)),var(--surface-1);box-shadow:var(--shadow-1),inset 0 1px 0 rgba(226,229,227,.08);color:var(--text);cursor:pointer;font:inherit;transition:border-color var(--dur-fast) var(--ease-out),box-shadow var(--dur-fast) var(--ease-out),background-color var(--dur-fast) var(--ease-out)}.cv-project-overview .cv-project-tile:hover:not(:disabled){border-color:var(--border-strong);background-color:var(--accent-soft)}.cv-project-overview .cv-project-tile:disabled{opacity:.45;cursor:wait}.cv-project-tile strong{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:600;font-size:18px}.cv-project-tile span{display:flex;gap:6px;align-items:center;font-size:var(--fs-caption);color:var(--text-2)}.cv-project-tile[aria-current=page]{border-color:var(--accent);box-shadow:var(--ring-selected)}.cv-project-tile[aria-current=page] span{color:var(--border-focus)}.cv-project-overview [role=alert]{color:var(--danger)}.cv-project-empty{color:var(--text-2)}
 
 .canvas-studio.cv-sidebar-menu-portal .cv-sidebar-menu{max-width:min(var(--cv-nav-menu-max-width,267px),calc(100vw - 16px))}
 
 .canvas-studio .cv-sidebar-name-editor{min-width:0;flex:1;max-width:55%}
-.canvas-studio .cv-sidebar-name-editor input{width:100%;min-width:0;height:32px;border:1px solid #77bca0;border-radius:8px;background:#152722;color:inherit;padding:3px 6px;font:inherit}
-.canvas-studio .cv-sidebar-name-editor [role=alert]{position:absolute;top:52px;left:10px;right:10px;background:#252a29;color:#ffa8a8;font-size:12px;padding:5px 8px;border-radius:8px;z-index:20;white-space:normal;overflow-wrap:anywhere}
+.canvas-studio .cv-sidebar-name-editor input{width:100%;min-width:0;height:32px;border:1px solid #959e9a;border-radius:8px;background:#1d1f1f;color:inherit;padding:3px 6px;font:inherit}
+.canvas-studio .cv-sidebar-name-editor [role=alert]{position:absolute;top:52px;left:10px;right:10px;background:#262928;color:#e7c0c0;font-size:12px;padding:5px 8px;border-radius:8px;z-index:20;white-space:normal;overflow-wrap:anywhere}
 
 .canvas-studio .cv-sidebar-top{position:relative}

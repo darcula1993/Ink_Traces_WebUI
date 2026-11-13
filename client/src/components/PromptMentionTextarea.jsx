@@ -203,9 +203,9 @@ export default function PromptMentionTextarea({
           </span>
           <span className="min-w-0 flex-1 text-left">
             <span className="block font-mono text-xs font-semibold text-nexus-text-light">{item.label}</span>
-            <span className="block truncate text-[10px] text-nexus-muted">{item.name || item.label}</span>
+            <span className="block truncate text-xs text-nexus-muted">{item.name || item.label}</span>
           </span>
-          <span className="font-mono text-[10px] text-nexus-green">{item.token}</span>
+          <span className="font-mono text-xs text-nexus-green">{item.token}</span>
         </button>
       )) : (
         <div className="px-3 py-4 text-center text-xs text-nexus-muted">

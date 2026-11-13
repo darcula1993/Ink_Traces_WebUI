@@ -1,0 +1,75 @@
+/* UI-ITER-R1: global design tokens. Structure from 艾达's spec draft (section 2); values follow
+ * the user's 2026-11-13 decision: Linear-style principles on a green-black base — neutral
+ * near-black surfaces layered by lightness, green only as an accent, glass only on overlays.
+ * Canvas-local aliases (--cv-*) in canvasTheme.css point at these tokens. */
+:root {
+  /* spacing (4px base) */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+
+  /* type scale: 12 / 13 / 14 / 16 / 20 */
+  --fs-display: 20px; --lh-display: 28px;
+  --fs-title: 16px; --lh-title: 24px;
+  --fs-body: 14px; --lh-body: 22px;
+  --fs-control: 13px; --lh-control: 20px;
+  --fs-caption: 12px; --lh-caption: 18px;
+  --fs-mono: 12px;
+
+  /* surfaces: neutral near-black, three lightness steps (~3-5% apart), no hue */
+  --bg: #0c0d0e;
+  --surface-1: #121314;      /* panels: sidebar, toolbars, nodes, cards */
+  --surface-2: #18191b;      /* overlays: dialogs, menus, node editor */
+  --surface-solid: #18191b;
+  --surface-raised: #1e1f22; /* hover rows, popovers inside overlays */
+  --overlay-fill: rgba(24, 25, 27, .96);
+  --field: rgba(255, 255, 255, .03);
+
+  /* borders: 1px low-opacity neutral */
+  --border: rgba(255, 255, 255, .08);
+  --border-strong: rgba(255, 255, 255, .14);
+  --border-focus: #4fc48c;
+
+  /* text: neutral greys */
+  --text: #e4e5e7;
+  --text-2: #a1a4a9;
+  --text-3: #6d7177;
+
+  /* accent green: focus, selection, primary, generating, key figures only */
+  --accent: #45c088;
+  --accent-hover: #58cc96;
+  --accent-soft: rgba(69, 192, 136, .12);
+  --accent-glow: rgba(69, 192, 136, .18);
+  --on-accent: #06140d;
+
+  /* status (desaturated) */
+  --danger: #df8a90;
+  --danger-soft: rgba(223, 138, 144, .10);
+  --warning: #d6bd86;
+  --info: var(--text-2);
+
+  /* media kinds use neutral icons; colour is reserved for state */
+  --kind-image: var(--text-2);
+  --kind-video: var(--text-2);
+  --kind-audio: var(--text-2);
+
+  /* radius: 6-8px; pill for chips */
+  --r-sm: 6px; --r-md: 8px; --r-lg: 8px; --r-xl: 10px; --r-pill: 999px;
+
+  /* elevation: minimal; glass only on overlays */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .04);
+  --glass-blur: blur(12px) saturate(110%);
+  --ring-selected: 0 0 0 1px var(--accent);
+  --ring-focus: 0 0 0 2px rgba(79, 196, 140, .5);
+
+  /* motion */
+  --dur-fast: 120ms;
+  --ease-out: cubic-bezier(.2, .7, .3, 1);
+}
+
+@media (prefers-contrast: more) {
+  :root { --border: rgba(255, 255, 255, .3); --border-strong: rgba(255, 255, 255, .5); --text-2: #cfd1d4; --text-3: #a1a4a9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; }
+}

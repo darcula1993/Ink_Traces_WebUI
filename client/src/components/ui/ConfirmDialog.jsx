@@ -31,8 +31,8 @@ export default function ConfirmDialog({ title, children, confirmLabel = '确认'
         <div id="ink-confirm-body" className="ink-confirm-body">{children}</div>
         {error && <p role="alert" className="ink-confirm-error">{error}</p>}
         <footer>
-          <button type="button" data-autofocus disabled={busy} onClick={onClose}>{cancelLabel}</button>
-          <button type="button" className={danger ? 'is-danger' : 'is-primary'} disabled={busy} onClick={confirm}>{busy ? '处理中…' : confirmLabel}</button>
+          <button type="button" className="btn btn-secondary" data-autofocus disabled={busy} onClick={onClose}>{cancelLabel}</button>
+          <button type="button" className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} disabled={busy} onClick={confirm}>{busy ? '处理中…' : confirmLabel}</button>
         </footer>
       </section>
     </div>,

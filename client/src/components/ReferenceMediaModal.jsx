@@ -66,7 +66,7 @@ export default function ReferenceMediaModal({ media, onClose }) {
             <header className="flex h-12 shrink-0 items-center border-b border-white/10 px-3">
               <MediaIcon size={16} className="text-nexus-green" />
               <span className="ml-2 text-sm font-semibold text-nexus-text-light">{label}</span>
-              {media.name && <span className="ml-3 min-w-0 truncate font-mono text-[11px] text-nexus-muted">{media.name}</span>}
+              {media.name && <span className="ml-3 min-w-0 truncate font-mono text-xs text-nexus-muted">{media.name}</span>}
               <div className="ml-auto">
                 <IconButton label={`关闭${label}`} onClick={onClose}><X size={17} /></IconButton>
               </div>

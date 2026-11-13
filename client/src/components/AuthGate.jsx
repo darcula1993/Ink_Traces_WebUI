@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
-import CodeRainCanvas from './CodeRainCanvas'
 import { Braces, User, LockKeyhole } from 'lucide-react'
 
 export function LoginPage({ onLogin }) {
@@ -19,9 +18,7 @@ export function LoginPage({ onLogin }) {
     }
   }
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#050706] p-5">
-      <CodeRainCanvas status="submitting" />
-      <div className="absolute inset-0 bg-black/55" aria-hidden="true" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--bg)] p-5">
       <form onSubmit={handleSubmit} className="liquid-login relative z-10 w-full max-w-[380px] p-6">
         <div className="mb-6 flex items-center gap-3">
           <div className="brand-mark flex size-10 items-center justify-center text-nexus-green">
@@ -45,7 +42,7 @@ export function LoginPage({ onLogin }) {
             className="glass-input h-10 w-full pl-9 pr-3 text-sm text-nexus-text-light outline-none" />
         </div>
         {error && <div role="alert" className="mb-3 rounded border border-nexus-red/25 bg-nexus-red/10 px-3 py-2 text-xs text-nexus-red">{error}</div>}
-        <button type="submit" className="btn-base btn-primary w-full min-h-10">
+        <button type="submit" className="btn btn-primary btn-lg btn-block">
           登录
         </button>
       </form>

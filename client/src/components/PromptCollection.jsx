@@ -124,8 +124,8 @@ function PromptCollection({ onSelectPrompt }) {
                       autoFocus
                     />
                     <div className="mt-2 flex justify-end gap-1">
-                      <button type="button" aria-label="取消编辑" title="取消" onClick={cancelEditing} className="icon-button size-8"><X size={14} /></button>
-                      <button type="button" aria-label="保存提示词" title="保存" onClick={saveEdit} disabled={loading || !editingText.trim()} className="icon-button size-8 text-nexus-green"><Check size={14} /></button>
+                      <button type="button" aria-label="取消编辑" title="取消" onClick={cancelEditing} className="btn btn-icon"><X size={14} /></button>
+                      <button type="button" aria-label="保存提示词" title="保存" onClick={saveEdit} disabled={loading || !editingText.trim()} className="btn btn-icon is-active"><Check size={14} /></button>
                     </div>
                   </div>
                 ) : (
@@ -145,12 +145,12 @@ function PromptCollection({ onSelectPrompt }) {
                       <p className="line-clamp-4 text-sm leading-5 text-nexus-text-light">{prompt.text}</p>
                     </div>
                     <div className="flex items-center border-t border-nexus-border/70 px-2 py-1.5">
-                      <time className="px-1 text-[11px] text-nexus-muted">
+                      <time className="px-1 text-xs text-nexus-muted">
                         {new Date(prompt.createdAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}
                       </time>
                       <div className="ml-auto flex items-center gap-1">
-                        <button type="button" aria-label="编辑提示词" title="编辑" onClick={() => startEditing(prompt.id, prompt.text)} disabled={loading} className="icon-button size-8"><Edit2 size={14} /></button>
-                        <button type="button" aria-label="删除提示词" title="删除" onClick={() => deletePrompt(prompt.id)} disabled={loading} className="icon-button size-8 hover:text-nexus-red"><Trash2 size={14} /></button>
+                        <button type="button" aria-label="编辑提示词" title="编辑" onClick={() => startEditing(prompt.id, prompt.text)} disabled={loading} className="btn btn-icon"><Edit2 size={14} /></button>
+                        <button type="button" aria-label="删除提示词" title="删除" onClick={() => deletePrompt(prompt.id)} disabled={loading} className="btn btn-icon btn-danger"><Trash2 size={14} /></button>
                       </div>
                     </div>
                   </>

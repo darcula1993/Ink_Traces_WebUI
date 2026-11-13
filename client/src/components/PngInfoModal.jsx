@@ -136,7 +136,7 @@ export default function PngInfoModal({ open, onClose, onApply }) {
               <FileImage size={16} className="text-nexus-green" />
               <span className="ml-2 text-sm font-semibold text-nexus-text-light">PNG Info</span>
               {file && (
-                <span className="ml-3 min-w-0 truncate font-mono text-[11px] text-nexus-muted">
+                <span className="ml-3 min-w-0 truncate font-mono text-xs text-nexus-muted">
                   {file.name} · {payload?.image ? `${payload.image.width}×${payload.image.height}` : ''} · {formatBytes(file.size)}
                 </span>
               )}
@@ -189,7 +189,7 @@ export default function PngInfoModal({ open, onClose, onApply }) {
                 </button>
               )}
               {previewUrl && (
-                <button type="button" onClick={() => inputRef.current?.click()} className="btn-base btn-outline absolute bottom-3 left-3 min-h-8 px-3 text-xs">
+                <button type="button" onClick={() => inputRef.current?.click()} className="btn btn-secondary btn-sm absolute bottom-3 left-3">
                   <Upload size={13} /> 更换 PNG
                 </button>
               )}
@@ -228,8 +228,8 @@ export default function PngInfoModal({ open, onClose, onApply }) {
                       <div className="space-y-3">
                         {Object.entries(metadata.chunks).map(([key, value]) => (
                           <div key={key}>
-                            <div className="mb-1 font-mono text-[10px] uppercase text-nexus-muted">{key}</div>
-                            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border border-white/8 bg-black/25 p-2 font-mono text-[10px] leading-4 text-nexus-text custom-scrollbar">{value}</pre>
+                            <div className="mb-1 font-mono text-xs uppercase text-nexus-muted">{key}</div>
+                            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border border-white/8 bg-black/25 p-2 font-mono text-xs leading-4 text-nexus-text custom-scrollbar">{value}</pre>
                           </div>
                         ))}
                       </div>
@@ -240,12 +240,12 @@ export default function PngInfoModal({ open, onClose, onApply }) {
             </aside>
 
             <footer className="col-span-2 flex h-14 items-center border-t border-white/10 px-3">
-              <span className="font-mono text-[10px] uppercase text-nexus-muted">{metadata?.source || 'PNG'}</span>
+              <span className="font-mono text-xs uppercase text-nexus-muted">{metadata?.source || 'PNG'}</span>
               <button
                 type="button"
                 disabled={!canApply}
                 onClick={() => { onApply(metadata); close() }}
-                className="btn-base btn-primary ml-auto min-h-9 px-4 text-xs"
+                className="btn btn-primary ml-auto"
               >
                 <Send size={14} /> 发送到图片生成
               </button>

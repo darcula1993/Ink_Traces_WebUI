@@ -50,7 +50,7 @@ export const TaskCard = React.memo(function TaskCard({
         <TaskPreview item={item} />
         {item.status !== 'succeeded' && (
           <div className="absolute left-2 top-2 z-20 flex items-center gap-1.5">
-            <span className={`status-pill min-h-6 px-2 text-[10px] ${status.tone}`}>
+            <span className={`status-pill min-h-6 px-2 text-xs ${status.tone}`}>
               <StatusIcon size={11} className={status.spin ? 'animate-spin' : ''} />
               {status.label}
             </span>
@@ -112,7 +112,7 @@ export const TaskCard = React.memo(function TaskCard({
               {item.favoriteGroups.length > 2 && <span className="favorite-group-pill">+{item.favoriteGroups.length - 2}</span>}
             </div>
           )}
-          <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-[10px] text-nexus-muted">
+          <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-nexus-muted">
             <span>#{item.taskId}</span>
             {item.provider && <span className="truncate">{providerLabel(item.provider)}</span>}
             {item.createdAt && <time className="ml-auto shrink-0">{formatTime(item.createdAt)}</time>}

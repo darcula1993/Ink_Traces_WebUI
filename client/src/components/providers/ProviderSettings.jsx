@@ -75,16 +75,16 @@ export default function ProviderSettings({ onClose, onSaved }) {
   }
   return <div className="provider-settings-backdrop">
     <section ref={dialogRef} className="provider-settings" role="dialog" aria-modal="true" aria-labelledby="provider-settings-title" tabIndex={-1} onKeyDown={keyboard}>
-      <header className="ps-header"><div><h2 id="provider-settings-title"><Server size={20} />接口管理</h2><p>为同一种服务保存多套命名配置，在生成节点中选择使用。</p></div><button type="button" onClick={close} disabled={busy} aria-label="关闭接口管理"><X size={19} /></button></header>
+      <header className="ps-header"><div><h2 id="provider-settings-title"><Server size={20} />接口管理</h2><p>为同一种服务保存多套命名配置，在生成节点中选择使用。</p></div><button type="button" className="btn btn-icon btn-outlined" onClick={close} disabled={busy} aria-label="关闭接口管理" title="关闭接口管理"><X size={19} /></button></header>
       <div className="ps-layout">
         <aside className="ps-sidebar" aria-label="已保存的接口配置">
-          <button type="button" className="ps-add" disabled={busy} onClick={() => navigate(() => install(null))}><Plus size={16} />新建配置</button>
-          <div className="ps-profile-list">{!profiles.length && <p className="ps-muted">{busy ? '正在读取配置…' : '还没有命名配置。原有服务配置仍可使用。'}</p>}{profiles.map(profile => <button type="button" key={profile.id} aria-pressed={selected?.id === profile.id} disabled={busy} onClick={() => navigate(() => install(profile))}><strong>{profile.name}</strong><span>{KINDS[profile.kind]} · {ADAPTERS[profile.adapter] || profile.adapter}</span><small>{profile.enabled ? '已启用' : '已停用'}{profile.is_default ? ' · 默认' : ''}{profile.has_api_key ? ' · 已配置密钥' : ' · 未配置密钥'}</small></button>)}</div>
+          <button type="button" className="btn btn-secondary btn-block ps-add" disabled={busy} onClick={() => navigate(() => install(null))}><Plus size={16} />新建配置</button>
+          <div className="ps-profile-list">{!profiles.length && <p className="ps-muted">{busy ? '正在读取配置…' : '还没有命名配置。原有服务配置仍可使用。'}</p>}{profiles.map(profile => <button type="button" className="ps-profile" key={profile.id} aria-pressed={selected?.id === profile.id} disabled={busy} onClick={() => navigate(() => install(profile))}><strong>{profile.name}</strong><span>{KINDS[profile.kind]} · {ADAPTERS[profile.adapter] || profile.adapter}</span><small>{profile.enabled ? '已启用' : '已停用'}{profile.is_default ? ' · 默认' : ''}{profile.has_api_key ? ' · 已配置密钥' : ' · 未配置密钥'}</small></button>)}</div>
         </aside>
         <form className="ps-form" onSubmit={save}>
           <div className="ps-form-scroll">
             <h3>{selected ? '编辑接口配置' : '新建接口配置'}</h3>
-            {error && <div className="ps-error" role="alert">{error}{conflict && <button type="button" disabled={busy} onClick={() => setPending(() => reload)}><RefreshCw size={14} />重新载入服务器版本</button>}</div>}
+            {error && <div className="ps-error" role="alert">{error}{conflict && <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => setPending(() => reload)}><RefreshCw size={14} />重新载入服务器版本</button>}</div>}
             {notice && <div className="ps-notice" role="status">{notice}</div>}
             <fieldset disabled={busy}>
               <label>配置名称<input required maxLength={100} value={form.name} placeholder="例如：Ark 主账号" onChange={event => change({ name: event.target.value })} /></label>
@@ -105,10 +105,10 @@ export default function ProviderSettings({ onClose, onSaved }) {
               </details>
             </fieldset>
           </div>
-          <footer className="ps-footer"><span>{dirty ? '有未保存的修改' : selected ? `配置版本 ${selected.revision}` : '保存后可在节点中选择'}</span><button className="ps-primary" type="submit" disabled={busy || conflict}>{busy ? '处理中…' : <><Save size={15} />保存配置</>}</button></footer>
+          <footer className="ps-footer"><span>{dirty ? '有未保存的修改' : selected ? `配置版本 ${selected.revision}` : '保存后可在节点中选择'}</span><button className="btn btn-primary" type="submit" disabled={busy || conflict}>{busy ? '处理中…' : <><Save size={15} />保存配置</>}</button></footer>
         </form>
       </div>
-      {pending && <div ref={confirmRef} className="ps-confirm" role="alertdialog" aria-modal="true" aria-label="未保存修改"><div><h3>替换当前未保存的内容？</h3><p>继续会丢弃本地编辑，已保存的服务器配置不会因此被修改。</p><button type="button" onClick={() => setPending(null)}>继续编辑</button><button type="button" onClick={() => { const action = pending; setPending(null); action() }}>丢弃修改并继续</button></div></div>}
+      {pending && <div ref={confirmRef} className="ps-confirm" role="alertdialog" aria-modal="true" aria-label="未保存修改"><div><h3>替换当前未保存的内容？</h3><p>继续会丢弃本地编辑，已保存的服务器配置不会因此被修改。</p><button type="button" className="btn btn-secondary" onClick={() => setPending(null)}>继续编辑</button><button type="button" className="btn btn-danger" onClick={() => { const action = pending; setPending(null); action() }}>丢弃修改并继续</button></div></div>}
     </section>
   </div>
 }

@@ -932,12 +932,12 @@ function TaskGallery({
         <div className="task-gallery-title flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
           <TaskTypeIcon type={mode} />
           {taskTypeLabel(mode)}任务
-          <span className="task-gallery-count font-mono text-[10px] font-normal">{categoryTotal}</span>
+          <span className="task-gallery-count font-mono text-xs font-normal">{categoryTotal}</span>
         </div>
         {selectionMode ? (
           <div data-testid="selection-summary" className="task-selection-summary ml-3 font-mono text-xs text-nexus-text">
             已选 <span className="text-nexus-green">{selectedKeys.size}</span>
-            <span className="ml-2 text-[10px] text-nexus-muted">共 {categoryTotal}</span>
+            <span className="ml-2 text-xs text-nexus-muted">共 {categoryTotal}</span>
           </div>
         ) : (
           <div className="task-view-segment ml-3 flex items-center gap-1" role="group" aria-label="任务视图">
@@ -993,7 +993,7 @@ function TaskGallery({
                               maxLength={40}
                               className="task-group-input min-w-0 flex-1"
                             />
-                            <IconButton label="保存分组名称" type="submit" className="size-7"><Check size={12} /></IconButton>
+                            <IconButton label="保存分组名称" type="submit" className="btn-sm"><Check size={12} /></IconButton>
                           </form>
                         ) : (
                           <>
@@ -1006,7 +1006,7 @@ function TaskGallery({
                             >
                               <span className="favorite-group-dot" data-color={group.color} />
                               <span className="min-w-0 flex-1 truncate">{group.name}</span>
-                              <span className="font-mono text-[9px] text-nexus-muted">{group.task_count || 0}</span>
+                              <span className="font-mono text-xs text-nexus-muted">{group.task_count || 0}</span>
                             </button>
                             <IconButton label={`重命名分组 ${group.name}`} onClick={() => { setEditingGroupId(group.id); setEditingGroupName(group.name) }} className="size-7"><Pencil size={11} /></IconButton>
                             <IconButton label={`删除分组 ${group.name}`} onClick={() => removeFavoriteGroup(group)} className="size-7 hover:text-nexus-red"><Trash2 size={11} /></IconButton>
@@ -1034,7 +1034,7 @@ function TaskGallery({
                   </div>
                   <form onSubmit={createFavoriteGroup} className="flex items-center gap-1.5 p-1">
                     <input value={newGroupName} onChange={event => setNewGroupName(event.target.value)} maxLength={40} aria-label="新收藏分组名称" placeholder="新分组" className="task-group-input min-w-0 flex-1" />
-                    <IconButton label="创建收藏分组" type="submit" disabled={!newGroupName.trim()} className="size-8"><FolderPlus size={13} /></IconButton>
+                    <IconButton label="创建收藏分组" type="submit" disabled={!newGroupName.trim()} className="btn-sm"><FolderPlus size={13} /></IconButton>
                   </form>
                 </motion.div>
               )}
@@ -1072,7 +1072,7 @@ function TaskGallery({
                   <div className="mb-3 flex items-center gap-2">
                     <Filter size={13} className="text-nexus-cyan" />
                     <span className="text-xs font-semibold text-nexus-text-light">筛选任务</span>
-                    <button type="button" onClick={clearFilters} disabled={!activeFilters.length} className="ml-auto text-[10px] text-nexus-muted hover:text-nexus-text-light disabled:opacity-35">全部清除</button>
+                    <button type="button" onClick={clearFilters} disabled={!activeFilters.length} className="ml-auto text-xs text-nexus-muted hover:text-nexus-text-light disabled:opacity-35">全部清除</button>
                   </div>
                   <label className="task-filter-field">
                     <span>状态</span>
@@ -1295,7 +1295,7 @@ function TaskGallery({
 
       {!selectionMode && activeFilters.length > 0 && (
         <div className="task-filter-strip flex h-10 shrink-0 items-center gap-2 px-3" aria-label="已应用筛选">
-          <span className="flex items-center gap-1.5 text-[10px] text-nexus-muted"><Filter size={11} /> 已筛选</span>
+          <span className="flex items-center gap-1.5 text-xs text-nexus-muted"><Filter size={11} /> 已筛选</span>
           {activeFilters.map(filter => (
             <button
               key={filter.key}
@@ -1307,7 +1307,7 @@ function TaskGallery({
               <span className="max-w-36 truncate">{filter.label}</span><X size={11} />
             </button>
           ))}
-          <button type="button" onClick={clearFilters} className="ml-auto text-[10px] text-nexus-muted hover:text-nexus-text-light">清除全部</button>
+          <button type="button" onClick={clearFilters} className="ml-auto text-xs text-nexus-muted hover:text-nexus-text-light">清除全部</button>
         </div>
       )}
 
@@ -1334,9 +1334,9 @@ function TaskGallery({
           <div className="task-empty-state">
             <div className="task-empty-icon"><TaskTypeIcon type={mode} size={22} /></div>
             <div className="text-sm font-medium text-nexus-text-light">{emptyTitle}</div>
-            <div className="font-mono text-[10px] text-nexus-muted">{hasSearchOrFilters ? 'FILTER RESULT: 0' : `${mode.toUpperCase()} TASKS: 0`}</div>
+            <div className="font-mono text-xs text-nexus-muted">{hasSearchOrFilters ? 'FILTER RESULT: 0' : `${mode.toUpperCase()} TASKS: 0`}</div>
             {hasSearchOrFilters && (
-              <button type="button" onClick={clearSearchAndFilters} className="btn-base btn-outline mt-2 min-h-8 text-xs">清除筛选</button>
+              <button type="button" onClick={clearSearchAndFilters} className="btn btn-secondary btn-sm mt-2">清除筛选</button>
             )}
           </div>
         )}
@@ -1345,7 +1345,7 @@ function TaskGallery({
             type="button"
             disabled={loading}
             onClick={() => fetchTasks({ append: true, offset: tasks.length })}
-            className="btn-base btn-outline mx-auto mt-3 flex min-w-40 text-xs"
+            className="btn btn-secondary btn-sm mx-auto mt-3 min-w-40"
           >
             {loading ? '加载中' : `加载更多 (${tasks.length}/${total})`}
           </button>

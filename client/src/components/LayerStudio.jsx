@@ -321,9 +321,9 @@ export default function LayerStudio({ notify }) {
           <IconButton label="适应画布" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}><Maximize size={15} /></IconButton>
         </div>
         <div className="layer-export-actions">
-          <button type="button" className="btn-base btn-outline" disabled={exporting||(!project?.document?.layers?.length && !documentState.layers.length)} onClick={() => exportCanvas('png')}><Download size={14} /> PNG</button>
-          <button type="button" className="btn-base btn-outline" disabled={exporting||!documentState.layers.length} onClick={() => exportCanvas('jpeg')}><Download size={14} /> JPEG</button>
-          <a className={`btn-base btn-primary ${!documentState.layers.length ? 'pointer-events-none opacity-40' : ''}`} href={project ? `/api/layer/projects/${project.id}/layers.zip` : '#'}><Download size={14} /> 图层包</a>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={exporting||(!project?.document?.layers?.length && !documentState.layers.length)} onClick={() => exportCanvas('png')}><Download size={14} /> PNG</button>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={exporting||!documentState.layers.length} onClick={() => exportCanvas('jpeg')}><Download size={14} /> JPEG</button>
+          <a className={`btn btn-primary btn-sm ${!documentState.layers.length ? 'pointer-events-none opacity-40' : ''}`} href={project ? `/api/layer/projects/${project.id}/layers.zip` : '#'}><Download size={14} /> 图层包</a>
         </div>
       </header>
 
@@ -355,8 +355,8 @@ export default function LayerStudio({ notify }) {
       </aside>
 
       <div className="layer-tool-rail liquid-glass">
-        <IconButton label="选择图层" onClick={() => setTool('select')} className={tool === 'select' ? 'btn-active' : ''}><MousePointer2 size={16} /></IconButton>
-        <IconButton label="移动画布" onClick={() => setTool('pan')} className={tool === 'pan' ? 'btn-active' : ''}><GripVertical size={16} /></IconButton>
+        <IconButton label="选择图层" onClick={() => setTool('select')} className={tool === 'select' ? 'is-active' : ''}><MousePointer2 size={16} /></IconButton>
+        <IconButton label="移动画布" onClick={() => setTool('pan')} className={tool === 'pan' ? 'is-active' : ''}><GripVertical size={16} /></IconButton>
       </div>
 
       <main
@@ -467,7 +467,7 @@ export default function LayerStudio({ notify }) {
         <select value={size} onChange={event => setSize(event.target.value)} aria-label="图层分解分辨率">
           <option value="auto">Auto</option><option value="1K">1K</option><option value="1.5K">1.5K</option><option value="2K">2K</option>
         </select>
-        <button type="button" className="btn-base btn-primary" disabled={busy || processing || (modern&&(!Number.isInteger(maxImages)||maxImages<2||maxImages>100)) || (!project && !sourceFile)} onClick={project ? decomposeAgain : createProject}>
+        <button type="button" className="btn btn-primary btn-lg" disabled={busy || processing || (modern&&(!Number.isInteger(maxImages)||maxImages<2||maxImages>100)) || (!project && !sourceFile)} onClick={project ? decomposeAgain : createProject}>
           <Sparkles size={14} />{processing ? '分解中' : project ? '创建新版本' : '分解图层'}
         </button>
       </footer>

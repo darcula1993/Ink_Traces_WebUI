@@ -105,7 +105,7 @@ export function TaskCompareModal({ items, onClose, onReuse }) {
           <Columns3 size={16} className="text-nexus-cyan" />
           <div>
             <div className="text-sm font-semibold text-nexus-text-light">任务对比</div>
-            <div className="font-mono text-[9px] text-nexus-muted">{items.length} ITEMS</div>
+            <div className="font-mono text-xs text-nexus-muted">{items.length} ITEMS</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <ZoomOut size={14} className="text-nexus-muted" />
@@ -120,7 +120,7 @@ export function TaskCompareModal({ items, onClose, onReuse }) {
               className="task-compare-zoom"
             />
             <ZoomIn size={14} className="text-nexus-muted" />
-            <span className="w-10 text-right font-mono text-[10px] text-nexus-text">{Math.round(zoom * 100)}%</span>
+            <span className="w-10 text-right font-mono text-xs text-nexus-text">{Math.round(zoom * 100)}%</span>
             <IconButton label="关闭任务对比" onClick={onClose}><X size={18} /></IconButton>
           </div>
         </header>
@@ -149,7 +149,7 @@ export function TaskCompareModal({ items, onClose, onReuse }) {
                   ))}
                 </dl>
                 <footer className="mt-auto border-t border-white/8 p-2">
-                  <button type="button" onClick={() => onReuse(item.source)} className="btn-base btn-outline w-full text-xs">
+                  <button type="button" onClick={() => onReuse(item.source)} className="btn btn-secondary btn-sm btn-block">
                     <RotateCcw size={13} /> 复用参数
                   </button>
                 </footer>
@@ -325,7 +325,7 @@ export function TaskDetailModal({
             <section className="border-b border-white/8 p-4">
               <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-nexus-text-light">
                 <Braces size={14} className="text-nexus-green" /> Prompt
-                <button type="button" aria-label="复制 Prompt" title="复制 Prompt" onClick={() => navigator.clipboard?.writeText(item.prompt || '')} className="icon-button ml-auto size-7"><Copy size={13} /></button>
+                <button type="button" aria-label="复制 Prompt" title="复制 Prompt" onClick={() => navigator.clipboard?.writeText(item.prompt || '')} className="btn btn-icon btn-sm ml-auto"><Copy size={13} /></button>
               </div>
               <p className="whitespace-pre-wrap break-words text-sm leading-6 text-nexus-text">{item.prompt || '未填写提示词'}</p>
             </section>
@@ -353,10 +353,10 @@ export function TaskDetailModal({
                 <div className="space-y-2">
                   {item.sourceUrls.map((url, index) => (
                     <div key={`${url}-${index}`} className="flex min-w-0 items-start gap-2 rounded border border-white/8 bg-black/20 p-2">
-                      <a href={url} target="_blank" rel="noreferrer" title={url} className="min-w-0 flex-1 break-all font-mono text-[10px] leading-4 text-nexus-cyan hover:text-white">
+                      <a href={url} target="_blank" rel="noreferrer" title={url} className="min-w-0 flex-1 break-all font-mono text-xs leading-4 text-nexus-cyan hover:text-white">
                         {url}
                       </a>
-                      <button type="button" aria-label={`复制端点图像 URL ${index + 1}`} title="复制 URL" onClick={() => navigator.clipboard?.writeText(url)} className="icon-button size-7 shrink-0">
+                      <button type="button" aria-label={`复制端点图像 URL ${index + 1}`} title="复制 URL" onClick={() => navigator.clipboard?.writeText(url)} className="btn btn-icon btn-sm shrink-0">
                         <Copy size={12} />
                       </button>
                     </div>
@@ -368,7 +368,7 @@ export function TaskDetailModal({
               <section className="border-b border-white/8 p-4">
                 <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-nexus-text-light">
                   <FolderHeart size={14} className="text-nexus-cyan" /> 收藏分组
-                  {!item.favorite && <span className="ml-auto text-[10px] font-normal text-nexus-muted">选择分组将自动收藏</span>}
+                  {!item.favorite && <span className="ml-auto text-xs font-normal text-nexus-muted">选择分组将自动收藏</span>}
                 </div>
                 <FavoriteGroupAssignments item={item} groups={favoriteGroups} onChange={onSetGroup} />
               </section>
@@ -414,7 +414,7 @@ export function TaskDetailModal({
                   aria-expanded={downloadMenuOpen}
                   title="选择下载格式"
                   onClick={() => setDownloadMenuOpen(open => !open)}
-                  className={`icon-button ${downloadMenuOpen ? 'text-nexus-green' : ''}`}
+                  className={`btn btn-icon ${downloadMenuOpen ? 'is-active' : ''}`}
                 >
                   <Download size={17} />
                   <ChevronDown size={10} />
@@ -440,7 +440,7 @@ export function TaskDetailModal({
                 </AnimatePresence>
               </div>
             ) : download ? (
-              <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="icon-button"><Download size={17} /></a>
+              <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="btn btn-icon"><Download size={17} /></a>
             ) : null}
             {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (

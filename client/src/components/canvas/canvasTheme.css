@@ -2,62 +2,61 @@
  * Layout geometry belongs to canvas.css; no per-node backdrop blur.
  * Import after canvas.css/sidebar.css. All rules stay within the canvas studio.
  */
+/* UI-ITER-R1 (user 2026-11-13): Linear-style restraint on the green-black base. Neutral near-black,
+ * layered by lightness; green only for focus/selection/primary/generating; glass only on overlays. */
 .canvas-studio {
-  /* CANVAS-UX-20261112: pure green-black (user decision 2026-11-12, item 5). */
-  --cv-bg: #030805;
-  --cv-surface: rgba(10, 22, 15, .5);
-  --cv-glass: rgba(5, 12, 8, .5);
-  --cv-glass-strong: rgba(4, 10, 6, .66);
-  --cv-node-fill: rgba(7, 16, 10, .55);
-  --cv-glass-solid: #07110b;
-  --cv-popover-solid: #0a170f;
-  --cv-field: rgba(2, 8, 4, .4);
-  --cv-border: rgba(120, 230, 160, .2);
-  --cv-border-strong: rgba(150, 245, 185, .32);
-  --cv-text: #e3f5e8;
-  --cv-secondary: #a9c9b3;
-  --cv-green: #35d08a;
-  --cv-focus: #76e9b1;
-  --cv-green-soft: rgba(53, 208, 138, .14);
-  --cv-green-hover: rgba(53, 208, 138, .22);
-  --cv-danger: #ffa3a9;
-  --cv-warning: #f1ce82;
-  --cv-glass-shadow: 0 18px 42px rgba(0, 0, 0, .4), inset 0 1px 1px rgba(200, 255, 220, .14), inset 1px 0 0 rgba(200, 255, 220, .05);
-  /* Stationary scenery shared by sidebar, canvas and node shells. */
-  background:
-    radial-gradient(ellipse at 14% 22%, rgba(53, 208, 138, .13), transparent 46%),
-    radial-gradient(ellipse at 78% 80%, rgba(35, 150, 90, .09), transparent 50%),
-    repeating-linear-gradient(90deg, transparent 0 126px, rgba(90, 220, 140, .035) 127px 128px, transparent 129px 256px),
-    repeating-linear-gradient(0deg, transparent 0 79px, rgba(90, 220, 140, .028) 80px 81px, transparent 82px 160px),
-    linear-gradient(160deg, #04100a, #020604 60%, #030805);
+  --cv-bg: var(--bg);
+  --cv-surface: var(--surface-1);
+  --cv-glass: var(--overlay-fill);
+  --cv-glass-strong: var(--overlay-fill);
+  --cv-node-fill: var(--surface-1);
+  --cv-glass-solid: var(--surface-solid);
+  --cv-popover-solid: var(--surface-raised);
+  --cv-field: var(--field);
+  --cv-border: var(--border);
+  --cv-border-strong: var(--border-strong);
+  --cv-text: var(--text);
+  --cv-secondary: var(--text-2);
+  --cv-green: var(--accent);
+  --cv-focus: var(--border-focus);
+  --cv-green-soft: var(--accent-soft);
+  --cv-green-hover: rgba(255, 255, 255, .06);
+  --cv-danger: var(--danger);
+  --cv-warning: var(--warning);
+  --cv-glass-shadow: var(--shadow-2);
+  background: var(--bg);
   color: var(--cv-text);
   color-scheme: dark;
 }
 
 .canvas-studio ::selection {
-  background: #286b45;
-  color: #f0fff5;
+  background: rgba(69, 192, 136, .3);
+  color: #fff;
 }
 
 .canvas-studio .cv-surface {
   background-color: transparent;
-  background-image: radial-gradient(rgba(120, 230, 160, .16) 1px, transparent 1px);
+  background-image: radial-gradient(rgba(255, 255, 255, .07) 1px, transparent 1px);
 }
 
-/* Small,bounded glass surfaces; no per-node backdrop blur. */
-.canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-node-panel, .cv-tools,
-  .cv-bottom, .cv-context-menu, .cv-sidebar-menu, .cv-image-toolbar,
-  .cv-history-popover, .cv-delete-dialog,
-  .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
-  background:
-    radial-gradient(560px circle at 28% 8%, rgba(200, 255, 220, .05), transparent 44%),
-    linear-gradient(145deg, rgba(200, 255, 220, .045), rgba(255, 255, 255, .008) 46%, rgba(53, 208, 138, .02)),
-    var(--cv-glass);
+/* Docked panels: flat neutral surfaces, no blur. */
+.canvas-studio :is(.cv-sidebar, .cv-topbar, .cv-tools, .cv-bottom, .cv-image-toolbar) {
+  background: var(--surface-1);
   border-color: var(--cv-border);
   color: var(--cv-text);
-  box-shadow: var(--cv-glass-shadow);
-  -webkit-backdrop-filter: blur(20px) saturate(125%);
-  backdrop-filter: blur(20px) saturate(125%);
+  box-shadow: var(--shadow-1);
+}
+
+/* Floating overlays: faint glass (light blur, faint inner highlight). */
+.canvas-studio :is(.cv-node-panel, .cv-context-menu, .cv-sidebar-menu,
+  .cv-history-popover, .cv-delete-dialog,
+  .cv-shortcut-help, .cv-media-viewer, .cv-tree-editor, .cv-parameters-popover) {
+  background: var(--overlay-fill);
+  border-color: var(--cv-border-strong);
+  color: var(--cv-text);
+  box-shadow: var(--shadow-2);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .canvas-studio :is(.cv-studio-overlay > div, .cv-connection-note, .cv-multi-selection) {
@@ -68,14 +67,21 @@
 }
 
 .canvas-studio :is(.cv-studio-overlay, .cv-media-overlay) {
-  background: rgba(1, 6, 3, .62);
+  background: rgba(0, 0, 0, .6);
 }
 
-.canvas-studio :is(button, input, select, textarea) {
+.canvas-studio :is(input, select, textarea) {
   background-color: var(--cv-field);
   border-color: var(--cv-border);
   color: var(--cv-text);
   accent-color: var(--cv-green);
+}
+
+/* Unclassed buttons share the .btn secondary tokens (styles/buttons.css). */
+.canvas-studio button:where(:not(.btn)) {
+  background-color: var(--btn-fill);
+  border-color: var(--btn-rim);
+  color: var(--btn-text);
 }
 
 .canvas-studio :is(.cv-sidebar, .cv-tree-editor, .cv-node-panel) :is(input, select, textarea) {
@@ -94,51 +100,47 @@
   color: var(--cv-text);
 }
 
-.canvas-studio button:hover:not(:disabled) {
-  background-color: var(--cv-green-hover);
-  border-color: var(--cv-border-strong);
-  color: #f0fff5;
+.canvas-studio button:where(:not(.btn)):hover:not(:disabled) {
+  background-color: var(--btn-fill-hover);
+  border-color: var(--btn-rim-hover);
+  color: #f1fbf4;
 }
 
-.canvas-studio :is(button, input, select, textarea, [tabindex]):focus-visible {
+.canvas-studio button:where(:not(.btn)):active:not(:disabled) {
+  background-color: var(--btn-fill-press);
+}
+
+.canvas-studio :is(input, select, textarea, [tabindex]):not(.btn):focus-visible {
   outline-color: var(--cv-focus);
   outline-style: solid;
   outline-width: 2px;
 }
 
-.canvas-studio :is(.cv-primary, .cv-panel-params .cv-primary) {
-  background: linear-gradient(145deg, #72e8af, var(--cv-green));
-  border-color: rgba(168, 255, 213, .6);
-  color: #06200e;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .32), 0 0 16px rgba(64, 225, 123, .12);
+.canvas-studio button:where(:not(.btn)):focus-visible {
+  outline: 2px solid rgba(79, 196, 140, .5);
+  outline-offset: 1px;
 }
 
-.canvas-studio .cv-primary:hover:not(:disabled) {
-  background: #8aefbd;
-  border-color: #c3ffda;
-  color: #06200e;
-}
-
-.canvas-studio :is(.cv-tools, .cv-bottom, .cv-sidebar-menu, .cv-sidebar) button {
+.canvas-studio :is(.cv-tools, .cv-bottom, .cv-sidebar-menu, .cv-sidebar) button:where(:not(.btn)) {
   background-color: transparent;
 }
 
-.canvas-studio :is(.cv-tools, .cv-bottom, .cv-sidebar-menu, .cv-sidebar) button:hover:not(:disabled),.canvas-studio .cv-sidebar-menu button:focus-visible {
-  background-color: var(--cv-green-hover);
+.canvas-studio :is(.cv-tools, .cv-bottom, .cv-sidebar-menu, .cv-sidebar) button:where(:not(.btn)):hover:not(:disabled),.canvas-studio .cv-sidebar-menu button:where(:not(.btn)):focus-visible {
+  background-color: var(--btn-fill-hover);
   color: var(--cv-text);
 }
 
-.canvas-studio :is(.cv-tools button[aria-pressed=true], .cv-sidebar-tools button[aria-pressed=true],
-  .cv-sidebar-tabs button[aria-selected=true], .cv-sidebar-node.is-selected,
-  .cv-tree-folder.is-selected, .cv-tree-asset-row.is-selected, .cv-candidates button[aria-pressed=true]) {
-  background-color: var(--cv-green-soft);
-  color: var(--cv-focus);
-  border-color: var(--cv-border-strong);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), inset 0 0 0 1px rgba(126, 235, 180, .23);
+.canvas-studio :is(.cv-tools button:where(:not(.btn))[aria-pressed=true], .cv-sidebar-tools button:where(:not(.btn))[aria-pressed=true],
+  .cv-sidebar-tabs button:where(:not(.btn))[aria-selected=true], .cv-sidebar-node.is-selected,
+  .cv-tree-folder.is-selected, .cv-tree-asset-row.is-selected, .cv-candidates button:where(:not(.btn))[aria-pressed=true]) {
+  background-color: var(--btn-active-fill);
+  color: var(--btn-active-text);
+  border-color: var(--btn-active-rim);
+  box-shadow: none;
 }
 
 .canvas-studio :is(.cv-sidebar-node:hover:not(.is-selected), .cv-sidebar .cv-tree-folder:hover) {
-  background-color: rgba(53, 208, 138, .1);
+  background-color: rgba(255, 255, 255, .04);
 }
 
 .canvas-studio .cv-sidebar :is(.cv-sidebar-node-main, .cv-folder-name) {
@@ -157,7 +159,7 @@
 }
 
 .canvas-studio :is(.cv-sidebar-search, .cv-reference-thumb) {
-  background: rgba(3, 12, 6, .35);
+  background: var(--field);
   border-color: var(--cv-border);
   color: var(--cv-secondary);
 }
@@ -168,25 +170,24 @@
 }
 
 .canvas-studio .cv-node {
-  background: linear-gradient(145deg, rgba(200, 255, 220, .06), rgba(255, 255, 255, .012) 48%, rgba(53, 208, 138, .04)), var(--cv-node-fill);
+  background: var(--cv-node-fill);
   color: var(--cv-text);
   border-color: var(--cv-border-strong);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, .2), inset 1px 0 0 rgba(255, 255, 255, .06), 0 8px 22px rgba(0, 0, 0, .24);
+  box-shadow: var(--shadow-1);
 }
 
 .canvas-studio .cv-node.is-generating {
-  border-color: var(--cv-border-strong);
-  box-shadow: inset 0 1px 0 rgba(182, 250, 204, .08), 0 0 16px rgba(55, 207, 111, .1);
+  border-color: rgba(69, 192, 136, .45);
 }
 
 .canvas-studio .cv-node.is-selected {
-  border-color: var(--cv-focus);
-  box-shadow: 0 0 0 1px rgba(113, 255, 162, .5), 0 10px 28px rgba(0, 0, 0, .42);
+  border-color: var(--accent);
+  box-shadow: var(--ring-selected), 0 4px 16px rgba(0, 0, 0, .35);
 }
 
 /* Media pixels stay neutral: theme tint must not change a creator's preview. */
 .canvas-studio :is(.cv-media, .cv-media-empty) {
-  background-color: rgba(2, 8, 4, .45);
+  background-color: rgba(0, 0, 0, .25);
   border-color: var(--cv-border);
 }
 
@@ -195,22 +196,22 @@
 }
 
 .canvas-studio .cv-node :is(.cv-play-asset, .cv-history-button) {
-  background-color: rgba(3, 10, 5, .62);
+  background-color: rgba(0, 0, 0, .55);
   color: var(--cv-text);
 }
 
 .canvas-studio .cv-port::after {
-  background: #8acaa1;
-  box-shadow: 0 0 0 2px #102017;
+  background: #8b8f95;
+  box-shadow: 0 0 0 2px var(--surface-1);
 }
 
 .canvas-studio :is(.cv-port:hover, .cv-port.is-pending)::after {
-  background: var(--cv-focus);
-  box-shadow: 0 0 0 2px #102017, 0 0 10px rgba(98, 242, 154, .42);
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-1);
 }
 
 .canvas-studio .cv-edge {
-  stroke: #67a67f;
+  stroke: #4c5055;
 }
 
 .canvas-studio .cv-edge.selected {
@@ -218,23 +219,23 @@
 }
 
 .canvas-studio .cv-edge-flow {
-  stroke: #a2ffc3;
-  filter: drop-shadow(0 0 2px rgba(98, 242, 154, .6));
+  stroke: rgba(69, 192, 136, .7);
+  filter: none;
 }
 
 .canvas-studio .cv-selection-box {
   border-color: var(--cv-focus);
-  background: rgba(98, 242, 154, .12);
+  background: rgba(69, 192, 136, .08);
 }
 
 .canvas-studio :is(.cv-reference-role) {
-  background: #bcf4cd;
-  color: #0c2815;
+  background: #e4e5e7;
+  color: #111214;
 }
 
 .canvas-studio .cv-reference-number {
-  background: #0b2819;
-  color: #ebfff1;
+  background: rgba(0, 0, 0, .72);
+  color: #f4f5f6;
 }
 
 .canvas-studio :is(.cv-node-kind, .cv-node-text, .cv-node-status, .cv-save-state, .cv-panel-params label, .cv-hint,
@@ -243,10 +244,10 @@
   color: var(--cv-secondary);
 }
 
-.canvas-studio :is(.cv-sidebar-node-actions button, .cv-sidebar > footer button,
+.canvas-studio :is(.cv-sidebar-node-actions button:where(:not(.btn)), .cv-sidebar > footer button:where(:not(.btn)),
   .cv-sidebar .cv-tree-more, .cv-sidebar .cv-folder-toggle,
   .cv-audio-reference, .cv-shortcut-help dt) {
-  color: #b5e8c6;
+  color: var(--cv-secondary);
 }
 
 .canvas-studio :is(.cv-node-status.error, .cv-save-state.error, .cv-node-panel [role=alert]) {
@@ -254,18 +255,18 @@
 }
 
 .canvas-studio .cv-alert {
-  background: #301b21;
-  border-color: #a76270;
-  color: #ffd9de;
+  background: #251c1d;
+  border-color: rgba(223, 138, 144, .4);
+  color: #f0c9cc;
 }
 
-.canvas-studio .cv-sidebar-menu button.is-danger,.canvas-studio .is-danger,.cv-sidebar-menu button.is-danger {
+.canvas-studio .cv-sidebar-menu button:where(:not(.btn)).is-danger,.canvas-studio .is-danger,.cv-sidebar-menu button:where(:not(.btn)).is-danger {
   color: var(--cv-danger);
 }
 
 
 
-.canvas-studio .cv-rating-editor button {
+.canvas-studio .cv-rating-editor button:where(:not(.btn)) {
   color: var(--cv-warning);
 }
 
@@ -279,45 +280,49 @@
 /* Rounded surfaces share the video tool's glass family without moving boxes. */
 .canvas-studio :is(.cv-sidebar, .cv-node, .cv-node-panel,
   .cv-delete-dialog, .cv-shortcut-help, .cv-media-viewer) {
-  border-radius: 18px;
+  border-radius: var(--r-xl);
 }
 
 .canvas-studio :is(.cv-context-menu, .cv-sidebar-menu, .cv-history-popover,
   .cv-tree-editor, .cv-parameters-popover, .cv-studio-overlay > div) {
-  border-radius: 16px;
+  border-radius: var(--r-lg);
 }
 
 .canvas-studio :is(.cv-topbar, .cv-tools, .cv-bottom, .cv-image-toolbar,
   .cv-sidebar-tabs, .cv-sidebar-search, .cv-reference-thumb) {
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 
-.canvas-studio :is(button, input, select, textarea) {
-  border-radius: 10px;
+.canvas-studio :is(input, select, textarea) {
+  border-radius: 8px;
+}
+
+.canvas-studio button:where(:not(.btn)) {
+  border-radius: var(--btn-radius);
 }
 
 .canvas-studio :is(.cv-sidebar-node, .cv-tree-folder, .cv-tree-asset-row) {
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 
 .canvas-studio :is(.cv-media, .cv-media-empty, .cv-generation-preview, .cv-play-asset) {
-  border-radius: 12px;
+  border-radius: var(--r-md);
 }
 
 .canvas-studio .cv-node-head {
-  border-radius: 17px 17px 0 0;
+  border-radius: 9px 9px 0 0;
 }
 
 .canvas-studio .cv-video-node-footer {
-  border-radius: 0 0 17px 17px;
+  border-radius: 0 0 9px 9px;
 }
 
 .canvas-studio .cv-sidebar-top {
-  border-radius: 17px 17px 0 0;
+  border-radius: 9px 9px 0 0;
 }
 
 .canvas-studio .cv-sidebar > footer {
-  border-radius: 0 0 17px 17px;
+  border-radius: 0 0 9px 9px;
 }
 
 .canvas-studio input[type=checkbox] {
@@ -358,7 +363,7 @@
 @media (prefers-reduced-transparency: reduce) {
   .canvas-studio {
     --cv-glass: var(--cv-glass-solid);
-    --cv-field: #06110a;
+    --cv-field: #141516;
     --cv-node-fill: var(--cv-glass-solid);
     --cv-glass-strong: var(--cv-glass-solid);
   }
@@ -386,9 +391,9 @@
 
 @media (prefers-contrast: more) {
   .canvas-studio {
-    --cv-border: #5fbf88;
-    --cv-border-strong: #a8f0c6;
-    --cv-secondary: #d4f2de;
+    --cv-border: rgba(255, 255, 255, .3);
+    --cv-border-strong: rgba(255, 255, 255, .5);
+    --cv-secondary: #cfd1d4;
     --cv-glass: var(--cv-glass-solid);
     --cv-glass-strong: var(--cv-glass-solid);
     --cv-node-fill: var(--cv-glass-solid);
@@ -405,27 +410,27 @@
 
 /* The mention menu is portalled to body; opt in only from the canvas caller. */
 .prompt-mention-menu.cv-mention-menu {
-  background: linear-gradient(145deg, rgba(200, 255, 220, .06), rgba(53, 208, 138, .02)), rgba(4, 10, 6, .66);
-  border-color: rgba(150, 245, 185, .32);
-  border-radius: 16px;
-  color: #e3f5e8;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, .3), inset 0 1px 1px rgba(255, 255, 255, .22);
-  -webkit-backdrop-filter: blur(20px) saturate(125%);
-  backdrop-filter: blur(20px) saturate(125%);
+  background: var(--overlay-fill);
+  border-color: var(--border-strong);
+  border-radius: var(--r-lg);
+  color: var(--text);
+  box-shadow: var(--shadow-2);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .cv-mention-menu .prompt-mention-option {
-  border-radius: 10px;
-  color: #e3f5e8;
+  border-radius: var(--r-sm);
+  color: var(--text);
 }
 
 .cv-mention-menu .prompt-mention-option[aria-selected=true] {
-  background: rgba(53, 208, 138, .18);
-  box-shadow: inset 0 0 0 1px rgba(126, 235, 180, .28);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(79, 196, 140, .3);
 }
 
 .cv-mention-menu .text-nexus-muted {
-  color: #a9c9b3;
+  color: var(--text-2);
 }
 
 .canvas-studio .cv-reference-thumb.is-dragging {
@@ -439,13 +444,13 @@
 
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .prompt-mention-menu.cv-mention-menu {
-    background: #07110b;
+    background: var(--surface-2);
   }
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .prompt-mention-menu.cv-mention-menu {
-    background: #07110b;
+    background: var(--surface-2);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -476,7 +481,7 @@
   }
 
   .canvas-studio :is(.cv-node.is-selected, .cv-sidebar-node.is-selected,
-    button[aria-selected=true], button[aria-pressed=true]),.cv-mention-menu .prompt-mention-option[aria-selected=true] {
+    button:where(:not(.btn))[aria-selected=true], button:where(:not(.btn))[aria-pressed=true]),.cv-mention-menu .prompt-mention-option[aria-selected=true] {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
@@ -504,23 +509,134 @@
 .canvas-studio .cv-topbar { flex-wrap: nowrap; gap: 8px; min-width: 0; }
 .canvas-studio .cv-topbar .cv-project-name { min-width: 80px; flex: 0 1 320px; text-overflow: ellipsis; }
 .canvas-studio .cv-topbar .cv-save-state { white-space: nowrap; font-size: 12px; }
-.canvas-studio .cv-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; flex-shrink: 0; }
 .canvas-studio .cv-edit-tools { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
 .canvas-studio .cv-retry-save { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--cv-warning); border-color: var(--cv-warning); font-size: 12px; }
-.canvas-studio .cv-more-menu button,.cv-sidebar-menu.cv-more-menu button { display: flex; align-items: center; gap: 8px; width: 100%; }
-.cv-sidebar-menu.cv-more-menu kbd { margin-left: auto; padding-left: 16px; font-family: var(--font-mono, monospace); font-size: 12px; color: var(--cv-secondary, #b6c9bb); }
-.canvas-studio .cv-bottom button { display: inline-flex; align-items: center; gap: 5px; }
-.canvas-studio .cv-task-failure { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid rgba(255, 163, 169, .45); border-radius: 10px; background: rgba(48, 16, 20, .55); color: var(--cv-danger); font-size: 12px; flex-shrink: 0; }
+.canvas-studio .cv-more-menu button:where(:not(.btn)),.cv-sidebar-menu.cv-more-menu button:where(:not(.btn)) { display: flex; align-items: center; gap: 8px; width: 100%; }
+.cv-sidebar-menu.cv-more-menu kbd { margin-left: auto; padding-left: 16px; font-family: var(--font-mono, monospace); font-size: 12px; color: var(--cv-secondary); }
+.canvas-studio .cv-bottom button:where(:not(.btn)) { display: inline-flex; align-items: center; gap: 5px; }
+.canvas-studio .cv-task-failure { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid rgba(223, 138, 144, .35); border-radius: var(--r-md); background: var(--danger-soft); color: var(--cv-danger); font-size: 12px; flex-shrink: 0; }
 .canvas-studio .cv-task-failure.is-unknown { border-color: rgba(241, 206, 130, .5); background: rgba(44, 34, 10, .55); color: var(--cv-warning); }
 .canvas-studio .cv-task-failure { gap: 2px; padding: 6px 10px; }
 .canvas-studio .cv-task-failure strong span { font-weight: 400; }
 .canvas-studio .cv-task-failure p { margin: 0; color: var(--cv-text); white-space: pre-wrap; word-break: break-word; max-height: 40px; overflow: auto; }
 .canvas-studio .cv-task-check { display: flex; align-items: center; gap: 8px; color: var(--cv-secondary); }
-.canvas-studio .cv-task-check button { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; }
+.canvas-studio .cv-task-check button:where(:not(.btn)) { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; }
 .canvas-studio .cv-stale-notice { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid rgba(241, 206, 130, .45); border-radius: 10px; color: var(--cv-warning); font-size: 12px; flex-shrink: 0; }
-.canvas-studio .cv-stale-notice button { margin-left: auto; white-space: nowrap; font-size: 12px; padding: 2px 8px; }
-.canvas-studio .cv-node-stale { position: absolute; top: 40px; right: 10px; z-index: 3; padding: 2px 8px; border: 1px solid rgba(241, 206, 130, .6); border-radius: 999px; background: #1d1806; color: var(--cv-warning); font-size: 12px; pointer-events: none; }
+.canvas-studio .cv-stale-notice button:where(:not(.btn)) { margin-left: auto; white-space: nowrap; font-size: 12px; padding: 2px 8px; }
+.canvas-studio .cv-node-stale { position: absolute; top: 40px; right: 10px; z-index: 3; padding: 2px 8px; border: 1px solid rgba(214, 189, 134, .5); border-radius: 999px; background: #1e1b14; color: var(--cv-warning); font-size: 12px; pointer-events: none; }
 .canvas-studio .cv-node-status.is-unknown { color: var(--cv-warning); }
 .canvas-studio .cv-run-selected { display: inline-flex; align-items: center; gap: 5px; }
 .canvas-studio .cv-alert.cv-alert-stack{flex-direction:column;align-items:flex-start;gap:4px}
-.canvas-studio .cv-alert.cv-alert-stack button{align-self:flex-end}
+.canvas-studio .cv-alert.cv-alert-stack button:where(:not(.btn)){align-self:flex-end}
+
+/* UI-ITER-R1 #1/#8: readable node text, low-zoom LOD, media-area task states. */
+.canvas-studio .cv-node-title { font-size: 14px; }
+.canvas-studio .cv-node :is(.cv-node-kind, .cv-node-status, .cv-video-estimate) { font-size: 12px; }
+/* Below LOD_ZOOM (12px would render under 10px) keep only the title and the media state. */
+.canvas-studio .cv-world.is-lod-low .cv-node :is(.cv-node-kind, .cv-node-status, .cv-video-estimate, .cv-media-state-reason, .cv-media-state-elapsed, .cv-media-empty > span) { visibility: hidden; }
+.canvas-studio .cv-world.is-lod-low .cv-node-title { font-size: 16px; }
+.canvas-studio .cv-media-state { position: relative; z-index: 2; gap: 4px; padding: 8px 12px; text-align: center; }
+.canvas-studio .cv-media-state strong { font-size: 14px; font-weight: 600; }
+.canvas-studio .cv-media-state-reason { font-size: 12px; line-height: 1.4; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.canvas-studio .cv-media-state-elapsed { font-size: 12px; font-variant-numeric: tabular-nums; }
+.canvas-studio .cv-media-state.is-failed { border-style: solid; border-color: rgba(223, 138, 144, .35); background-color: var(--danger-soft); color: var(--cv-danger); }
+.canvas-studio .cv-media-state.is-failed .cv-media-state-reason { color: var(--cv-text); }
+.canvas-studio .cv-media-state.is-failed button:where(:not(.btn)) { margin-top: 2px; font-size: 12px; padding: 2px 10px; min-height: 24px; color: var(--cv-danger); border-color: rgba(223, 138, 144, .35); }
+.canvas-studio .cv-media-state.is-busy { color: var(--accent); background-color: rgba(0, 0, 0, .2); border-style: solid; }
+.canvas-studio .cv-media-state.is-busy strong { text-shadow: 0 0 8px rgba(0, 0, 0, .9); }
+.canvas-studio .cv-media-badge { position: absolute; z-index: 3; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: rgba(12, 13, 14, .85); border: 1px solid var(--cv-border-strong); color: var(--accent); pointer-events: none; }
+.canvas-studio .cv-media-badge.is-failed { color: var(--cv-danger); border-color: rgba(223, 138, 144, .45); }
+.canvas-studio .cv-node.is-failed { border-color: var(--cv-danger); box-shadow: 0 0 0 1px rgba(223, 138, 144, .3), var(--shadow-1); }
+.canvas-studio .cv-node.is-unknown { border-color: var(--cv-warning); }
+.canvas-studio .cv-node.is-failed.is-selected { box-shadow: 0 0 0 2px var(--cv-danger), 0 10px 28px rgba(0, 0, 0, .42); }
+.canvas-studio .cv-spin { animation: cv-spin 1.1s linear infinite; }
+@keyframes cv-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .canvas-studio .cv-spin { animation: none; } }
+.canvas-studio .cv-node.is-unknown .cv-media-state.is-failed, .canvas-studio .cv-node.is-unknown .cv-media-badge.is-failed { color: var(--cv-warning); border-color: rgba(214, 189, 134, .45); }
+/* Ports are positioned dots, not buttons: opt out of the unclassed-button fallback by specificity. */
+.canvas-studio .cv-node .cv-port { position: absolute; z-index: 2; padding: 0; min-height: 0; border-radius: 50%; box-shadow: none; display: grid; place-items: center; }
+
+/* UI-ITER-R1 #3: one-row chip parameter bar (LibTV-style), labels live in aria-label/title only.
+ * Chips share one baseline and height; selects use the customizable-select picker (keyboard and
+ * screen-reader behaviour of a native select) themed with tokens; older engines fall back to a
+ * themed closed select with a chevron. Estimate + round primary button sit at the right end. */
+.canvas-studio .cv-generation-panel .cv-panel-params { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-height: 36px; height: auto; flex-shrink: 0; min-width: 0; }
+.canvas-studio .cv-panel-params .cv-chip {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; max-width: 220px;
+  height: 28px; min-height: 28px; padding: 0 10px; margin: 0;
+  border: 1px solid var(--btn-rim); border-radius: var(--r-pill); background: var(--btn-fill); color: var(--btn-text);
+  font: 500 13px/1 var(--font-sans, Inter, system-ui, sans-serif); letter-spacing: var(--btn-tracking);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: var(--btn-transition);
+}
+.canvas-studio .cv-panel-params .cv-chip:hover:not(:disabled) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); color: var(--text); }
+.canvas-studio .cv-panel-params .cv-chip:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.canvas-studio .cv-panel-params .cv-chip[aria-expanded=true] { border-color: var(--btn-active-rim); background: var(--btn-active-fill); color: var(--btn-active-text); }
+.canvas-studio .cv-panel-params .cv-chip:disabled { opacity: .4; cursor: not-allowed; }
+.canvas-studio .cv-panel-params .cv-chip svg { flex-shrink: 0; color: var(--text-2); }
+.canvas-studio .cv-panel-params .cv-output-summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.canvas-studio .cv-panel-params .cv-node-provider { flex-shrink: 2; }
+.canvas-studio .cv-panel-params .cv-chip-select {
+  appearance: none; -webkit-appearance: none; padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a4a9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 8px center; background-color: var(--btn-fill);
+}
+@supports (appearance: base-select) {
+  .canvas-studio .cv-panel-params .cv-chip-select,
+  .canvas-studio .cv-panel-params .cv-chip-select::picker(select) { appearance: base-select; }
+  .canvas-studio .cv-panel-params .cv-chip-select { padding-right: 8px; background-image: none; }
+  .canvas-studio .cv-panel-params .cv-chip-select::picker-icon { content: ''; width: 14px; height: 14px; margin-left: 2px; background: currentColor; color: var(--text-2);
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/14px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center/14px no-repeat; transition: rotate var(--dur-fast) var(--ease-out); }
+  .canvas-studio .cv-panel-params .cv-chip-select:open::picker-icon { rotate: 180deg; }
+  .canvas-studio .cv-panel-params .cv-chip-select::picker(select) {
+    margin-block: 6px; padding: 4px; min-width: anchor-size(width); max-height: 320px;
+    border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--overlay-fill); color: var(--text);
+    box-shadow: var(--shadow-2); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  }
+  .canvas-studio .cv-panel-params .cv-chip-select option { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border-radius: var(--r-sm); background: transparent; color: var(--text); font-size: 13px; cursor: pointer; }
+  .canvas-studio .cv-panel-params .cv-chip-select option:is(:hover, :focus-visible) { background: rgba(255, 255, 255, .06); outline: none; }
+  .canvas-studio .cv-panel-params .cv-chip-select option:checked { color: var(--btn-active-text); background: var(--btn-active-fill); }
+  .canvas-studio .cv-panel-params .cv-chip-select option::checkmark { content: '✓'; order: 1; margin-left: auto; color: var(--accent); }
+  .canvas-studio .cv-panel-params .cv-chip-select option:disabled { color: var(--text-3); cursor: default; }
+}
+.canvas-studio .cv-generation-panel .cv-generation-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
+.canvas-studio .cv-generation-actions .cv-video-estimate { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.canvas-studio .cv-generation-actions .cv-generate svg { width: 16px; height: 16px; }
+@media (prefers-reduced-motion: reduce) { .canvas-studio .cv-panel-params .cv-chip-select::picker-icon { transition: none; } }
+/* UI-FIXES-20261113 keeps full video model names visible: the model chip never truncates. */
+.canvas-studio .cv-panel-params .cv-chip-select[aria-label="视频模型"] { max-width: none; flex-shrink: 0; }
+/* Compact popover chrome so the output popover still fits below the panel at 1440×900. */
+.canvas-studio .cv-parameters-popover { padding: 8px 12px 12px; }
+.canvas-studio .cv-parameters-popover header { margin-bottom: 4px; }
+
+/* UI-ITER-R1 multi-resolution (1280×800 … 2560×1440): the canvas column is a size container so
+ * toolbars adapt to the space left by the sidebar instead of the viewport. */
+.canvas-studio .cv-main { container: cv-main / inline-size; }
+@container cv-main (max-width: 1040px) {
+  .canvas-studio .cv-bottom .cv-bottom-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .canvas-studio .cv-topbar .cv-save-state { max-width: 96px; overflow: hidden; text-overflow: ellipsis; }
+}
+
+/* UI-ITER-R1 rework M1: node edit panel is a solid surface (no blur, no see-through). */
+.canvas-studio .cv-node-panel {
+  background: var(--surface-solid);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* M2/M4: prompt never collapses below 72px; failure card is one line; 8px 12px inset. */
+.canvas-studio .cv-generation-panel .cv-prompt-mention { flex: 1 0 72px; min-height: 72px; }
+.canvas-studio .cv-generation-panel .cv-panel-prompt { flex: 1 0 auto; min-height: 72px; padding: 8px 12px; }
+.canvas-studio .cv-generation-panel .cv-task-failure { flex-direction: row; align-items: center; flex-wrap: nowrap; gap: 8px; min-width: 0; overflow: hidden; }
+.canvas-studio .cv-generation-panel .cv-task-failure > * { white-space: nowrap; flex-shrink: 0; }
+.canvas-studio .cv-generation-panel .cv-task-failure p { flex: 1 1 auto; min-width: 0; max-height: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-studio .cv-generation-panel .cv-task-failure strong span { display: none; }
+.canvas-studio .cv-generation-panel .cv-task-check { overflow: hidden; text-overflow: ellipsis; }
+
+/* M3: node bottom status is a single ellipsised line (full text lives in title). */
+.canvas-studio .cv-node-status,
+.canvas-studio .cv-node-status:hover,
+.canvas-studio .cv-node-status:focus {
+  display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  -webkit-line-clamp: unset; line-clamp: unset; position: static; padding: 0; box-shadow: none; background: transparent;
+}

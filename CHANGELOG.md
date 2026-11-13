@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 - 2026-11-14
+
+- New design language: restrained neutral near-black base with green used only as an accent (focus, selection, primary actions, generating state); glass effects limited to floating panels and menus.
+- Unified button system (primary, secondary, ghost, danger, icon) with consistent sizing and subtle hover, press and focus states.
+- Readable canvas zoom: locating a node zooms to 100%, fit-all never goes below 75%, node text is at least 12px; failed and generating nodes show their state directly on the node.
+- Node panel parameters are a single row of compact pills with themed dropdowns and a round generate button; the panel is now fully opaque.
+- Sidebar node rows show thumbnails or type icons with status dots; the assets tab shows the asset count; the more-actions menu is grouped.
+- Layouts adapt to 1280×800 through 2560×1440 screens; the asset library grid scrolls independently with pagination always visible.
+
 ## 1.1.1 - 2026-11-13
 
 - Canvas status alerts now sit above the bottom toolbar and can be dismissed, so they no longer cover node titles.
