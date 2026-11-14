@@ -10,6 +10,9 @@ URL inside ``result`` is reduced to ``scheme://host/…`` and URLs embedded in
 ``error`` text lose their path and query.  Relative local links and ``params``
 (user inputs reused by "复用参数") are left untouched.  The stored row is never
 modified; download, write-back and cache code keep reading ``tasks.get_task``.
+
+EP-MASK-20261115: error texts (and text fields inside ``result``) also have Ark
+endpoint IDs reduced to ``ep-***``; ``params`` and the prompt stay untouched.
 """
 import copy
 import re
@@ -22,6 +25,20 @@ _SIGNED_QUERY = re.compile(
     r'\?[^\s\'"<>]*(?:signature|credential|token|x-tos-|x-amz-|expires|sig=|key=)[^\s\'"<>]*',
     re.IGNORECASE,
 )
+# EP-MASK-20261115: Ark/BytePlus endpoint (接入点) IDs such as
+# ``ep-<14 digit timestamp>-<suffix>`` (and the ``ep-m-`` model-endpoint form)
+# echo back in Provider error texts.  They identify the account's deployment and
+# are reduced to ``ep-***``.  Requiring 8+ digits keeps words like "step-2" or a
+# prompt's "ep-1" untouched.
+_ENDPOINT_ID = re.compile(r'(?<![A-Za-z0-9_-])ep-(?:m-)?[0-9]{8,}-[A-Za-z0-9]+', re.IGNORECASE)
+ENDPOINT_MASK = 'ep-***'
+
+
+def mask_endpoint_ids(value):
+    """Replace Ark endpoint IDs in a string; non-strings are returned unchanged."""
+    if not isinstance(value, str) or 'ep-' not in value.lower():
+        return value
+    return _ENDPOINT_ID.sub(ENDPOINT_MASK, value)
 
 
 def mask_url(value):
@@ -44,7 +61,7 @@ def mask_text(value):
     if not isinstance(value, str) or not value:
         return value
     masked = _URL_IN_TEXT.sub(lambda match: mask_url(match.group(0)), value)
-    return _SIGNED_QUERY.sub('?…', masked)
+    return mask_endpoint_ids(_SIGNED_QUERY.sub('?…', masked))
 
 
 def _mask_tree(value):
@@ -55,9 +72,23 @@ def _mask_tree(value):
     if isinstance(value, str):
         if re.match(r'https?://', value, re.IGNORECASE):
             return mask_url(value)
-        # Text fields (e.g. error_details.message) may embed a remote address.
-        return _URL_IN_TEXT.sub(lambda match: mask_url(match.group(0)), value)
+        # Text fields (e.g. error_details.message) may embed a remote address
+        # or an Ark endpoint ID.
+        return mask_endpoint_ids(_URL_IN_TEXT.sub(lambda match: mask_url(match.group(0)), value))
     return value
+
+
+# VIDEO-SIGNAL-20261115: the only stage words a client may see.  A stage is
+# meaningful only while the task is 'processing'; any other status reports None so
+# a stale value can never outlive a failure, cancellation or completion.
+PUBLIC_TASK_STAGES = frozenset({'downloading'})
+
+
+def public_stage(task):
+    stage = task.get('stage') if isinstance(task, dict) else None
+    if task.get('status') != 'processing' or stage not in PUBLIC_TASK_STAGES:
+        return None
+    return stage
 
 
 def public_task(task):
@@ -65,6 +96,8 @@ def public_task(task):
     if not task:
         return task
     data = copy.copy(task)
+    if 'stage' in data:
+        data['stage'] = public_stage(data)
     if isinstance(data.get('result'), (dict, list)):
         data['result'] = _mask_tree(data['result'])
     if data.get('error'):

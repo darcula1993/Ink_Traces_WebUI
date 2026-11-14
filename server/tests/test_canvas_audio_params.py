@@ -154,7 +154,9 @@ def test_speaker_counts_toward_three_reference_limit(monkeypatch):
     sent = configure(monkeypatch)
     workflow = audio_canvas({'speaker':'kian'})
     before = tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0]
+    # Canvas defaults so the request matches the saved node and reaches the limit check.
     response = submit_form(workflow, {'speaker':'kian', 'reference_mode':'audio',
+                                      'output_format':'mp3', 'sample_rate':'48000', 'enable_subtitle':'true',
                                       'references':[wav_upload('one'), wav_upload('two'), wav_upload('three')]})
     assert response.status_code == 400
     assert '最多支持 3 个' in response.json['error']
@@ -204,3 +206,130 @@ def test_speaker_with_audio_files_uses_multipart_strings(monkeypatch):
     body = sent[0]['json']
     assert body['references'] == [{'speaker':'vivi'}, {'audio_url':'asset://asset_1'}, {'audio_url':'asset://asset_2'}]
     assert body['audio_config'] == {'format':'wav', 'sample_rate':16000, 'enable_subtitle':False}
+
+
+def task_count():
+    return tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0]
+
+
+SAVED = {'speaker':'vivi', 'output_format':'wav', 'sample_rate':16000, 'enable_subtitle':False}
+MATCHING = {'speaker':'vivi', 'output_format':'wav', 'sample_rate':16000, 'enable_subtitle':False, 'reference_mode':'audio'}
+
+
+def test_matching_saved_params_submit(monkeypatch):
+    sent = configure(monkeypatch)
+    workflow = audio_canvas(SAVED)
+    response = submit_form(workflow, MATCHING)
+    assert response.status_code == 202, response.json
+    assert poll(response.json['task_id'])['state'] == 'pending'
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize('field, value', [
+    ('speaker', 'mindy'), ('speaker', ''), ('output_format', 'mp3'), ('sample_rate', 48000),
+    ('sample_rate', 44100), ('enable_subtitle', True), ('watermark', True),
+])
+def test_mismatched_param_rejected_without_provider(monkeypatch, field, value):
+    sent = configure(monkeypatch)
+    workflow = audio_canvas(SAVED)
+    before = task_count()
+    response = submit_form(workflow, {**MATCHING, field:value})
+    assert response.status_code == 409, response.json
+    assert '重新载入' in response.json['error']
+    assert task_count() == before
+    assert tasks.claim_next_task('audio-worker') is None
+    assert sent == []
+
+
+@pytest.mark.parametrize('field', ['output_format', 'sample_rate', 'enable_subtitle', 'speaker'])
+def test_missing_field_uses_server_default_and_is_checked(monkeypatch, field):
+    # Server fallback (sample_rate 44100) differs from the canvas default 48000, so an
+    # omitted field cannot silently produce different audio.
+    sent = configure(monkeypatch)
+    workflow = audio_canvas({'speaker':'vivi', 'output_format':'wav', 'sample_rate':48000, 'enable_subtitle':False})
+    fields = {'speaker':'vivi', 'output_format':'wav', 'sample_rate':48000, 'enable_subtitle':False, 'reference_mode':'audio'}
+    fields.pop(field)
+    response = submit_form(workflow, fields)
+    assert response.status_code == 409, response.json
+    assert sent == []
+
+
+def test_unset_node_requires_canvas_defaults(monkeypatch):
+    sent = configure(monkeypatch)
+    workflow = audio_canvas()
+    response = submit_form(workflow, {'reference_mode':'none'})  # server fallback 44100 != 48000
+    assert response.status_code == 409
+    response = submit_form(workflow, {'output_format':'mp3', 'sample_rate':44100, 'enable_subtitle':True, 'reference_mode':'none'})
+    assert response.status_code == 409
+    assert sent == []
+
+
+def test_reference_mode_must_follow_references(monkeypatch):
+    sent = configure(monkeypatch)
+    workflow = audio_canvas()
+    base = {'output_format':'mp3', 'sample_rate':48000, 'enable_subtitle':True}
+    # Audio references submitted, mode must be audio; an empty 'audio' mode without references is rejected.
+    assert submit_form(workflow, {**base, 'reference_mode':'audio'}).status_code == 409
+    before = task_count()
+    response = submit_form(workflow, {**base, 'reference_mode':'audio', 'references':[wav_upload('one')]})
+    assert response.status_code == 202, response.json
+    assert task_count() == before + 1
+    assert sent == []
+
+
+def provider_asset_count():
+    return tasks.get_db().execute('SELECT count(*) FROM provider_assets').fetchone()[0]
+
+
+@pytest.mark.parametrize('field, value', [
+    ('speaker', 'mindy'), ('output_format', 'mp3'), ('sample_rate', '24000'),
+    ('enable_subtitle', 'true'), ('watermark', 'true'),
+])
+def test_multipart_mismatch_rejected_before_upload(monkeypatch, field, value):
+    # QA D1: a 409 must not leave a pending provider asset that the asset worker would
+    # later POST to Cupsy /v1/assets.
+    sent = configure(monkeypatch)
+    workflow = audio_canvas(SAVED)
+    before, assets_before = task_count(), provider_asset_count()
+    response = submit_form(workflow, {**MATCHING, 'sample_rate':'16000', 'enable_subtitle':'false', field:value,
+                                      'references':[wav_upload('one'), wav_upload('two')]})
+    assert response.status_code == 409, response.json
+    assert task_count() == before
+    assert provider_asset_count() == assets_before
+    claimed = tasks.claim_next_provider_asset('asset-worker')
+    if claimed:
+        application.process_cupsy_asset_once(claimed['id'])
+    assert claimed is None
+    assert sent == []
+
+
+def test_multipart_reference_mode_mismatch_rejected_before_upload(monkeypatch):
+    sent = configure(monkeypatch)
+    workflow = audio_canvas()
+    assets_before = provider_asset_count()
+    response = submit_form(workflow, {'output_format':'mp3', 'sample_rate':'48000', 'enable_subtitle':'true',
+                                      'reference_mode':'none', 'references':[wav_upload('one')]})
+    assert response.status_code == 409, response.json
+    assert provider_asset_count() == assets_before
+    assert tasks.claim_next_provider_asset('asset-worker') is None
+    assert sent == []
+
+
+def test_multipart_match_still_queues_upload(monkeypatch):
+    sent = configure(monkeypatch)
+    workflow = audio_canvas(SAVED)
+    assets_before = provider_asset_count()
+    response = submit_form(workflow, {**MATCHING, 'sample_rate':'16000', 'enable_subtitle':'false',
+                                      'references':[wav_upload('one')]})
+    assert response.status_code == 202, response.json
+    assert provider_asset_count() == assets_before + 1
+    assert sent == []
+
+
+def test_legacy_tool_audio_request_not_bound_to_canvas(monkeypatch):
+    sent = configure(monkeypatch)
+    response = application.app.test_client().post('/api/audio/generate', json={
+        'prompt':'synthetic', 'provider':'cupsy', 'output_format':'mp3', 'reference_mode':'none'})
+    assert response.status_code == 202, response.json
+    assert tasks.get_task(response.json['task_id'])['params']['sample_rate'] == 44100
+    assert sent == []

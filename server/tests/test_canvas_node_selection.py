@@ -182,6 +182,9 @@ def test_node_selection_real_submission_and_conflicts(monkeypatch, kind, form):
     # Independent node remains valid whatever a legacy project default row says.
     legacy_project_default(project['id'], kind, 'cupsy')
     body = {**request_for(workflow,node), 'prompt':'synthetic', 'video_mode':'reference'}
+    if kind == 'audio':
+        # Canvas audio submissions must carry the saved node's (default) output options.
+        body.update(output_format='mp3', sample_rate=48000, enable_subtitle=True)
     url = {'image':'/api/generate', 'video':'/api/video/generate', 'audio':'/api/audio/generate'}[kind]
     client = application.app.test_client()
     def post(data):

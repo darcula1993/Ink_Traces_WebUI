@@ -1,0 +1,1960 @@
+{
+ "comment": "GROUP-RUN-20261115 A1: shared by server/tests/test_canvas_submit.py and client/tests/canvasSubmitParity.test.js. workflow id wf1, revision 3; sources are the four GET payloads the browser reads for capabilities.",
+ "workflow": {
+  "id": "wf1",
+  "revision": 3
+ },
+ "sources": {
+  "image": {
+   "providers": {
+    "cupsy": {
+     "name": "Cupsy",
+     "model": "seedream-5.0-pro",
+     "available": true
+    },
+    "ark": {
+     "name": "BytePlus Ark",
+     "model": "seedream-5-0-pro",
+     "capability_model": "seedream-5-0-pro",
+     "available": true
+    }
+   }
+  },
+  "video": {
+   "providers": {
+    "ark": {
+     "available": true,
+     "models": [
+      "seedance-2.0",
+      "seedance-2.5"
+     ]
+    },
+    "cupsy": {
+     "available": true,
+     "models": [
+      "seedance-2.5",
+      "seedance-2.5-moderated"
+     ]
+    }
+   }
+  },
+  "audio": {
+   "providers": {
+    "cupsy": {
+     "available": true,
+     "models": [
+      "seed-audio-1.0"
+     ]
+    }
+   }
+  },
+  "profiles": [
+   {
+    "id": "99999999999999999999999999999999",
+    "kind": "image",
+    "adapter": "ark",
+    "name": "5.5 账号",
+    "enabled": true,
+    "has_api_key": true,
+    "is_default": false,
+    "revision": 1,
+    "settings": {
+     "endpoint": "https://example.invalid",
+     "model": "dola-seedream-5-5-261028"
+    }
+   },
+   {
+    "id": "88888888888888888888888888888888",
+    "kind": "image",
+    "adapter": "ark",
+    "name": "已停用",
+    "enabled": false,
+    "has_api_key": true,
+    "is_default": false,
+    "revision": 1,
+    "settings": {
+     "endpoint": "https://example.invalid"
+    }
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "image: upstream text + own text, JS trim, JSON body",
+   "nodes": [
+    {
+     "id": "t",
+     "type": "text",
+     "title": "t",
+     "x": 0,
+     "y": 0,
+     "text": "  上游描述\n"
+    },
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "﻿自身提示　",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "t-n",
+     "source": "t",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "path": "/api/generate",
+    "multipart": false,
+    "fields": {
+     "prompt": "上游描述\n\n自身提示",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "aspect_ratio": "1:1",
+     "resolution": "1K",
+     "output_format": "png",
+     "background": "default",
+     "watermark": false,
+     "model": "seedream-5-0-pro"
+    },
+    "files": []
+   }
+  },
+  {
+   "name": "image: upstream asset + references + group, referenceOrder and @mention, custom size on Cupsy",
+   "nodes": [
+    {
+     "id": "u",
+     "type": "asset",
+     "title": "u",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "a.png",
+      "mime_type": "image/png",
+      "kind": "image",
+      "size_bytes": 10,
+      "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "candidates": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ],
+     "selectedCandidateId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "让 @图片1 与 @图片3 融合",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "ratio": "custom",
+      "custom_width": 1280,
+      "custom_height": 720
+     },
+     "referenceAssets": [
+      {
+       "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "name": "b.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+       "id": "cccccccccccccccccccccccccccccccc",
+       "name": "c.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/cccccccccccccccccccccccccccccccc"
+      }
+     ],
+     "referenceGroups": [
+      {
+       "id": "g1",
+       "title": "组",
+       "asset_ids": [
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "cccccccccccccccccccccccccccccccc"
+       ]
+      }
+     ],
+     "referenceOrder": [
+      "cccccccccccccccccccccccccccccccc",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     ],
+     "referenceMentions": {
+      "@图片1": "cccccccccccccccccccccccccccccccc",
+      "@图片3": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "u-n",
+     "source": "u",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "path": "/api/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "让 @图片1 与 @图片3 融合",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "cupsy",
+     "aspect_ratio": "custom",
+     "custom_width": 1280,
+     "custom_height": 720,
+     "output_format": "png",
+     "background": "default",
+     "watermark": false,
+     "model": "seedream-5.0-pro"
+    },
+    "files": [
+     [
+      "images",
+      "cccccccccccccccccccccccccccccccc",
+      "c.png"
+     ],
+     [
+      "images",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a.png"
+     ],
+     [
+      "images",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "b.png"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "image: duplicate reference keeps first position, unranked keep insertion order",
+   "nodes": [
+    {
+     "id": "u",
+     "type": "asset",
+     "title": "u",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "a.png",
+      "mime_type": "image/png",
+      "kind": "image",
+      "size_bytes": 10,
+      "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "candidates": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ],
+     "selectedCandidateId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "name": "b.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+       "id": "cccccccccccccccccccccccccccccccc",
+       "name": "c.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/cccccccccccccccccccccccccccccccc"
+      }
+     ],
+     "referenceOrder": [
+      "cccccccccccccccccccccccccccccccc"
+     ]
+    }
+   ],
+   "edges": [
+    {
+     "id": "u-n",
+     "source": "u",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "path": "/api/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "p",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "aspect_ratio": "1:1",
+     "resolution": "1K",
+     "output_format": "png",
+     "background": "default",
+     "watermark": false,
+     "model": "seedream-5-0-pro"
+    },
+    "files": [
+     [
+      "images",
+      "cccccccccccccccccccccccccccccccc",
+      "c.png"
+     ],
+     [
+      "images",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a.png"
+     ],
+     [
+      "images",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "b.png"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "image: Ark 5.0 transparent background reads Alpha metadata",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "params": {
+      "background": "transparent"
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "metadata": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+     "has_alpha": true,
+     "width": 1024,
+     "height": 1024
+    }
+   },
+   "expect": {
+    "path": "/api/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "p",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "aspect_ratio": "1:1",
+     "resolution": "1K",
+     "output_format": "png",
+     "background": "transparent",
+     "watermark": false,
+     "model": "seedream-5-0-pro"
+    },
+    "files": [
+     [
+      "images",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reference.png"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "image: Alpha missing is refused",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "params": {
+      "background": "transparent"
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "metadata": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+     "has_alpha": false
+    }
+   },
+   "expect": {
+    "error": "参考图片没有可确认的 Alpha 通道，请更换参考或使用默认背景"
+   }
+  },
+  {
+   "name": "image: Alpha metadata unreadable is refused",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "params": {
+      "background": "opaque"
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "无法读取参考图片 Alpha 信息，尚未提交生成"
+   }
+  },
+  {
+   "name": "image: profile 5.5 interface, 1.5K, title omitted when empty",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": "99999999999999999999999999999999"
+     },
+     "params": {
+      "ratio": "16:9",
+      "resolution": "1.5K",
+      "output_format": "jpeg",
+      "watermark": true
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "path": "/api/generate",
+    "multipart": false,
+    "fields": {
+     "prompt": "p",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "profile_id": "99999999999999999999999999999999",
+     "aspect_ratio": "16:9",
+     "resolution": "1.5K",
+     "output_format": "jpeg",
+     "background": "default",
+     "watermark": true,
+     "model": "dola-seedream-5-5-261028"
+    },
+    "files": []
+   }
+  },
+  {
+   "name": "image: video reference refused",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "name": "e.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "图像生成只接受图片参考；请调整素材或素材组"
+   }
+  },
+  {
+   "name": "image: Cupsy has no auto ratio",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "ratio": "auto"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "当前接口不支持画幅 auto"
+   }
+  },
+  {
+   "name": "image: custom size must be multiple of 16",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "params": {
+      "ratio": "custom",
+      "custom_width": 1000,
+      "custom_height": 1000
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "宽度和高度必须是 16 的倍数"
+   }
+  },
+  {
+   "name": "image: several issues joined",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "background": "transparent",
+      "output_format": "jpeg"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "背景控制仅支持 Ark；透明背景必须使用 PNG 格式"
+   }
+  },
+  {
+   "name": "video: Ark Seedance 2.0 reference with image, video and audio",
+   "nodes": [
+    {
+     "id": "ua",
+     "type": "asset",
+     "title": "ua",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "a.png",
+      "mime_type": "image/png",
+      "kind": "image",
+      "size_bytes": 10,
+      "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "candidates": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ],
+     "selectedCandidateId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+     "id": "uv",
+     "type": "asset",
+     "title": "uv",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "name": "e.mp4",
+      "mime_type": "video/mp4",
+      "kind": "video",
+      "size_bytes": 10,
+      "url": "/api/canvas/workflows/wf1/assets/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+     },
+     "candidates": [
+      {
+       "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "name": "e.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+     ],
+     "selectedCandidateId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "镜头 @视频1 配 @音频1",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "params": {
+      "model": "seedance-2.0",
+      "ratio": "9:16",
+      "resolution": "1080p",
+      "duration": 8,
+      "generate_audio": false
+     },
+     "referenceAssets": [
+      {
+       "id": "11111111111111111111111111111111",
+       "name": "1.wav",
+       "mime_type": "audio/wav",
+       "kind": "audio",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/11111111111111111111111111111111"
+      }
+     ]
+    }
+   ],
+   "edges": [
+    {
+     "id": "uv-n",
+     "source": "uv",
+     "target": "n"
+    },
+    {
+     "id": "ua-n",
+     "source": "ua",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "path": "/api/video/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "镜头 @视频1 配 @音频1",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "model": "seedance-2.0",
+     "ratio": "9:16",
+     "resolution": "1080p",
+     "duration": 8,
+     "video_mode": "reference",
+     "generate_audio": false,
+     "output_format": "mp4"
+    },
+    "files": [
+     [
+      "ref_videos",
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "e.mp4"
+     ],
+     [
+      "ref_images",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a.png"
+     ],
+     [
+      "ref_audios",
+      "11111111111111111111111111111111",
+      "1.wav"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "video: default model is the interface first model, text only, duration string",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "params": {
+      "duration": " 6 "
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "path": "/api/video/generate",
+    "multipart": false,
+    "fields": {
+     "prompt": "p",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "model": "seedance-2.0",
+     "ratio": "16:9",
+     "resolution": "720p",
+     "duration": 6,
+     "video_mode": "reference",
+     "generate_audio": true,
+     "output_format": "mp4"
+    },
+    "files": []
+   }
+  },
+  {
+   "name": "video: Cupsy keyframe by reference order, ratio locked adaptive, Auto duration",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "从 @图片1 到 @图片2",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "model": "seedance-2.5",
+      "video_mode": "keyframe",
+      "duration": -1,
+      "ratio": "1:1",
+      "first_frame": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "last_frame": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+       "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "name": "b.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+     ],
+     "referenceOrder": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "path": "/api/video/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "从 @图片1 到 @图片2",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "cupsy",
+     "model": "seedance-2.5",
+     "ratio": "adaptive",
+     "resolution": "720p",
+     "duration": -1,
+     "video_mode": "keyframe",
+     "generate_audio": true,
+     "output_format": "mp4"
+    },
+    "files": [
+     [
+      "image",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "b.png"
+     ],
+     [
+      "last_image",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a.png"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "video: Cupsy video-to-video extend from upstream generated video",
+   "nodes": [
+    {
+     "id": "up",
+     "type": "video",
+     "title": "up",
+     "x": 0,
+     "y": 0,
+     "text": "x",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "ffffffffffffffffffffffffffffffff",
+      "name": "f.mp4",
+      "mime_type": "video/mp4",
+      "kind": "video",
+      "size_bytes": 10,
+      "url": "/api/canvas/workflows/wf1/assets/ffffffffffffffffffffffffffffffff"
+     },
+     "candidates": [
+      {
+       "id": "ffffffffffffffffffffffffffffffff",
+       "name": "f.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/ffffffffffffffffffffffffffffffff"
+      }
+     ],
+     "selectedCandidateId": "ffffffffffffffffffffffffffffffff"
+    },
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "接着 @视频1",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "model": "seedance-2.5-moderated",
+      "omni_reference_task_type": "extend",
+      "duration": 10
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "up-n",
+     "source": "up",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "path": "/api/video/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "接着 @视频1",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "cupsy",
+     "model": "seedance-2.5-moderated",
+     "ratio": "16:9",
+     "resolution": "720p",
+     "duration": 10,
+     "video_mode": "reference",
+     "generate_audio": true,
+     "output_format": "mp4",
+     "omni_reference_task_type": "extend"
+    },
+    "files": [
+     [
+      "ref_videos",
+      "ffffffffffffffffffffffffffffffff",
+      "f.mp4"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "video: upstream generation node without a result is refused",
+   "nodes": [
+    {
+     "id": "up",
+     "type": "image",
+     "title": "上游图",
+     "x": 0,
+     "y": 0,
+     "text": "x",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     }
+    },
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "up-n",
+     "source": "up",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "error": "请先为“上游图”生成或选择一个结果"
+   }
+  },
+  {
+   "name": "video: keyframe with three images",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "video_mode": "keyframe"
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+       "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "name": "b.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      {
+       "id": "cccccccccccccccccccccccccccccccc",
+       "name": "c.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/cccccccccccccccccccccccccccccccc"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "首尾帧模式最多接入两张图片"
+   }
+  },
+  {
+   "name": "video: keyframe without image",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "video_mode": "keyframe"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "首尾帧模式请接入一张首帧图片；纯文本生成请选择全能参考"
+   }
+  },
+  {
+   "name": "video: duration out of range",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "duration": 31
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "视频时长应为 4–30 秒的整数或 Auto"
+   }
+  },
+  {
+   "name": "video: model not offered by interface",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "model": "seedance-2.0"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "当前服务不支持所选视频模型"
+   }
+  },
+  {
+   "name": "video: Seedance 2.0 audio only",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "11111111111111111111111111111111",
+       "name": "1.wav",
+       "mime_type": "audio/wav",
+       "kind": "audio",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/11111111111111111111111111111111"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "Seedance 2.0 使用音频参考时还需要图片或视频"
+   }
+  },
+  {
+   "name": "video: too many references for Seedance 2.0",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+       "name": "e.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      {
+       "id": "ffffffffffffffffffffffffffffffff",
+       "name": "f.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/ffffffffffffffffffffffffffffffff"
+      },
+      {
+       "id": "33333333333333333333333333333333",
+       "name": "3.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/33333333333333333333333333333333"
+      },
+      {
+       "id": "44444444444444444444444444444444",
+       "name": "4.mp4",
+       "mime_type": "video/mp4",
+       "kind": "video",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/44444444444444444444444444444444"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "参考素材数量超过所选视频模型上限"
+   }
+  },
+  {
+   "name": "audio: text only with preset speaker",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "台词",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "speaker": "vivi"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "path": "/api/audio/generate",
+    "multipart": false,
+    "fields": {
+     "prompt": "台词",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "cupsy",
+     "model": "seed-audio-1.0",
+     "output_format": "mp3",
+     "sample_rate": 48000,
+     "enable_subtitle": true,
+     "reference_mode": "audio",
+     "speaker": "vivi"
+    },
+    "files": []
+   }
+  },
+  {
+   "name": "audio: two audio references, wav 24000 without subtitles",
+   "nodes": [
+    {
+     "id": "u",
+     "type": "asset",
+     "title": "u",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "11111111111111111111111111111111",
+      "name": "1.wav",
+      "mime_type": "audio/wav",
+      "kind": "audio",
+      "size_bytes": 10,
+      "url": "/api/canvas/workflows/wf1/assets/11111111111111111111111111111111"
+     },
+     "candidates": [
+      {
+       "id": "11111111111111111111111111111111",
+       "name": "1.wav",
+       "mime_type": "audio/wav",
+       "kind": "audio",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/11111111111111111111111111111111"
+      }
+     ],
+     "selectedCandidateId": "11111111111111111111111111111111"
+    },
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "模仿 @音频2",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "output_format": "wav",
+      "sample_rate": 24000,
+      "enable_subtitle": false
+     },
+     "referenceAssets": [
+      {
+       "id": "22222222222222222222222222222222",
+       "name": "",
+       "mime_type": "audio/wav",
+       "kind": "audio",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/22222222222222222222222222222222"
+      }
+     ]
+    }
+   ],
+   "edges": [
+    {
+     "id": "u-n",
+     "source": "u",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "path": "/api/audio/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "模仿 @音频2",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "cupsy",
+     "model": "seed-audio-1.0",
+     "output_format": "wav",
+     "sample_rate": 24000,
+     "enable_subtitle": false,
+     "reference_mode": "audio"
+    },
+    "files": [
+     [
+      "references",
+      "11111111111111111111111111111111",
+      "1.wav"
+     ],
+     [
+      "references",
+      "22222222222222222222222222222222",
+      "reference.wav"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "audio: one image reference",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "path": "/api/audio/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "p",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "cupsy",
+     "model": "seed-audio-1.0",
+     "output_format": "mp3",
+     "sample_rate": 48000,
+     "enable_subtitle": true,
+     "reference_mode": "image"
+    },
+    "files": [
+     [
+      "references",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a.png"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "audio: image and audio mixed",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+       "id": "11111111111111111111111111111111",
+       "name": "1.wav",
+       "mime_type": "audio/wav",
+       "kind": "audio",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/11111111111111111111111111111111"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "音频参考支持 1 张图片或最多 3 段音频，不能混用；请调整素材组"
+   }
+  },
+  {
+   "name": "audio: prompt length counts UTF-16 units",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "音频提示词不能超过 3000 个字符"
+   }
+  },
+  {
+   "name": "audio: speaker with image",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "speaker": "kian"
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "预设声线不能与图片参考同时使用：请改为“模型自动”或移除图片参考"
+   }
+  },
+  {
+   "name": "audio: unsupported sample rate",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "audio",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "params": {
+      "sample_rate": 22050
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "不支持的采样率，请重新选择"
+   }
+  },
+  {
+   "name": "mention: number without reference",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "看 @图片2",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "提及 @图片2 没有对应素材，请删除或重新选择"
+   }
+  },
+  {
+   "name": "mention: number changed",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "看 @图片1",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+       "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "name": "b.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+     ],
+     "referenceMentions": {
+      "@图片1": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "提及 @图片1 的编号已变化，请调整或移除该提及后重新选择"
+   }
+  },
+  {
+   "name": "mention: bound asset removed",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "看 @图片3",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ],
+     "referenceMentions": {
+      "@图片3": "dddddddddddddddddddddddddddddddd"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "提及 @图片3 的素材已移除，请删除该提及后重新选择素材"
+   }
+  },
+  {
+   "name": "mention: removed binding is read by position",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "看 @图片1",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ],
+     "referenceMentions": {
+      "@图片1": "dddddddddddddddddddddddddddddddd"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "path": "/api/generate",
+    "multipart": true,
+    "fields": {
+     "prompt": "看 @图片1",
+     "canvas_workflow_id": "wf1",
+     "canvas_node_id": "n",
+     "result_name": "n",
+     "canvas_workflow_revision": 3,
+     "provider": "ark",
+     "aspect_ratio": "1:1",
+     "resolution": "1K",
+     "output_format": "png",
+     "background": "default",
+     "watermark": false,
+     "model": "seedream-5-0-pro"
+    },
+    "files": [
+     [
+      "images",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "a.png"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "mention: token inside upstream text is checked too",
+   "nodes": [
+    {
+     "id": "t",
+     "type": "text",
+     "title": "t",
+     "x": 0,
+     "y": 0,
+     "text": "用 @视频1"
+    },
+    {
+     "id": "n",
+     "type": "video",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [
+    {
+     "id": "t-n",
+     "source": "t",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "error": "提及 @视频1 没有对应素材，请删除或重新选择"
+   }
+  },
+  {
+   "name": "general: empty prompt",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "   ",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "请填写生成提示词"
+   }
+  },
+  {
+   "name": "general: node without interface",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p"
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "请先为节点选择接口"
+   }
+  },
+  {
+   "name": "general: interface no longer available",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": "88888888888888888888888888888888"
+     }
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "节点所选接口已停用或不可用，请重新选择"
+   }
+  },
+  {
+   "name": "general: unreadable reference file",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+       "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "name": "b.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/workflows/wf1/assets/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "unreadable": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   ],
+   "expect": {
+    "error": "无法读取参考素材“b.png”，尚未提交生成"
+   }
+  },
+  {
+   "name": "general: reference outside this canvas",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+       "name": "a.png",
+       "mime_type": "image/png",
+       "kind": "image",
+       "size_bytes": 10,
+       "url": "/api/canvas/projects/p1/assets/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     ]
+    }
+   ],
+   "edges": [],
+   "node": "n",
+   "expect": {
+    "error": "参考素材必须先保存到当前画布"
+   }
+  },
+  {
+   "name": "general: missing upstream node",
+   "nodes": [
+    {
+     "id": "n",
+     "type": "image",
+     "title": "n",
+     "x": 0,
+     "y": 0,
+     "text": "p",
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "gone-n",
+     "source": "gone",
+     "target": "n"
+    }
+   ],
+   "node": "n",
+   "expect": {
+    "error": "连接的上游节点不存在或类型不兼容"
+   }
+  }
+ ]
+}

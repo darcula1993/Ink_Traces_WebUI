@@ -292,9 +292,21 @@ const NOMINAL_IMAGE_SIZE = { '1K': [1024, 1024], '1.5K': [1536, 1536], '2K': [20
 // Canvas/tool image estimate from node params. Returns {known:true,estimate,...} or
 // {known:false,reason}; never a zero for unknown prices. `issue` is a pre-computed
 // parameter problem (e.g. a draft size error) that blocks estimating.
+// The model the backend will actually call for this interface (ESTIMATE-DEBT-20261115).
+// A saved interface profile runs on its own settings only: without its own model the
+// backend uses seedream-5-0-pro (app.get_provider_default_model), never the deployment
+// default, so the deployment `model` fallback must not decide the price family.
+export const BACKEND_PROFILE_DEFAULT_IMAGE_MODEL = 'seedream-5-0-pro'
+export function imagePricingModel(provider) {
+  if (!provider) return ''
+  if (provider.profile_id) return provider.capability_model || BACKEND_PROFILE_DEFAULT_IMAGE_MODEL
+  return provider.capability_model || provider.model
+}
+export const imagePricingFamily = provider => ((provider?.provider || provider?.id) === 'ark' && isSeedream55(imagePricingModel(provider)) ? SEEDREAM_55 : SEEDREAM_50_PRO)
+
 export function estimateImageParamsCost({ provider, params = {}, references = [], issue = '' } = {}) {
   if (!provider) return { known: false, reason: '接口未配置或尚未就绪' }
-  const adapter = provider.provider || provider.id, model = provider.capability_model || provider.model
+  const adapter = provider.provider || provider.id, model = imagePricingModel(provider)
   if (!['ark', 'cupsy'].includes(adapter)) return { known: false, reason: '当前接口暂无价格资料' }
   const images = references.filter(asset => !asset.kind || asset.kind === 'image')
   const problem = issue || imageParameterIssues(adapter, params, images, model)[0]
@@ -305,7 +317,7 @@ export function estimateImageParamsCost({ provider, params = {}, references = []
   else if (p.ratio === 'auto') { size = NOMINAL_IMAGE_SIZE[p.resolution]; sizeAssumed = true }
   else size = imageCapabilities(adapter, model).sizeMap[p.resolution]?.[p.ratio]
   if (!size) return { known: false, reason: '无法确定输出尺寸' }
-  const family = adapter === 'ark' && isSeedream55(model) ? SEEDREAM_55 : SEEDREAM_50_PRO
+  const family = imagePricingFamily(provider)
   const estimate = estimateBytePlusImageCost({ family, width: size[0], height: size[1], referenceCount: images.length, sizeAssumed })
   if (!estimate.known) return { known: false, reason: IMAGE_UNKNOWN_REASONS[estimate.reason], estimate }
   return { known: true, estimate, min: estimate.minimumCost, max: estimate.maximumCost, assumed: sizeAssumed }

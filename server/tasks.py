@@ -13,6 +13,10 @@ DB_PATH = os.environ.get('NANOBANANA_DB_PATH', os.path.join(PROJECT_ROOT, 'tasks
 _local = threading.local()
 ACTIVE_TASK_STATUSES = ('submitting', 'preparing', 'pending', 'processing', 'cancel_requested')
 TERMINAL_TASK_STATUSES = ('succeeded', 'failed', 'cancelled')
+# VIDEO-SIGNAL-20261115: sub-stage of a 'processing' task.  'downloading' means the
+# Provider reported success and the worker is downloading and storing the result.
+TASK_STAGE_DOWNLOADING = 'downloading'
+TASK_STAGES = frozenset({TASK_STAGE_DOWNLOADING})
 TASK_SORTS = {
     'newest': 't.id DESC',
     'oldest': 't.id ASC',
@@ -91,7 +95,8 @@ def init_db():
             lease_until TEXT,
             favorite INTEGER NOT NULL DEFAULT 0,
             deleted_at TEXT,
-            retry_of INTEGER
+            retry_of INTEGER,
+            stage TEXT
         )
     ''')
     _ensure_columns(db, 'tasks', {
@@ -104,6 +109,8 @@ def init_db():
         'favorite': 'INTEGER NOT NULL DEFAULT 0',
         'deleted_at': 'TEXT',
         'retry_of': 'INTEGER',
+        # VIDEO-SIGNAL-20261115: in-flight stage within 'processing' (NULL = none).
+        'stage': 'TEXT',
     })
     db.execute('''
         CREATE TABLE IF NOT EXISTS task_assets (
@@ -266,6 +273,29 @@ def init_db():
             VALUES (new.id, COALESCE(new.prompt, ''), COALESCE(new.provider, ''));
         END
     ''')
+    # GROUP-RUN-20261115: server-queued "run whole node group" (canvas_group_run.py).
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS canvas_group_runs (
+            id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, group_id TEXT NOT NULL,
+            status TEXT NOT NULL, base_revision INTEGER NOT NULL,
+            stop_reason TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT
+        )
+    ''')
+    db.execute('''CREATE UNIQUE INDEX IF NOT EXISTS idx_canvas_group_runs_active
+                  ON canvas_group_runs(workflow_id, group_id) WHERE status IN ('running', 'awaiting_confirm')''')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_canvas_group_runs_workflow ON canvas_group_runs(workflow_id, created_at DESC)')
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS canvas_group_run_nodes (
+            run_id TEXT NOT NULL, node_id TEXT NOT NULL, node_type TEXT NOT NULL,
+            position INTEGER NOT NULL, level INTEGER NOT NULL, upstream TEXT NOT NULL,
+            status TEXT NOT NULL, task_id INTEGER, estimate TEXT NOT NULL, pending_estimate TEXT,
+            fingerprint TEXT NOT NULL, base_assets TEXT NOT NULL, result_asset_id TEXT,
+            reason TEXT, message TEXT, updated_at TEXT NOT NULL,
+            PRIMARY KEY(run_id, node_id),
+            FOREIGN KEY(run_id) REFERENCES canvas_group_runs(id) ON DELETE CASCADE
+        )
+    ''')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_canvas_group_run_nodes_task ON canvas_group_run_nodes(task_id)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type)')
     db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_queue ON tasks(status, next_run_at, lease_until)')
@@ -438,6 +468,13 @@ def create_task(task_type, prompt, params, provider=None, external_task_id=None,
             from result_names import clean_result_name
             if clean_result_name(incoming.get('result_name')):
                 params['result_name'] = clean_result_name(incoming['result_name'])
+    # GROUP-RUN B3: only an internal group-run submission tags its task; a manual retry is not part of a run.
+    from canvas_group_submit import current_submission
+    submission = None if retry_of is not None else current_submission()
+    if retry_of is not None:
+        params.pop('group_run_id', None)
+    if submission and params.get('canvas_workflow_id') == submission['workflow_id'] and params.get('canvas_node_id') == submission['node_id']:
+        params['group_run_id'] = submission['run_id']
     now = utcnow()
     db = get_db()
     if params.get('canvas_workflow_id'):
@@ -463,7 +500,7 @@ def update_task(task_id, **kwargs):
         'status', 'params', 'result', 'error', 'provider', 'external_task_id',
         'output_dir', 'completed_at', 'updated_at', 'progress', 'attempt_count',
         'next_run_at', 'lease_owner', 'lease_until', 'favorite', 'deleted_at',
-        'retry_of',
+        'retry_of', 'stage',
     }
     fields = {key: value for key, value in kwargs.items() if key in allowed}
     if not fields:
@@ -485,7 +522,7 @@ def complete_task(task_id, result, output_dir=None):
         '''UPDATE tasks
            SET status = 'succeeded', result = ?, error = NULL, output_dir = ?,
                progress = 100, completed_at = ?, updated_at = ?, next_run_at = NULL,
-               lease_owner = NULL, lease_until = NULL
+               lease_owner = NULL, lease_until = NULL, stage = NULL
            WHERE id = ? AND deleted_at IS NULL
              AND status NOT IN ('cancel_requested', 'cancelled', 'failed', 'succeeded')''',
         (_json(result), output_dir, now, now, task_id),
@@ -501,7 +538,7 @@ def fail_task(task_id, error, result=None):
            SET status = 'failed', error = ?,
                result = CASE WHEN ? IS NULL THEN result ELSE ? END,
                completed_at = ?, updated_at = ?, next_run_at = NULL,
-               lease_owner = NULL, lease_until = NULL
+               lease_owner = NULL, lease_until = NULL, stage = NULL
            WHERE id = ? AND deleted_at IS NULL
              AND status NOT IN ('cancel_requested', 'cancelled', 'failed', 'succeeded')''',
         (str(error), None if result is None else 1, None if result is None else _json(result), now, now, task_id),
@@ -510,21 +547,46 @@ def fail_task(task_id, error, result=None):
     return cursor.rowcount > 0
 
 
-def reschedule_task(task_id, delay_seconds, status='processing', error=None, progress=None):
+def reschedule_task(task_id, delay_seconds, status='processing', error=None, progress=None, stage=None):
+    """Release the lease and schedule the next run.
+
+    ``stage`` replaces the stored in-flight stage: only a poll that already saw the
+    Provider succeed and must retry the download passes ``TASK_STAGE_DOWNLOADING``;
+    every other reschedule clears it.
+    """
     now = utcnow()
+    if stage not in TASK_STAGES or status != 'processing':
+        stage = None
     cursor = get_db().execute(
         '''UPDATE tasks
            SET status = ?, completed_at = NULL, next_run_at = ?, updated_at = ?,
-               lease_owner = NULL, lease_until = NULL,
+               lease_owner = NULL, lease_until = NULL, stage = ?,
                error = CASE WHEN ? IS NULL THEN error ELSE ? END,
                progress = CASE WHEN ? IS NULL THEN progress ELSE ? END
            WHERE id = ? AND deleted_at IS NULL
              AND status NOT IN ('cancel_requested', 'cancelled', 'failed', 'succeeded')''',
         (
-            status, _future(delay_seconds), now,
+            status, _future(delay_seconds), now, stage,
             error, None if error is None else str(error),
             progress, None if progress is None else int(progress), task_id,
         ),
+    )
+    get_db().commit()
+    return cursor.rowcount > 0
+
+
+def set_task_stage(task_id, stage):
+    """VIDEO-SIGNAL-20261115: mark an in-flight stage while the task stays 'processing'.
+
+    Committed immediately so status queries see it while the worker downloads.
+    Never changes status, attempts, lease or billing fields.
+    """
+    if stage is not None and stage not in TASK_STAGES:
+        raise ValueError(f'unknown task stage: {stage}')
+    cursor = get_db().execute(
+        '''UPDATE tasks SET stage = ?, updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL AND status = 'processing' ''',
+        (stage, utcnow(), task_id),
     )
     get_db().commit()
     return cursor.rowcount > 0
@@ -573,7 +635,7 @@ def get_task_statuses(task_ids):
         return []
     placeholders = ','.join('?' for _ in task_ids)
     rows = get_db().execute(
-        f'''SELECT id, type, status, {_preview_result_sql()}, error, progress, provider,
+        f'''SELECT id, type, status, {_preview_result_sql()}, error, progress, stage, provider,
                    external_task_id, updated_at, deleted_at
             FROM tasks WHERE id IN ({placeholders})''',
         task_ids,
@@ -715,7 +777,7 @@ def list_tasks(task_type=None, status=None, limit=50, offset=0, summary=False,
             'length(t.prompt) > 200 AS prompt_truncated, '
             f'{params_summary}, t.provider, '
             f'{result_summary}, error, output_dir, created_at, completed_at, '
-            't.updated_at, t.progress, t.attempt_count, t.favorite, t.deleted_at, t.retry_of'
+            't.updated_at, t.progress, t.stage, t.attempt_count, t.favorite, t.deleted_at, t.retry_of'
         )
     else:
         columns = 't.*'
@@ -878,7 +940,7 @@ def release_worker_leases(worker_id):
            SET status = CASE WHEN status = 'cancel_requested' THEN 'cancelled' ELSE status END,
                completed_at = CASE WHEN status = 'cancel_requested' THEN ? ELSE completed_at END,
                next_run_at = CASE WHEN status = 'cancel_requested' THEN NULL ELSE next_run_at END,
-               lease_owner = NULL, lease_until = NULL, updated_at = ?
+               lease_owner = NULL, lease_until = NULL, stage = NULL, updated_at = ?
            WHERE lease_owner = ?''',
         (utcnow(), utcnow(), worker_id),
     )
@@ -968,7 +1030,7 @@ def finalize_task_cancel(task_id):
     now = utcnow()
     cursor = get_db().execute(
         '''UPDATE tasks SET status = 'cancelled', completed_at = ?, updated_at = ?,
-               next_run_at = NULL, lease_owner = NULL, lease_until = NULL
+               next_run_at = NULL, lease_owner = NULL, lease_until = NULL, stage = NULL
            WHERE id = ? AND status = 'cancel_requested' ''',
         (now, now, task_id),
     )
@@ -980,7 +1042,7 @@ def activate_video_task(task_id, external_task_id):
     now = utcnow()
     cursor = get_db().execute(
         '''UPDATE tasks SET status = 'processing', external_task_id = ?, progress = 0,
-               next_run_at = ?, updated_at = ?
+               next_run_at = ?, updated_at = ?, stage = NULL
            WHERE id = ? AND deleted_at IS NULL
              AND status NOT IN ('cancel_requested', 'cancelled')''',
         (external_task_id, now, now, task_id),
@@ -1643,6 +1705,7 @@ def recover_dead_worker_leases(stale_seconds=30):
                END,
                lease_owner = NULL,
                lease_until = NULL,
+               stage = NULL,
                next_run_at = CASE
                    WHEN status = 'cancel_requested' THEN NULL
                    WHEN {unknown} THEN NULL

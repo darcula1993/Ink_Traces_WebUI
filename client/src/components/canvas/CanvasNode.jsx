@@ -8,24 +8,33 @@ import {TASK_STAGES,taskStageIndex,taskStageHint,taskProgressPercent} from '../.
 import { mediaSize, recordMediaSize } from './mediaSizes'
 import MediaPlayer from './MediaPlayer'
 import { FileText, Image, Film, Music, History, AlertTriangle, LoaderCircle } from 'lucide-react'
+import useTaskEcho from './useTaskEcho'
+import './nodeEcho.css'
+import {formatDuration,taskDurationSeconds,taskStartedAt,taskCostEcho,taskFailure,FAILURE_ACTION_LABELS} from '../../lib/canvasTaskEcho'
 
 const kinds = { text: ['文本', FileText], image: ['画面', Image], video: ['视频', Film], audio: ['音频', Music] }
 
-const formatElapsed=sec=>sec>=3600?`${Math.floor(sec/3600)}:${String(Math.floor(sec%3600/60)).padStart(2,'0')}:${String(sec%60).padStart(2,'0')}`:`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`
-// Elapsed time is client-side runtime state counted from when this node first showed the active task.
-function useTaskElapsed(task){
+const formatElapsed=formatDuration
+// Elapsed time is client-side runtime state (never saved). NODE-ECHO-20261115: counted from the server
+// submit time once the task detail is loaded, else from when this node first showed the active task.
+function useTaskElapsed(task,startedAt=null){
   const active=task?.id&&isGeneratingTaskStatus(task.status),taskId=task?.id,start=useRef({id:null,at:0}),[now,setNow]=useState(Date.now())
   if(active&&start.current.id!==taskId)start.current={id:taskId,at:Date.now()}
   useEffect(()=>{if(!active)return;setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[active,taskId])
-  return active?Math.max(0,Math.floor((now-start.current.at)/1000)):null
+  return active?Math.max(0,Math.floor((now-(startedAt??start.current.at))/1000)):null
+}
+// NODE-ECHO-20261115: latest task number (opens the task center), duration and cost estimate.
+function TaskEcho({task,detail,resultUnknown,onOpenTask}){
+  const cost=taskCostEcho(detail,{resultUnknown}),duration=taskDurationSeconds(detail)
+  return <span className="cv-node-echo" data-testid="node-task-echo"><button type="button" className="cv-node-echo-task" title={`任务 #${task.id}：在任务中心查看`} aria-label={`在任务中心查看任务 #${task.id}`} onClick={event=>{event.stopPropagation();onOpenTask?.(task)}}>#{task.id}</button>{duration!=null&&<span className="cv-node-echo-item" data-testid="node-task-duration" title={`耗时 ${formatDuration(duration)}（提交到完成）`}>{formatDuration(duration)}</span>}{cost&&<span className={`cv-node-echo-item ${cost.known?'':'is-unknown'}`} data-testid="node-task-cost" title={cost.title} aria-label={cost.title}>{cost.text}</span>}</span>
 }
 // FIX-B2B-20261114: stage stepper for in-flight video tasks (排队 → 生成 → 下载写回).
-function TaskStages({status}){
-  const current=taskStageIndex(status)
+function TaskStages({status,stage}){
+  const current=taskStageIndex(status,stage)
   if(current<0)return null
-  return <ol className="cv-task-stages" aria-label={`任务阶段：${TASK_STAGES[current]}`} title={taskStageHint(status)}>{TASK_STAGES.map((stage,index)=><li key={stage} className={index<current?'is-done':index===current?'is-current':''} aria-current={index===current?'step':undefined}>{stage}</li>)}</ol>
+  return <ol className="cv-task-stages" aria-label={`任务阶段：${TASK_STAGES[current]}`} title={taskStageHint(status,stage)}>{TASK_STAGES.map((stage,index)=><li key={stage} className={index<current?'is-done':index===current?'is-current':''} aria-current={index===current?'step':undefined}>{stage}</li>)}</ol>
 }
-export default function CanvasNode({ node, selected, pendingConnection, onSelect, onDrag, onChange, onPort, references=[], frames, onMenu, onPreview, onHistory, onLocate, onRightDrag,provider,onSelectComplete,resultUnknown=false,statusAnomaly,onPortDrag,dropTarget=false,onFocusZoom }) {
+export default function CanvasNode({ node, selected, pendingConnection, onSelect, onDrag, onChange, onPort, references=[], frames, onMenu, onPreview, onHistory, onLocate, onRightDrag,provider,onSelectComplete,resultUnknown=false,statusAnomaly,onPortDrag,dropTarget=false,onFocusZoom,onOpenTask,runMark }) {
   const geometry=nodeGeometry(node)
   const kind = mediaKind(node)
   const [baseLabel, Icon] = kinds[kind] || kinds.text
@@ -35,18 +44,25 @@ export default function CanvasNode({ node, selected, pendingConnection, onSelect
   const dimensions=mediaSize(asset?.id),mediaNode=geometry.mediaHeight!=null
   const measure=(width,height)=>recordMediaSize(asset?.id,width,height)
   const task = node.task
-  const elapsed=useTaskElapsed(task)
+  const echoed=['image','video','audio'].includes(node.type)&&Number(task?.id)>0,fetched=useTaskEcho(task,echoed),detail=fetched&&{...fetched,status:task.status}
+  const elapsed=useTaskElapsed(task,taskStartedAt(detail))
   const generating=['image','video'].includes(node.type)&&isGeneratingTaskStatus(task?.status)
   // UI-ITER-R1: the media area itself carries failure / in-progress state (no "waiting" copy while a task runs or failed).
   const failed=!!task&&isFailureTaskStatus(task.status),busy=!!task&&isGeneratingTaskStatus(task.status)
-  const failureTitle=failed&&(resultUnknown&&task.status==='failed'?'结果未知':task.status==='unknown'?'提交结果未知':'生成失败')
-  const preview=node.type === 'text' ? <div className="cv-node-text">{node.text || '选择节点，输入故事、对白或提示词'}</div> : asset?.url ? kind === 'image' ? <img className="cv-media" src={asset.url} alt={node.title} loading="lazy" draggable={false} onLoad={e=>measure(e.currentTarget.naturalWidth,e.currentTarget.naturalHeight)} /> : <MediaPlayer kind={kind==='video'?'video':'audio'} src={asset.url} title={node.title} onMetadata={element=>kind==='video'&&measure(element.videoWidth,element.videoHeight)}/> : failed ? <div className="cv-media-empty cv-media-state is-failed"><AlertTriangle size={24} aria-hidden="true"/><strong>{failureTitle}</strong><span className="cv-media-state-reason" title={task.error||undefined}>{task.error||'服务端未返回失败原因'}</span><button type="button" className="btn btn-ghost btn-sm" aria-label={`查看失败详情 ${node.title}`} onClick={onLocate}>查看详情</button></div> : busy ? <div className="cv-media-empty cv-media-state is-busy"><LoaderCircle size={24} className="cv-spin" aria-hidden="true"/><strong>{taskStatusLabel(task.status)}</strong>{node.type==='video'&&<TaskStages status={task.status}/>}</div> : <div className="cv-media-empty"><Icon size={27} /><span>{node.type === 'image' ? '等待生成画面' : node.type === 'video' ? '等待生成视频' : '等待生成音频'}</span></div>
+  const failureClass=failed?taskFailure(task.failure||fetched?.failure,{resultUnknown,status:task.status}):null
+  const failureTitle=failed&&(failureClass?.label||(resultUnknown&&task.status==='failed'?'结果未知':task.status==='unknown'?'提交结果未知':'生成失败'))
+  const failureReason=failureClass?.hint||task?.error||'服务端未返回失败原因'
+  const preview=node.type === 'text' ? <div className="cv-node-text">{node.text || '选择节点，输入故事、对白或提示词'}</div> : asset?.url ? kind === 'image' ? <img className="cv-media" src={asset.url} alt={node.title} loading="lazy" draggable={false} onLoad={e=>measure(e.currentTarget.naturalWidth,e.currentTarget.naturalHeight)} /> : <MediaPlayer kind={kind==='video'?'video':'audio'} src={asset.url} title={node.title} onMetadata={element=>kind==='video'&&measure(element.videoWidth,element.videoHeight)}/> : failed ? <div className="cv-media-empty cv-media-state is-failed"><AlertTriangle size={24} aria-hidden="true"/><strong>{failureTitle}</strong><span className="cv-media-state-reason" data-testid={failureClass?'node-failure-hint':undefined} data-failure-category={failureClass?.category||undefined} title={[failureClass?.hint,task.error].filter(Boolean).join('\n')||undefined}>{failureReason}</span><span className="cv-media-state-actions">{failureClass?.action==='check_task'&&task.id&&<button type="button" className="btn btn-secondary btn-sm" data-testid="node-failure-action" aria-label={`${FAILURE_ACTION_LABELS.check_task} ${node.title}`} onClick={event=>{event.stopPropagation();onOpenTask?.(task)}}>核查任务</button>}<button type="button" className="btn btn-ghost btn-sm" aria-label={`查看失败详情 ${node.title}`} onClick={onLocate}>查看详情</button></span></div> : busy ? <div className="cv-media-empty cv-media-state is-busy"><LoaderCircle size={24} className="cv-spin" aria-hidden="true"/><strong>{taskStatusLabel(task.status)}</strong>{node.type==='video'&&<TaskStages status={task.status} stage={task.stage}/>}</div> : <div className="cv-media-empty"><Icon size={27} /><span>{node.type === 'image' ? '等待生成画面' : node.type === 'video' ? '等待生成视频' : '等待生成音频'}</span></div>
   const statusLabel=task&&(task.status==='failed'&&resultUnknown?'结果未知，可能已计费':taskStatusLabel(task.status))
   const percent=generating?taskProgressPercent(node.type,task.progress):null
   // FIX-B2B-20261114: video nodes show the stage, never a provider placeholder percentage.
-  const progressText=generating?[percent!=null?`${percent}%`:node.type==='video'?taskStageHint(task.status):'',elapsed==null?'':`已用 ${formatElapsed(elapsed)}`].filter(Boolean).join(' · '):''
+  const progressText=generating?[percent!=null?`${percent}%`:node.type==='video'?taskStageHint(task.status,task.stage):'',elapsed==null?'':`已用 ${formatElapsed(elapsed)}`].filter(Boolean).join(' · '):''
   const statusText=task&&`${statusLabel}${progressText?` · ${progressText}`:''}${statusAnomaly?` · ${INVALID_STATUS_LABEL}（服务端返回“${statusAnomaly}”，已保留原状态）`:''}${task.error ? ` · ${task.error}` : ''}`
-  const status=task && <div className={`cv-node-status ${isFailureTaskStatus(task.status) ? 'error' : ''} ${resultUnknown&&task.status==='failed'?'is-unknown':''}`} role="status" tabIndex={0} title={statusText} data-result-unknown={resultUnknown&&task.status==='failed'?'true':undefined}>{statusText}</div>
+  const echo=echoed&&<TaskEcho task={task} detail={detail} resultUnknown={resultUnknown&&task.status==='failed'} onOpenTask={onOpenTask}/>
+  // NODE-ECHO-20261115 (艾达必修1): beside the echo a failed node's footer keeps only the status word; the reason is
+  // already in the media area (full text stays in the tooltip). With a result shown, the badge has no reason, so keep it.
+  const shortStatus=!!echo&&failed&&mediaNode&&!asset?.url&&!statusAnomaly
+  const status=task && <div className={`cv-node-status ${isFailureTaskStatus(task.status) ? 'error' : ''} ${resultUnknown&&task.status==='failed'?'is-unknown':''} ${shortStatus?'is-short':''}`} role="status" tabIndex={0} title={statusText} data-result-unknown={resultUnknown&&task.status==='failed'?'true':undefined}>{shortStatus?statusLabel:statusText}</div>
   const stale=node.upstreamStale&&<div className="cv-node-stale" role="status" title="上游的选定结果或输入已变化，此节点结果可能已过期；不会自动重新生成">上游已更新</div>
   // Selecting on pointerdown can mount a panel over this port before pointerup.
   // Keep left-click connection gestures intact; right drag still bubbles to pan.
@@ -63,8 +79,9 @@ export default function CanvasNode({ node, selected, pendingConnection, onSelect
       {node.type==='asset'&&kind==='image'&&<button className="cv-history-button" aria-label={`历史版本 ${node.title}`} title="历史版本" onClick={onHistory}><History size={14}/></button>}
       {mediaNode?<div className={`cv-node-media ${['image','video'].includes(node.type)?'cv-generation-preview':''}`}>{kind==='audio'&&<ReferenceThumbnails assets={references} frames={frames} compact/>}{preview}{overlays}{kind!=='audio'&&<ReferenceThumbnails assets={references} frames={frames} compact/>}</div>:<>{preview}<ReferenceThumbnails assets={references} frames={frames} compact/></>}
       {stale}
-      {!mediaNode&&status}
+      {runMark&&<div className="cv-node-run-mark" role="status" data-run-status={runMark.status} title={runMark.detail||runMark.label}>{runMark.label}{runMark.detail?` · ${runMark.detail}`:''}</div>}
+      {!mediaNode&&status}{!mediaNode&&echo}
     </div>
-    {mediaNode&&status&&<footer className="cv-node-footer">{status}</footer>}
+    {mediaNode&&status&&<footer className="cv-node-footer">{status}{echo}</footer>}
   </article>
 }

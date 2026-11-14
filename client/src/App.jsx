@@ -26,6 +26,7 @@ import { initialTabMode, writeTabMode } from './lib/canvasLastLocation'
 import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CUPSY_AUDIO_MODEL, AUDIO_SAMPLE_RATES, AUDIO_SPEAKERS, VIDEO_MODEL_CAPABILITIES } from './lib/generationSettings.js'
 import { currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile, readFileDataUrl, videoDropZoneHandlers } from './lib/referenceMedia.js'
 import { makeImgTab, makeVideoTab, DEFAULT_AUDIO_FORM, IMAGE_WORKSPACE_OPTIONS, VIDEO_WORKSPACE_OPTIONS } from './lib/workspaceTabs.js'
+import { TASK_CENTER_EVENT, TASK_CENTER_MODES } from './lib/taskCenterLink.js'
 
 axios.defaults.withCredentials = true
 
@@ -117,6 +118,14 @@ function App({ onLogout }) {
     } catch (error) { notify(error?.message || '暂时无法切换工具，请重试', 'error') }
     finally { modeSwitchPending.current = false }
   }
+  // NODE-ECHO-20261115: canvas task number → that tool's task center; TaskGallery opens the pending task.
+  const changeAppModeRef = useRef(changeAppMode)
+  changeAppModeRef.current = changeAppMode
+  useEffect(() => {
+    const open = event => { const type = event.detail?.type; if (!TASK_CENTER_MODES.includes(type)) return; event.preventDefault(); changeAppModeRef.current(type) }
+    window.addEventListener(TASK_CENTER_EVENT, open)
+    return () => window.removeEventListener(TASK_CENTER_EVENT, open)
+  }, [])
 
 
   const [videoFastAvailable, setVideoFastAvailable] = useState(false)

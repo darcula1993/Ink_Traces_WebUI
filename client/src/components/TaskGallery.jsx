@@ -10,6 +10,7 @@ import { TaskCardList } from './gallery/TaskCards.jsx'
 import { TaskCompareModal, TaskDetailModal } from './gallery/TaskModals.jsx'
 import ConfirmDialog from './ui/ConfirmDialog'
 import askConfirm from './ui/askConfirm'
+import { takeTaskCenterFocus } from '../lib/taskCenterLink.js'
 
 function useLiveCallback(callback) {
   const ref = useRef(callback)
@@ -403,6 +404,13 @@ function TaskGallery({
       if (!controller.signal.aborted) setError(requestError.response?.data?.error || '任务详情加载失败')
     }
   })
+
+  // NODE-ECHO-20261115: a task number clicked on the canvas opens that task here (taken once; after the
+  // reset effect above so the selection is not cleared again). A missing task shows the detail error.
+  useEffect(() => {
+    const taskId = takeTaskCenterFocus(mode)
+    if (taskId) openItem({ key: `task-${taskId}`, taskId })
+  }, [mode, openItem])
 
   useEffect(() => {
     if (!selectedOverride?.taskId) return

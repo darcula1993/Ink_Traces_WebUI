@@ -1,0 +1,39 @@
+/* GROUP-RUN-20261115 B5: group run dialog, header badge, member marks and awaiting-confirm banner.
+   Linear principles on the green/black base: neutral surfaces, 1px low-alpha borders, green only for focus/primary/running. */
+.cv-group-run-confirm .ink-confirm-dialog{width:min(600px,100%)}
+.cv-group-run-list{list-style:none;margin:0 0 10px;padding:0;max-height:min(44vh,360px);overflow:auto;border:1px solid rgba(255,255,255,.08);border-radius:8px}
+.cv-group-run-list li{display:flex;align-items:center;gap:8px;min-height:36px;padding:6px 10px;border-top:1px solid rgba(255,255,255,.06)}
+.cv-group-run-list li:first-child{border-top:0}
+.cv-group-run-level{flex:none;font-size:12px;color:var(--text-2,#a3a8a6);min-width:44px}
+.cv-group-run-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text,#ebedec)}
+.cv-group-run-name small{margin-left:6px;font-size:12px;color:var(--text-2,#a3a8a6)}
+.cv-group-run-tag{flex:none;font-size:12px;padding:1px 6px;border:1px solid rgba(214,189,134,.4);border-radius:6px;color:var(--warning,#d6bd86)}
+.cv-group-run-cost{flex:none;font-variant-numeric:tabular-nums;color:var(--text,#ebedec)}
+.cv-group-run-cost.is-unknown,.cv-group-run-banner .is-unknown{color:var(--warning,#d6bd86)}
+.cv-group-run-list.is-skipped li{color:var(--text-2,#a3a8a6);font-size:12px;min-height:28px}
+.cv-group-run-sub{font-size:12px;color:var(--text-2,#a3a8a6)}
+
+.canvas-studio .cv-node-group header .cv-group-run-status{flex:none;font-size:12px;padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:#1a1d1ce8;color:var(--cv-secondary,#a3a8a6);white-space:nowrap;max-width:420px;overflow:hidden;text-overflow:ellipsis}
+.canvas-studio .cv-node-group header .cv-group-run-status[data-run-status=running]{border-color:rgba(69,192,136,.5);color:var(--cv-green,#45c088)}
+.canvas-studio .cv-node-group header .cv-group-run-status[data-run-status=awaiting_confirm]{border-color:rgba(214,189,134,.5);color:var(--cv-warning,#d6bd86)}
+.canvas-studio .cv-node-group header .cv-group-run-status[data-run-status=stopped]{border-color:rgba(230,120,110,.5);color:var(--cv-danger,#e6786e)}
+.canvas-studio .cv-node-group header button.cv-group-run-button{border-color:rgba(69,192,136,.45)}
+.canvas-studio .cv-node-group header button.cv-group-run-cancel{border-color:rgba(230,120,110,.6);color:var(--cv-danger,#e6786e)}
+.canvas-studio .cv-node-group header button.cv-group-run-button:disabled{opacity:.5;cursor:default}
+
+/* Counter-scaled like the group header (canvasFeedback.css) so the rendered text stays >=12px at any zoom <=100%. */
+.canvas-studio .cv-node-run-mark{--cv-mark-ui:clamp(1,calc(1 / var(--cv-zoom,1)),5);position:absolute;top:40px;left:10px;z-index:3;transform:scale(var(--cv-mark-ui));transform-origin:left top;max-width:calc((100% - 20px) / var(--cv-mark-ui));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.14);background:#161917ee;color:var(--cv-secondary,#a3a8a6);font-size:12px;line-height:16px}
+.canvas-studio .cv-node-run-mark[data-run-status=submitting]{border-color:rgba(69,192,136,.5);color:var(--cv-green,#45c088)}
+.canvas-studio .cv-node-run-mark[data-run-status=blocked]{border-color:rgba(214,189,134,.5);color:var(--cv-warning,#d6bd86)}
+
+/* Docked bottom-right above the canvas toolbar so it never covers group headers/badges near the top (艾达 B5 必修1). */
+.canvas-studio .cv-group-run-banners{position:absolute;right:16px;bottom:88px;z-index:40;display:flex;flex-direction:column;gap:8px;width:min(440px,calc(100% - 32px));max-height:calc(100% - 120px);overflow:auto}
+.cv-group-run-banner{padding:12px 14px;border:1px solid rgba(214,189,134,.45);border-radius:8px;background:var(--surface-raised,#141614f2);backdrop-filter:blur(10px);color:var(--text,#ebedec);font-size:13px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.cv-group-run-banner header strong{font-weight:600}
+.cv-group-run-banner ul{list-style:none;margin:8px 0;padding:0;max-height:160px;overflow:auto}
+.cv-group-run-banner li{display:flex;flex-wrap:wrap;gap:4px 12px;padding:4px 0;border-top:1px solid rgba(255,255,255,.06);font-variant-numeric:tabular-nums}
+.cv-group-run-banner li:first-child{border-top:0}
+.cv-group-run-banner li .cv-group-run-name{flex:1 1 140px}
+.cv-group-run-delta{color:var(--warning,#d6bd86)}
+.cv-group-run-error{margin:4px 0;color:var(--danger,#e6786e)}
+.cv-group-run-banner footer{display:flex;justify-content:flex-end;gap:8px}

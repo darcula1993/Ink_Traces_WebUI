@@ -10,8 +10,15 @@ export function activeTaskNodes(document) {
   return (document?.nodes || []).filter(node => node.task?.id && isActiveTask(node.task.status))
 }
 
+// NODE-ECHO-20261115: runtime-only extras copied from the task interfaces (never saved:
+// sanitizeDocumentTasks keeps task to id/status/error). stage: VIDEO-SIGNAL ('downloading' while
+// processing, else null); failure: FAILURE-CLASS {category,label,hint,action}.
+export const taskStageField = task => (typeof task?.stage === 'string' && task.stage ? task.stage : null)
+export const taskFailureField = task => (task?.failure && typeof task.failure === 'object' && !Array.isArray(task.failure) ? task.failure : null)
+const sameFailure = (a, b) => JSON.stringify(a || null) === JSON.stringify(b || null)
+
 export function sameTaskState(task, next) {
-  return task?.status === next.status && (task?.error || null) === (next.error || null) && Boolean(task?.resultUnknown) === Boolean(next.resultUnknown) && (task?.progress ?? null) === (next.progress ?? null)
+  return task?.status === next.status && (task?.error || null) === (next.error || null) && Boolean(task?.resultUnknown) === Boolean(next.resultUnknown) && (task?.progress ?? null) === (next.progress ?? null) && (task?.stage ?? null) === (next.stage ?? null) && sameFailure(task?.failure, next.failure)
 }
 
 /**
@@ -47,13 +54,13 @@ export async function collectTaskUpdates({ document, fetchStatuses, fetchDetail,
     if (!status) { failed++; continue }
     if (!isServerTaskStatus(status.status)) { anomalies.set(node.id, String(status.status)); continue }
     try {
-      let next = { id: taskId, status: status.status, error: status.error || null, progress: Number.isFinite(Number(status.progress)) ? Number(status.progress) : null, resultUnknown: status.status === 'failed' && status.result?.result_unknown === true }
+      let next = { id: taskId, status: status.status, error: status.error || null, progress: Number.isFinite(Number(status.progress)) ? Number(status.progress) : null, resultUnknown: status.status === 'failed' && status.result?.result_unknown === true, stage: taskStageField(status), failure: taskFailureField(status) }
       const knowsUnknown = status.result && Object.hasOwn(status.result, 'result_unknown')
       if (status.status === 'failed' && !knowsUnknown) {
         const detail = await fetchDetail(taskId)
         if (!isCurrent()) return { patches, terminal, failed, stale: true, anomalies }
         if (!isServerTaskStatus(detail.status)) { anomalies.set(node.id, String(detail.status)); continue }
-        next = { id: taskId, status: detail.status, error: detail.error || null, resultUnknown: Boolean(detail.resultUnknown) }
+        next = { id: taskId, status: detail.status, error: detail.error || null, resultUnknown: Boolean(detail.resultUnknown), stage: null, failure: taskFailureField(detail) || next.failure }
       }
       const latest = getDocument().nodes.find(item => item.id === node.id)
       if (!latest || Number(latest.task?.id) !== taskId) continue
@@ -87,7 +94,8 @@ export function taskSyncPatches({ document, serverNodes, terminal, known = null 
     if (!task || Number(task.id) !== Number(status.id) || !isTerminalTaskStatus(task.status)) { missing.push(nodeId); continue }
     const seen = new Set([...(local.candidates || []), ...(knownNodes.get(nodeId)?.candidates || [])].map(asset => asset.id))
     const additions = (Array.isArray(remote.candidates) ? remote.candidates : []).filter(asset => asset?.id && !seen.has(asset.id))
-    const next = { id: Number(task.id), status: task.status, error: task.error || null, resultUnknown: task.status === 'failed' && Boolean(status.resultUnknown) }
+    // The written-back node task never carries failure: it comes from the status poll (terminal map).
+    const next = { id: Number(task.id), status: task.status, error: task.error || null, resultUnknown: task.status === 'failed' && Boolean(status.resultUnknown), failure: task.status === 'failed' ? taskFailureField(status) : null }
     const selected = additions.find(asset => asset.id === remote.selectedCandidateId)
     if (!sameTaskState(local.task, next) || additions.length) patches.set(nodeId, { task: next, additions, ...(selected ? { selected } : {}) })
   }
@@ -101,7 +109,7 @@ export function applyTaskUpdates(document, patches) {
       const patch = patches.get(item.id)
       if (!patch || Number(item.task?.id) !== Number(patch.task.id)) return item
       // resultUnknown is runtime-only (the server document schema keeps task to id/status/error).
-      const task = { id: patch.task.id, status: patch.task.status, error: patch.task.error || null, ...(patch.task.progress != null ? { progress: patch.task.progress } : {}) }
+      const task = { id: patch.task.id, status: patch.task.status, error: patch.task.error || null, ...(patch.task.progress != null ? { progress: patch.task.progress } : {}), ...(taskStageField(patch.task) ? { stage: patch.task.stage } : {}), ...(taskFailureField(patch.task) ? { failure: patch.task.failure } : {}) }
       const { upstreamStale, ...rest } = item
       // A successful regeneration clears the "上游已更新" marker.
       return {

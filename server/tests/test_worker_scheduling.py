@@ -216,7 +216,7 @@ def test_scheduler_drains_all_pools_before_releasing_leases(scheduler, monkeypat
         assert not any(event[0] == 'release' for event in events)
         if clock.sleeps == 1:
             assert {name: len(pool.jobs) for name, pool in executors.items()} == {
-                'generation': 3, 'polling': 2, 'assets': 1, 'maintenance': 1,
+                'generation': 3, 'polling': 2, 'assets': 1, 'maintenance': 1, 'group-run': 1,
             }
             for name, pool in executors.items():
                 assert len(pool.jobs) == pool.limit
@@ -226,6 +226,8 @@ def test_scheduler_drains_all_pools_before_releasing_leases(scheduler, monkeypat
                         assert args[0]['type'] == ('image' if name == 'generation' else 'video')
                     elif name == 'assets':
                         assert function == scheduler.process_provider_asset
+                    elif name == 'group-run':
+                        assert function == scheduler._sweep_group_runs
                     else:
                         assert function == scheduler._cleanup
             scheduler.request_stop()
@@ -235,6 +237,7 @@ def test_scheduler_drains_all_pools_before_releasing_leases(scheduler, monkeypat
                     future.set_result(None)
         else:
             executors['maintenance'].jobs[0][2].set_result(None)
+            executors['group-run'].jobs[0][2].set_result(None)
 
     monkeypatch.setattr(worker, 'ThreadPoolExecutor', Executor)
     monkeypatch.setattr(worker, 'time', SimpleNamespace(monotonic=lambda: clock.now, sleep=sleep))
@@ -249,5 +252,5 @@ def test_scheduler_drains_all_pools_before_releasing_leases(scheduler, monkeypat
     monkeypatch.setattr(worker.storage, 'release_process_memory', lambda: None)
     scheduler.run()
     assert [event[1] for event in events if event[0] == 'heartbeat'] == [0, 1, 2, 3]
-    assert [event[0] for event in events[-7:]] == ['shutdown'] * 4 + ['release', 'remove', 'close']
+    assert [event[0] for event in events[-8:]] == ['shutdown'] * 5 + ['release', 'remove', 'close']
     assert events[-3][1] == events[-2][1] == scheduler.worker_id

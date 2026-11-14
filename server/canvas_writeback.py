@@ -134,54 +134,36 @@ def _input_ids(target, by_id, edges):
 
 
 def derive_downstream(before_nodes, after_nodes, edges, changed_ids):
-    """F10 + F11 of the client edit pipeline for nodes whose result changed.
+    """F10 + F11 of the client edit pipeline after write-back changed some nodes.
 
     ``before_nodes``/``after_nodes`` are lists, ``changed_ids`` the written nodes.
-    F10 markStaleDownstream: a direct downstream generation node that has a
-    result and is not stale yet gets ``upstreamStale: true`` when the upstream
-    asset id changed.  F11 reconcileReferenceMentions (id part): in that node's
-    ``referenceOrder`` / ``referenceMentions`` an old upstream asset id that is no
-    longer an input is replaced by the new one when that is unambiguous.
-    Returns (nodes, ids of downstream nodes that changed).
+    F11 reconcileReferenceMentions (full port, QA D3): references, bindings and the
+    @图片N/@视频N/@音频N numbering of every generation node follow the new results
+    exactly as an open page would (canvas_reference_rebind).  F10
+    markStaleDownstream: a direct downstream generation node that has a result and
+    is not stale yet gets ``upstreamStale: true`` when the upstream asset id changed.
+    Returns (nodes, ids of other nodes that changed).
     """
+    from canvas_reference_rebind import reconcile_reference_mentions
     before = {node.get('id'): node for node in before_nodes if isinstance(node, dict)}
     after = {node.get('id'): node for node in after_nodes if isinstance(node, dict)}
-    moved = {}
-    for node_id in changed_ids:
-        old, new = _asset_id(before.get(node_id)), _asset_id(after.get(node_id))
-        if node_id in before and node_id in after and old != new:
-            moved[node_id] = (old, new)
-    if not moved:
-        return after_nodes, set()
-    touched = {}
-    for edge in edges:
-        if not isinstance(edge, dict) or edge.get('source') not in moved:
-            continue
+    edge_list = [edge for edge in edges if isinstance(edge, dict)]
+    reconciled = {node.get('id'): node for node in reconcile_reference_mentions(
+        {'nodes': before_nodes, 'edges': edge_list}, {'nodes': after_nodes, 'edges': edge_list})}
+    moved = {node_id for node_id in changed_ids
+             if node_id in before and node_id in after and _asset_id(before[node_id]) != _asset_id(after[node_id])}
+    for edge in edge_list:
         target_id = edge.get('target')
-        target = touched.get(target_id) or after.get(target_id)
-        if not isinstance(target, dict) or target.get('type') not in GENERATION_TYPES or target_id not in before or target_id in moved:
+        target = reconciled.get(target_id)
+        if edge.get('source') not in moved or not isinstance(target, dict) or target.get('type') not in GENERATION_TYPES \
+                or target_id not in before or target_id in moved:
             continue
-        updated = dict(target)
         if target.get('asset') and not target.get('upstreamStale'):
-            updated['upstreamStale'] = True
-        inputs = _input_ids(updated, after, edges)
-        old_id, new_id = moved[edge['source']]
-        # Unambiguous: the old id left the inputs and every old source of it now provides new_id.
-        sources = [e.get('source') for e in edges if isinstance(e, dict) and e.get('target') == target_id
-                   and _asset_id(before.get(e.get('source'))) == old_id]
-        replacements = {_asset_id(after.get(source)) for source in sources}
-        if old_id and old_id not in inputs and new_id in inputs and replacements == {new_id}:
-            order = updated.get('referenceOrder')
-            if isinstance(order, list) and old_id in order:
-                updated['referenceOrder'] = list(dict.fromkeys(new_id if item == old_id else item for item in order))
-            mentions = updated.get('referenceMentions')
-            if isinstance(mentions, dict) and old_id in mentions.values():
-                updated['referenceMentions'] = {token: new_id if value == old_id else value for token, value in mentions.items()}
-        if updated != target:
-            touched[target_id] = updated
+            reconciled[target_id] = {**target, 'upstreamStale': True}
+    touched = {node_id for node_id, node in reconciled.items() if node != after.get(node_id) and node_id not in changed_ids}
     if not touched:
         return after_nodes, set()
-    return [touched.get(node.get('id'), node) if isinstance(node, dict) else node for node in after_nodes], set(touched)
+    return [reconciled.get(node.get('id'), node) if isinstance(node, dict) else node for node in after_nodes], touched
 
 
 def node_fields(node):
@@ -309,6 +291,21 @@ def sync_tasks(workflow_id, task_ids):
     return {'revision': row['revision'], 'nodes': nodes, 'failed': failed}
 
 
+def _older_than_group_task(db, node, task_id):
+    """GROUP-RUN B3: the server bound ``node.task`` to a group-run task at submission.
+
+    A stale client still holding an older task (or none) gets the server's task;
+    a client bound to a newer task keeps its own.  Only tasks a group run created
+    (params.group_run_id) qualify; ordinary write-backs keep the matching rule.
+    """
+    current = node.get('task') if isinstance(node.get('task'), dict) else {}
+    client_id = current.get('id')
+    if client_id is not None and (type(client_id) is not int or client_id >= task_id):
+        return False
+    row = db.execute("SELECT json_extract(params,'$.group_run_id') AS run FROM tasks WHERE id=?", (task_id,)).fetchone()
+    return bool(row and row['run'])
+
+
 def merge_stale_save(db, workflow_id, base_revision, current_revision, document):
     """Interface C. Overlay write-back fields onto a stale client document.
 
@@ -335,7 +332,7 @@ def merge_stale_save(db, workflow_id, base_revision, current_revision, document)
         task_id = next((item for item in task_ids if source is not None and _matching(source, item)), None)
         # A deleted node stays deleted; a node the client re-bound to another task keeps the
         # client's state; downstream rows (F10/F11) are re-derived below from the client document.
-        if source is None or task_id is None or not _matching(node, task_id):
+        if source is None or task_id is None or not (_matching(node, task_id) or _older_than_group_task(db, node, task_id)):
             nodes.append(node)
             continue
         results.append(node['id'])

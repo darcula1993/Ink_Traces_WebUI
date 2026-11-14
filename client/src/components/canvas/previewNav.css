@@ -1,0 +1,13 @@
+/* PREVIEW-NAV-20261115: preview paging (← n/N →) and download, Linear-style quiet controls. */
+.cv-media-viewer>header{gap:12px;min-width:0}
+.cv-preview-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cv-preview-actions{display:flex;align-items:center;gap:8px;flex:none}
+.cv-preview-nav{display:flex;align-items:center;gap:4px}
+.cv-preview-actions :is(.cv-preview-step,.cv-preview-download){display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:28px;padding:2px 8px;border:1px solid var(--cv-border,#b5bbb833);border-radius:6px;background:transparent;color:inherit;font-size:12px;line-height:1;text-decoration:none;cursor:pointer}
+.cv-preview-actions .cv-preview-step{width:28px;padding:0}
+.cv-preview-actions :is(.cv-preview-step,.cv-preview-download):hover:not(:disabled){background:var(--cv-green-hover,#5ca07e22)}
+.cv-preview-actions :is(.cv-preview-step,.cv-preview-download):disabled{opacity:.4;cursor:not-allowed}
+.cv-preview-actions :is(.cv-preview-step,.cv-preview-download,.cv-preview-close):focus-visible{outline:2px solid var(--cv-focus,#5ca07e);outline-offset:1px}
+.cv-preview-count{min-width:48px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums;color:var(--cv-secondary,#b5bbb8)}
+/* The themed player positions its <video> absolutely, so the preview gives it a real box (was collapsed to the bar). */
+.cv-preview-content .cv-media-player.is-video{height:min(64vh,620px);min-height:200px}

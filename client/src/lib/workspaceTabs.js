@@ -19,8 +19,10 @@ export function makeVideoTab(id) {
   }
 }
 
+// New audio tool form defaults to 48 kHz like canvas audio nodes (user 2026-11-15). Saved forms keep
+// their stored sampleRate; reloading an old task without sample_rate still falls back to 44100.
 export const DEFAULT_AUDIO_FORM = {
-  prompt: '', model: CUPSY_AUDIO_MODEL, outputFormat: 'mp3', sampleRate: 44100,
+  prompt: '', model: CUPSY_AUDIO_MODEL, outputFormat: 'mp3', sampleRate: 48000,
   enableSubtitle: true, watermark: false, referenceMode: 'none', speaker: '', references: [],
 }
 

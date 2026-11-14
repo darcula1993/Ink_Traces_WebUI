@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.9.0 - 2026-11-15
+
+- Run a whole node group: the group bar gets "运行组内全部". A confirmation lists the nodes in upstream order with per-node estimates (unknown prices listed separately, never zero) and marks nodes that will be re-run. The server then submits independent nodes together and each downstream node only after its upstream succeeds, using the new upstream result, so the run continues with the page closed. A normal failure blocks only its downstream; an unknown result stops the whole group without resubmitting. If a recalculated estimate exceeds the confirmed amount (or becomes unknown) the run pauses for a new confirmation. Cancelling stops only nodes not yet submitted. Manually editing a member node or its upstream during a run blocks that branch; single-node generation and retry of member nodes are refused while the run is active.
+- Generation nodes show the latest task number, elapsed time and estimated cost; clicking the task number opens it in the task center.
+- Video and audio nodes show a server-reported "下载写回" stage while the result is being downloaded.
+- Media preview pages through node versions or group media with ←/→, shows n/N and downloads the local file.
+- Server-side write-back now rebinds @ image numbers in downstream prompts the same way the browser does, so results are the same with the page open or closed.
+- Estimates: the Seedream 5.5 / 5.0 Pro decision follows the node's interface model on both sides; reference-video seconds are matched to the right file; ledger amounts use three decimals.
+- Canvas audio submissions are checked against the saved node and refused before any upload if they differ; result names drop Unicode bidirectional controls and avoid Windows reserved names; the legacy audio tool now defaults to 48 kHz.
+- Provider error messages no longer expose endpoint IDs (shown as ep-***).
+
 ## 1.8.0 - 2026-11-14
 
 - Image and layer cost estimates from the official BytePlus price list: canvas image nodes show "预估 $x USD" with the model, output size, pixel tier and reference-image price on hover; the layer tool shows the per-layer price before submission and the ledger prices each output layer by its actual size. Seedream 5.5 layers below 921,600 pixels are counted at the lowest tier and marked as derived. Unknown prices are never shown as zero. Small amounts show three decimals.

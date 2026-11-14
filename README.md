@@ -12,7 +12,7 @@
   English · <a href="./doc/README.md">中文</a>
 </p>
 
-<p align="center">Version 1.8.0 · <a href="./CHANGELOG.md">Changelog</a></p>
+<p align="center">Version 1.9.0 · <a href="./CHANGELOG.md">Changelog</a></p>
 
 <p align="center">
   <img src="./screenshot.png" alt="Ink Traces WebUI Screenshot" width="100%" />
@@ -24,7 +24,9 @@
 - **Asset library**: project assets, asset groups and local assets (your uploads are kept as independent persistent copies), with select-all and permanent delete.
 - **Task center**: every generation is a real backend task with server-side search, pagination, favorites, trash and bulk download.
 - **Layer studio**: decompose an image into 2–100 editable layers, optional OCR, version restore and export.
-- **Interface management**: several named provider configurations; choose one per node, with project defaults and immutable revisions for submitted tasks.
+- **Interface management**: several named provider configurations; each generation node picks its own (new nodes preselect your last choice per type), and submitted tasks keep an immutable revision.
+- **Cost estimates**: image, layer and video tasks show an estimate before submitting, and a per-project cost ledger lists estimates (unknown prices are shown as unknown, never zero).
+- **Character library**: reusable characters with description, reference images and voice, referenced in prompts with @.
 - **Safe billing behavior**: if a provider request times out with an unknown outcome it is never replayed automatically, avoiding duplicate paid generations.
 - **Prompt Vault**: reusable saved prompts and a fullscreen prompt editor.
 

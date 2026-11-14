@@ -1,0 +1,51 @@
+[
+ {
+  "name": "profile 5.5 over deployment 5.0 pro",
+  "deployment_model": "seedream-5-0-pro",
+  "deployment_capability_model": "seedream-5-0-pro",
+  "profile_model": "dola-seedream-5-5-261028",
+  "expected": {"model": "seedream-5.5", "minimumCost": 0.02}
+ },
+ {
+  "name": "profile 5.0 pro over deployment 5.5",
+  "deployment_model": "dola-seedream-5-5-261028",
+  "deployment_capability_model": "dola-seedream-5-5-261028",
+  "profile_model": "seedream-5-0-pro",
+  "expected": {"model": "seedream-5.0-pro", "minimumCost": 0.045}
+ },
+ {
+  "name": "profile without model over deployment 5.5 uses backend default 5.0 pro",
+  "deployment_model": "dola-seedream-5-5-261028",
+  "deployment_capability_model": "dola-seedream-5-5-261028",
+  "profile_model": "",
+  "expected": {"model": "seedream-5.0-pro", "minimumCost": 0.045}
+ },
+ {
+  "name": "profile reuses the deployment 5.5 endpoint ID",
+  "deployment_model": "ep-estimate-debt-55",
+  "deployment_capability_model": "dola-seedream-5-5-261028",
+  "profile_model": "ep-estimate-debt-55",
+  "expected": {"model": "seedream-5.5", "minimumCost": 0.02}
+ },
+ {
+  "name": "profile own endpoint ID over deployment 5.5 endpoint",
+  "deployment_model": "ep-estimate-debt-55",
+  "deployment_capability_model": "dola-seedream-5-5-261028",
+  "profile_model": "ep-estimate-debt-other",
+  "expected": {"model": "seedream-5.0-pro", "minimumCost": 0.045}
+ },
+ {
+  "name": "original deployment config 5.5 (no profile)",
+  "deployment_model": "dola-seedream-5-5-261028",
+  "deployment_capability_model": "dola-seedream-5-5-261028",
+  "profile_model": null,
+  "expected": {"model": "seedream-5.5", "minimumCost": 0.02}
+ },
+ {
+  "name": "original deployment config 5.0 pro (no profile)",
+  "deployment_model": "seedream-5-0-pro",
+  "deployment_capability_model": "seedream-5-0-pro",
+  "profile_model": null,
+  "expected": {"model": "seedream-5.0-pro", "minimumCost": 0.045}
+ }
+]

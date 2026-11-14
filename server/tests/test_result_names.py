@@ -70,3 +70,30 @@ def test_legacy_task_keeps_old_names():
     import task_media
     assert task_media._task_download_name(task, 'image_1.png').startswith(f'ink-traces-image-task-{tid}-')
     assert task_media._task_download_name(task, 'image_1.png').endswith('output-02.png')
+
+
+def test_bidi_controls_removed():
+    # U+202E would display "abc<RLO>gnp.exe" as "abcexe.png".
+    assert clean_result_name('abc‮gnp.exe') == 'abcgnp.exe'
+    for char in '؜‎‏‪‫‬‭‮⁦⁧⁨⁩':
+        assert clean_result_name(f'铁{char}门') == '铁门'
+    assert clean_result_name('‮⁦') == ''
+    assert result_display_name('‮', 7, 'image_0.png') is None
+    assert result_display_name('镜‮头', 7, 'image_0.png') == '镜头_7.png'
+
+
+def test_windows_reserved_names_renamed():
+    for name in ['CON', 'con', 'PRN', 'Aux', 'NUL', 'nul.txt', 'COM1', 'com9', 'LPT1', 'lpt9.log', 'CON .x']:
+        cleaned = clean_result_name(name)
+        assert cleaned == f'_{name}', name
+    assert clean_result_name('nul.') == '_nul'
+    assert result_display_name('nul.txt', 7, 'image_0.png') == '_nul.txt_7.png'
+    assert len(clean_result_name('con.' + '长' * 300)) == 80
+    # Lookalikes stay unchanged.
+    for name in ['CONSOLE', 'COM0', 'COM10', 'LPT', 'acon', '会议CON', '铁门首帧', '第1镜 夜景']:
+        assert clean_result_name(name) == name
+
+
+def test_legacy_stored_result_name_cleaned_on_display():
+    from result_names import task_result_name
+    assert task_result_name({'result_name': 'CON‮'}) == '_CON'

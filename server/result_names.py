@@ -9,15 +9,27 @@ import re
 
 MAX_STEM = 80
 _BAD = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
+# Unicode bidirectional controls (LRM/RLM/ALM, embeddings/overrides, isolates) can disguise
+# an extension such as "abc\u202Egnp.exe"; they are removed outright.
+_BIDI = re.compile('[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]')
+# Windows reserved device names, matched case-insensitively on the part before the first dot.
+_WINDOWS_RESERVED = re.compile(r'(?:con|prn|aux|nul|com[1-9]|lpt[1-9])', re.IGNORECASE)
+
+
+def _safe_windows_stem(text):
+    if _WINDOWS_RESERVED.fullmatch(text.split('.', 1)[0].rstrip(' ')):
+        return f'_{text}'
+    return text
 
 
 def clean_result_name(value):
     """Sanitise a node name: no separators/control chars, bounded length, CJK kept."""
     if not isinstance(value, str):
         return ''
-    text = _BAD.sub(' ', value)
+    text = _BIDI.sub('', value)
+    text = _BAD.sub(' ', text)
     text = re.sub(r'\s+', ' ', text).strip(' .')
-    return text[:MAX_STEM].strip(' .')
+    return _safe_windows_stem(text[:MAX_STEM].strip(' .'))[:MAX_STEM].rstrip(' .')
 
 
 def _output_index(filename):

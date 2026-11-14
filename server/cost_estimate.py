@@ -276,15 +276,29 @@ def probe_duration(path):
     return value
 
 
+def _url_file_name(url):
+    """Last path segment of a reference URL (query/fragment dropped), or None."""
+    if not isinstance(url, str) or not url.strip():
+        return None
+    name = url.split('#', 1)[0].split('?', 1)[0].rstrip('/').rsplit('/', 1)[-1]
+    return name or None
+
+
 def _upload_video_path(url):
     if not isinstance(url, str) or '/api/upload_video/' not in url:
         return None
     import storage
-    return os.path.join(storage.UPLOAD_VIDEO_DIR, os.path.basename(url.rsplit('/api/upload_video/', 1)[-1]))
+    name = _url_file_name(url.rsplit('/api/upload_video/', 1)[-1])
+    return os.path.join(storage.UPLOAD_VIDEO_DIR, os.path.basename(name)) if name else None
 
 
 def reference_video_durations(task, db):
-    """Durations of the reference videos the task actually sent (None = unknown)."""
+    """Durations of the reference videos the task actually sent (None = unknown).
+
+    Ark: each entry of ref_video_urls is matched to its local file by identity (the
+    /api/upload_video/ file name, also used to find it among ref_video_paths), never by
+    list position; remote URLs have no local file and stay unknown (counted as 5s).
+    """
     params = task.get('params') or {}
     if params.get('video_mode') == 'keyframe':
         return []
@@ -299,18 +313,19 @@ def reference_video_durations(task, db):
     paths = [p for p in (params.get('ref_video_paths') or []) if isinstance(p, str)]
     if not isinstance(urls, list):
         urls = []
-    durations = []
-    used = set()
-    for index, url in enumerate(urls):
-        path = _upload_video_path(url)
-        if path is None and index < len(paths) and paths[index] not in used:
-            path = paths[index]
-        if path:
-            used.add(path)
-        durations.append(probe_duration(path))
-    # Uploaded files are always echoed in ref_video_urls; count stray paths only if urls are missing.
     if not urls:
-        durations.extend(probe_duration(p) for p in paths)
+        # Very old tasks may only record paths; each path is one sent reference.
+        return [probe_duration(p) for p in paths]
+    by_name = {}
+    for path in paths:
+        by_name.setdefault(os.path.basename(path), path)
+    durations = []
+    for url in urls:
+        path = _upload_video_path(url)
+        if path is not None and not os.path.isfile(path):
+            # Same upload recorded at submission under another directory: match by file name only.
+            path = by_name.get(os.path.basename(path), path)
+        durations.append(probe_duration(path))
     return durations
 
 

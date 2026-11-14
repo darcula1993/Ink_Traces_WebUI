@@ -1,0 +1,21 @@
+/* NODE-ECHO-20261115: latest-task echo in the node footer (task number · duration · cost) and the
+   failure-class actions. Neutral text, green only on the focused/hovered task link; 1px hairlines. */
+.canvas-studio .cv-node-echo { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-width: 0; max-width: 78%; overflow: hidden; white-space: nowrap; font-size: 12px; line-height: 20px; color: var(--cv-secondary); font-variant-numeric: tabular-nums; }
+.canvas-studio .cv-node-echo > * { flex-shrink: 0; }
+.canvas-studio .cv-node-echo > :last-child { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.canvas-studio .cv-node-echo-item + .cv-node-echo-item::before, .canvas-studio .cv-node-echo-task + .cv-node-echo-item::before { content: '·'; margin-right: 6px; color: var(--cv-border-strong); }
+.canvas-studio .cv-node-echo-item.is-unknown { color: var(--cv-warning); }
+.canvas-studio .cv-node-echo-task { all: unset; box-sizing: border-box; cursor: pointer; padding: 0 4px; height: 18px; line-height: 16px; border: 1px solid var(--cv-border); border-radius: 6px; color: var(--cv-text); font-size: 12px; }
+.canvas-studio .cv-node-echo-task:hover { border-color: var(--cv-green); color: var(--cv-green); }
+.canvas-studio .cv-node-echo-task:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 1px; }
+.canvas-studio .cv-node:not(.cv-node-sized) .cv-node-echo { max-width: 100%; margin-top: 4px; }
+.canvas-studio .cv-world.is-lod-low .cv-node .cv-node-echo { visibility: hidden; }
+.canvas-studio .cv-media-state-actions { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+.canvas-studio .cv-task-failure-hint { color: var(--cv-text); }
+.canvas-studio .cv-task-failure-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+/* 艾达必修1: the status word is never truncated; the echo gives way first (its last item ellipsizes). */
+.canvas-studio .cv-node.cv-node-sized .cv-node-footer .cv-node-status.is-short { flex: 0 0 auto; }
+.canvas-studio .cv-node.cv-node-sized .cv-node-footer .cv-node-status.is-short + .cv-node-echo { flex: 0 1 auto; margin-left: auto; max-width: none; }
+/* Panel failure row: the class hint wins over the raw error text (which ellipsizes first). */
+.canvas-studio .cv-generation-panel .cv-task-failure .cv-task-failure-hint { flex: 0 0 auto; max-width: 45%; }
+.canvas-studio .cv-generation-panel .cv-task-failure .cv-task-failure-actions { margin-top: 0; flex-wrap: nowrap; }

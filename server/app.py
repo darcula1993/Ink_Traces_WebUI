@@ -31,7 +31,7 @@ from logging_config import configure_logging
 from response_compression import install_compression
 from request_utils import as_bool, normalize_newlines
 from task_api import task_api
-from task_public import mask_layer_fields, public_layer_project, public_task, restore_layer_remote_fields
+from task_public import mask_endpoint_ids, mask_layer_fields, public_layer_project, public_task, restore_layer_remote_fields
 from canvas_api import canvas_api
 from canvas_store import init_canvas_db
 import profile_runtime
@@ -53,6 +53,9 @@ app.register_blueprint(provider_api)
 import cost_ledger
 cost_ledger.register_routes(app)
 import cost_estimate
+# GROUP-RUN B3: group runs submit through the generation routes below and estimate via cost_estimate.
+import canvas_group_submit
+canvas_group_submit.register()
 
 
 @app.teardown_appcontext
@@ -415,6 +418,7 @@ def redact_sensitive(value):
             return 'Bearer ***REDACTED***'
         if value.startswith('data:') and len(value) > 1024:
             return f'<omitted data URL: {len(value)} characters>'
+        return mask_endpoint_ids(value)
     return value
 
 # Prompt收藏存储文件路径
@@ -446,7 +450,7 @@ def save_error_log(error_type, request_data, response_data, error_message=None):
         log_data = {
             'timestamp': datetime.now().isoformat(),
             'error_type': error_type,
-            'error_message': error_message,
+            'error_message': mask_endpoint_ids(error_message),
             'request': redact_sensitive(request_data),
             'response': redact_sensitive(response_data)
         }
@@ -550,7 +554,7 @@ def parse_api_error(response, response_data=None):
     if response_data and isinstance(response_data, dict):
         if 'error' in response_data:
             if isinstance(error_obj, dict):
-                error_info['message'] = error_message
+                error_info['message'] = mask_endpoint_ids(error_message)
                 error_info['details']['code'] = error_obj.get('code', status_code)
                 error_info['details']['status'] = error_status
                 if error_reasons:
@@ -920,6 +924,7 @@ def _generate_ark_image(
 
     if response.status_code != 200:
         err_msg = resp_data.get('error', {}).get('message', f'Ark API 错误 {response.status_code}') if isinstance(resp_data.get('error'), dict) else resp_data.get('error', f'Ark API 错误 {response.status_code}')
+        err_msg = mask_endpoint_ids(err_msg)  # EP-MASK-20261115
         save_error_log('ark_api_error', req_info, resp_data, err_msg)
         return jsonify({
             'success': False,
@@ -1097,7 +1102,7 @@ def execute_image_task(task_id):
             'error_details': response_data.get('error_details'),
             'result_unknown': bool(response_data.get('result_unknown', False)),
         }
-        task_db.fail_task(task_id, response_data.get('error', '图片生成失败'), error_result)
+        task_db.fail_task(task_id, mask_endpoint_ids(response_data.get('error', '图片生成失败')), error_result)
         response_data['task_id'] = task_id
         return response_data, status_code
 
@@ -1319,9 +1324,45 @@ def _queue_layer_task(project, prompt, size, options_data=None):
     return task_id
 
 
+def _group_run_guard():
+    """GROUP-RUN B4: refuse a manual generation of a node owned by an active group run.
+
+    Only the run's own server-internal submission passes: the contextvar set by
+    canvas_group_submit (B3) names this run and node, and the node is claimed as
+    submitting. Request fields are never trusted for this; everything else gets 409.
+    """
+    data = request.form if request.mimetype == 'multipart/form-data' else request.get_json(silent=True)
+    if not hasattr(data, 'get'):
+        return None
+    return _group_run_conflict(data.get('canvas_workflow_id'), data.get('canvas_node_id'))
+
+
+def _group_run_conflict(workflow_id, node_id):
+    """409 response when canvas node ``node_id`` belongs to an active group run (else None)."""
+    if not isinstance(workflow_id, str) or not isinstance(node_id, str) or not workflow_id or not node_id:
+        return None
+    import canvas_group_run
+    run_id = canvas_group_run.active_run_for_node(workflow_id, node_id)
+    if run_id is None:
+        return None
+    try:
+        from canvas_group_submit import current_submission
+        own = current_submission()
+    except ImportError:
+        own = None
+    if isinstance(own, dict) and own.get('node_id') == node_id and \
+            canvas_group_run.is_run_submission(run_id, node_id, own.get('run_id')):
+        return None
+    return jsonify(success=False, code='group_run_active', run_id=run_id,
+                   error='该节点正在“运行组内全部”中，请等待组运行完成或取消整组后再单独生成'), 409
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Queue single-shot image jobs (Ark / Cupsy)."""
+    blocked = _group_run_guard()
+    if blocked:
+        return blocked
     db_task_id = None
     try:
         is_form_request = request.mimetype == 'multipart/form-data'
@@ -1702,11 +1743,11 @@ def _cupsy_error(response, fallback):
     if not isinstance(payload, dict):
         return fallback
     error = payload.get('error')
-    return str(
+    return mask_endpoint_ids(str(
         payload.get('message')
         or (error.get('message') if isinstance(error, dict) else error)
         or fallback
-    )
+    ))
 
 
 def _cupsy_asset_json(asset):
@@ -1868,7 +1909,7 @@ def process_cupsy_asset_once(asset_id):
             )
             return {'state': 'active'}
         if status in {'failed', 'error', 'deleted', 'expired'}:
-            reason = payload.get('error') or payload.get('message') or f'Cupsy 素材状态: {status}'
+            reason = mask_endpoint_ids(str(payload.get('error') or payload.get('message') or f'Cupsy 素材状态: {status}'))
             task_db.update_provider_asset(asset_id, status='failed', error=str(reason),
                                           next_run_at=None, lease_owner=None, lease_until=None)
             return {'state': 'failed', 'error': str(reason)}
@@ -2136,6 +2177,9 @@ def _parse_audio_list(value, field_name):
 
 @app.route('/api/audio/generate', methods=['POST'])
 def generate_audio():
+    blocked = _group_run_guard()
+    if blocked:
+        return blocked
     settings = _cupsy_audio_settings()
     if not settings['api_key']:
         return jsonify({'success': False, 'error': 'Cupsy 未配置 API Key'}), 400
@@ -2193,6 +2237,42 @@ def generate_audio():
         pending_links.append((asset, f'reference_{expected_kind}', position))
 
     uploads = request.files.getlist('references') if has_files else []
+    enable_subtitle = as_bool(data.get('enable_subtitle', True), default=True)
+    watermark = as_bool(data.get('watermark', False))
+    if data.get('canvas_node_id'):
+        # Canvas audio nodes: the request must match the saved node (AUDIO-NAME-DEBT-20261115).
+        # profile_runtime has already bound workflow/revision/node/provider; defaults mirror
+        # CANVAS_AUDIO_DEFAULTS in client/src/lib/generationSettings.js. Canvas audio has no
+        # watermark option, so it must stay off.
+        import canvas_store
+        saved_workflow = canvas_store.workflow(data['canvas_workflow_id'])
+        node = next((n for n in saved_workflow['document']['nodes'] if n['id'] == data['canvas_node_id']), None)
+        if not node or node.get('type') != 'audio':
+            return jsonify({'success': False, 'error': '音频节点不存在，请重新载入画布'}), 404
+        saved = node.get('params') or {}
+        saved_speaker = saved.get('speaker') or ''
+        expected = {
+            'speaker': saved_speaker,
+            'output_format': saved.get('output_format', 'mp3'),
+            'sample_rate': saved.get('sample_rate', 48000),
+            'enable_subtitle': saved.get('enable_subtitle', True),
+            'watermark': False,
+        }
+        actual = {
+            'speaker': speaker,
+            'output_format': output_format,
+            'sample_rate': sample_rate,
+            'enable_subtitle': enable_subtitle,
+            'watermark': watermark,
+        }
+        # Reference mode is derived from the submitted references plus the saved voice, as
+        # canvasApi.js derives it; the effective mode (after the voice upgrade) must match.
+        # Runs before uploads are persisted, so a 409 leaves no pending provider asset for the
+        # asset worker to send to Cupsy; only the uploaded file count is needed here.
+        derived_mode = expected_kind if (pending_links or uploads) else ('audio' if saved_speaker else 'none')
+        if actual != expected or reference_mode != derived_mode:
+            return jsonify({'success': False, 'error': '音频参数与已保存节点不一致，请重新载入画布后再生成'}), 409
+
     try:
         for upload in uploads:
             if reference_mode == 'none':
@@ -2214,8 +2294,8 @@ def generate_audio():
         'model': CUPSY_AUDIO_MODEL,
         'output_format': output_format,
         'sample_rate': sample_rate,
-        'enable_subtitle': as_bool(data.get('enable_subtitle', True), default=True),
-        'watermark': as_bool(data.get('watermark', False)),
+        'enable_subtitle': enable_subtitle,
+        'watermark': watermark,
         'reference_mode': reference_mode,
         'speaker': speaker or None,
     }
@@ -2598,6 +2678,9 @@ def _recover_video_post_accept(db_task_id, provider, external_id, request_info, 
 @app.route('/api/video/generate', methods=['POST'])
 def video_generate():
     """提交视频生成任务，返回 task_id"""
+    blocked = _group_run_guard()
+    if blocked:
+        return blocked
     db_task_id = None
     try:
         has_files = bool(request.content_type and 'multipart' in request.content_type)
@@ -2844,7 +2927,7 @@ def video_generate():
 
         if resp.status_code != 200:
             err_obj = resp_data.get('error', {}) if isinstance(resp_data, dict) else {}
-            err_msg = resp_data.get('message') or (err_obj.get('message') if isinstance(err_obj, dict) else '') or f'API 错误 {resp.status_code}'
+            err_msg = mask_endpoint_ids(resp_data.get('message') or (err_obj.get('message') if isinstance(err_obj, dict) else '') or f'API 错误 {resp.status_code}')
             task_db.fail_task(db_task_id, err_msg)
             return jsonify({'success': False, 'error': err_msg, 'db_task_id': db_task_id}), resp.status_code
 
@@ -2946,6 +3029,11 @@ def api_retry_task(task_id):
     task = task_db.get_task(task_id)
     if not task:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
+    # GROUP-RUN D2: retrying a member node's task is a manual generation of that node.
+    task_params = task.get('params') if isinstance(task.get('params'), dict) else {}
+    blocked = _group_run_conflict(task_params.get('canvas_workflow_id'), task_params.get('canvas_node_id'))
+    if blocked:
+        return blocked
     if task.get('deleted_at') is not None:
         return jsonify({'success': False, 'error': '请先从回收站恢复任务'}), 409
     if task['type'] != 'image':
@@ -3475,12 +3563,15 @@ def _poll_cupsy_video_task(task):
         reason = payload.get('message') or payload.get('error') or f'Cupsy 视频状态: {status}'
         if isinstance(reason, dict):
             reason = reason.get('message') or json.dumps(reason, ensure_ascii=False)
+        reason = mask_endpoint_ids(str(reason))
         task_db.fail_task(task_id, str(reason))
         return {'state': 'failed', 'error': str(reason)}
     if status not in {'succeeded', 'completed', 'ready'}:
         progress = payload.get('progress')
         return {'state': 'pending', 'progress': int(progress) if isinstance(progress, (int, float)) else 0}
 
+    # VIDEO-SIGNAL-20261115: Provider succeeded; expose "下载写回" while downloading.
+    task_db.set_task_stage(task_id, task_db.TASK_STAGE_DOWNLOADING)
     output_dir = task.get('output_dir') or storage.task_output_dir('video', task_id)
     filename = 'video.mp4'
     path = os.path.join(output_dir, filename)
@@ -3488,7 +3579,7 @@ def _poll_cupsy_video_task(task):
         payload, endpoint, 'video', f'/v1/videos/{external_id}/content', path,
     )
     if download_error:
-        return {'state': 'retry', 'error': download_error}
+        return {'state': 'retry', 'error': download_error, 'stage': task_db.TASK_STAGE_DOWNLOADING}
     storage.register_file(task_id, 'output_video', path, 'video/mp4')
     result = {
         'videos': [],
@@ -3597,6 +3688,7 @@ def _poll_cupsy_audio_task(task):
         reason = payload.get('message') or payload.get('error') or f'Cupsy 音频状态: {status}'
         if isinstance(reason, dict):
             reason = reason.get('message') or json.dumps(reason, ensure_ascii=False)
+        reason = mask_endpoint_ids(str(reason))
         task_db.fail_task(task_id, str(reason))
         return {'state': 'failed', 'error': str(reason)}
     if status not in {'succeeded', 'completed', 'ready'}:
@@ -3607,6 +3699,8 @@ def _poll_cupsy_audio_task(task):
     if output_format not in CUPSY_AUDIO_FORMATS:
         output_format = 'mp3'
     filename = f'audio.{"ogg" if output_format == "ogg_opus" else output_format}'
+    # VIDEO-SIGNAL-20261115: Provider succeeded; expose "下载写回" while downloading.
+    task_db.set_task_stage(task_id, task_db.TASK_STAGE_DOWNLOADING)
     output_dir = task.get('output_dir') or storage.task_output_dir('audio', task_id)
     path = os.path.join(output_dir, filename)
     download_error = _download_cupsy_output(
@@ -3614,7 +3708,7 @@ def _poll_cupsy_audio_task(task):
         f'/v1/audio/generations/{external_id}/content', path,
     )
     if download_error:
-        return {'state': 'retry', 'error': download_error}
+        return {'state': 'retry', 'error': download_error, 'stage': task_db.TASK_STAGE_DOWNLOADING}
     storage.register_file(task_id, 'output_audio', path, CUPSY_AUDIO_FORMATS[output_format])
     result = {
         'local_audio': f'/api/tasks/{task_id}/file/{filename}',
@@ -3698,6 +3792,7 @@ def poll_video_task_once(task_id):
             or (error_obj.get('message') if isinstance(error_obj, dict) else '')
             or f'查询失败 {response.status_code}'
         )
+        reason = mask_endpoint_ids(reason)
         if response.status_code == 429 or response.status_code >= 500:
             return {'state': 'retry', 'error': reason}
         task_db.fail_task(task_id, reason)
@@ -3708,7 +3803,7 @@ def poll_video_task_once(task_id):
     videos = [{'video_url': content['video_url'], 'video_type': output_format}] if content.get('video_url') else []
     images = [{'image_url': content['last_frame_url']}] if content.get('last_frame_url') else []
     error_obj = response_data.get('error', {})
-    reason = error_obj.get('message', '') if isinstance(error_obj, dict) else str(error_obj or '')
+    reason = mask_endpoint_ids(error_obj.get('message', '') if isinstance(error_obj, dict) else str(error_obj or ''))
     progress = 0
 
     if mapped_status == 'TASK_STATUS_FAILED':
@@ -3718,6 +3813,8 @@ def poll_video_task_once(task_id):
     if mapped_status != 'TASK_STATUS_SUCCEED':
         return {'state': 'pending', 'progress': progress}
 
+    # VIDEO-SIGNAL-20261115: Provider succeeded; expose "下载写回" while downloading.
+    task_db.set_task_stage(task_id, task_db.TASK_STAGE_DOWNLOADING)
     output_dir = task.get('output_dir') or storage.task_output_dir('video', task_id)
     result = {
         'videos': videos,
@@ -3743,7 +3840,8 @@ def poll_video_task_once(task_id):
             path = os.path.join(output_dir, filename)
             with HTTP.get(url, timeout=(10, profile_runtime.setting('download_timeout_seconds', DOWNLOAD_TIMEOUT)), stream=True) as download:
                 if download.status_code >= 400:
-                    return {'state': 'retry', 'error': f'视频下载失败 {download.status_code}'}
+                    return {'state': 'retry', 'error': f'视频下载失败 {download.status_code}',
+                            'stage': task_db.TASK_STAGE_DOWNLOADING}
                 storage.stream_response_to_file(download, path)
             storage.register_file(task_id, 'output_video', path, mime_type)
             result['local_videos'].append(f'/api/tasks/{task_id}/file/{filename}')
@@ -3760,7 +3858,8 @@ def poll_video_task_once(task_id):
             path = os.path.join(output_dir, filename)
             with HTTP.get(url, timeout=(10, profile_runtime.setting('download_timeout_seconds', DOWNLOAD_TIMEOUT)), stream=True) as download:
                 if download.status_code >= 400:
-                    return {'state': 'retry', 'error': f'尾帧下载失败 {download.status_code}'}
+                    return {'state': 'retry', 'error': f'尾帧下载失败 {download.status_code}',
+                            'stage': task_db.TASK_STAGE_DOWNLOADING}
                 storage.stream_response_to_file(download, path)
             storage.register_file(task_id, 'output_image', path, 'image/png')
             result['local_images'].append(f'/api/tasks/{task_id}/file/{filename}')
@@ -3773,7 +3872,7 @@ def poll_video_task_once(task_id):
             except (OSError, ValueError):
                 app.logger.warning('thumbnail_generation_failed task_id=%s file=%s', task_id, filename)
     except requests.RequestException as e:
-        return {'state': 'retry', 'error': str(e)}
+        return {'state': 'retry', 'error': str(e), 'stage': task_db.TASK_STAGE_DOWNLOADING}
 
     if result['local_videos']:
         result['local_video'] = result['local_videos'][0]

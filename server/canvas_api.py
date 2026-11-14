@@ -130,3 +130,6 @@ register_image_param_routes(canvas_api)
 
 from characters import register_routes as register_character_routes
 register_character_routes(canvas_api, body)
+
+from canvas_group_run_api import register_routes as register_group_run_routes
+register_group_run_routes(canvas_api, body)

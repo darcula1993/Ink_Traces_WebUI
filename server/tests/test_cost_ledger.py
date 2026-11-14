@@ -233,3 +233,55 @@ def test_cupsy_reference_video_seconds_from_linked_assets(tmp_path):
     assert snapshot['input_video_seconds'] == pytest.approx(9)
     assert snapshot['input_duration_assumed'] is False
     assert snapshot['unit_price'] == pytest.approx(6.40)  # Cupsy priced at BytePlus with-video rate
+
+
+def _probe_fixture(monkeypatch, tmp_path, durations):
+    """Fake ffprobe by file name so the matching logic is tested without media tools."""
+    upload_dir = tmp_path / 'debt_upload_video'
+    upload_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(storage, 'UPLOAD_VIDEO_DIR', str(upload_dir))
+    for name in durations:
+        (upload_dir / name).write_bytes(b'x')
+    monkeypatch.setattr(cost_estimate, 'probe_duration',
+                        lambda path: durations.get(Path(path).name) if path and Path(path).is_file() else None)
+    return upload_dir
+
+
+def test_ark_reference_seconds_match_by_identity_with_remote_first(monkeypatch, tmp_path):
+    # ESTIMATE-DEBT-20261115 #2: a remote URL ahead of local uploads must not take their seconds.
+    upload_dir = _probe_fixture(monkeypatch, tmp_path, {'debt-a.mp4': 7, 'debt-b.mp4': 3})
+    params = _video_params(
+        ref_video_urls=['https://elsewhere.invalid/remote.mp4', 'https://own.invalid/api/upload_video/debt-b.mp4',
+                        '/api/upload_video/debt-a.mp4?sig=1'],
+        ref_video_paths=[str(upload_dir / 'debt-a.mp4'), str(upload_dir / 'debt-b.mp4')])
+    task_id = task_db.create_task('video', 'p', params, provider='ark', status='succeeded')
+    task = task_db.get_task(task_id)
+    assert cost_estimate.reference_video_durations(task, task_db.get_db()) == [None, 3, 7]
+    snapshot = cost_estimate.store_snapshot(task_id)
+    assert snapshot['reference_video_count'] == 3
+    assert snapshot['input_video_seconds'] == pytest.approx(5 + 3 + 7)  # remote unknown -> 5s assumed
+    assert snapshot['input_duration_assumed'] is True
+
+
+def test_ark_reference_seconds_remote_between_and_after_local(monkeypatch, tmp_path):
+    upload_dir = _probe_fixture(monkeypatch, tmp_path, {'debt-c.mp4': 4, 'debt-d.mp4': 6})
+    urls = ['/api/upload_video/debt-c.mp4', 'https://elsewhere.invalid/debt-d.mp4',
+            '/api/upload_video/debt-d.mp4', 'https://elsewhere.invalid/z.mp4']
+    params = _video_params(ref_video_urls=urls, ref_video_paths=[str(upload_dir / 'debt-c.mp4'), str(upload_dir / 'debt-d.mp4')])
+    task = task_db.get_task(task_db.create_task('video', 'p', params, provider='ark', status='succeeded'))
+    # A remote URL sharing a local file name is still a different asset (no local seconds).
+    assert cost_estimate.reference_video_durations(task, task_db.get_db()) == [4, None, 6, None]
+
+
+def test_ark_reference_seconds_all_local_and_paths_only(monkeypatch, tmp_path):
+    upload_dir = _probe_fixture(monkeypatch, tmp_path, {'debt-e.mp4': 2, 'debt-f.mp4': 9})
+    paths = [str(upload_dir / 'debt-e.mp4'), str(upload_dir / 'debt-f.mp4')]
+    local = task_db.get_task(task_db.create_task('video', 'p', _video_params(
+        ref_video_urls=['/api/upload_video/debt-f.mp4', '/api/upload_video/debt-e.mp4'], ref_video_paths=paths),
+        provider='ark', status='succeeded'))
+    assert cost_estimate.reference_video_durations(local, task_db.get_db()) == [9, 2]
+    old = task_db.get_task(task_db.create_task('video', 'p', _video_params(ref_video_paths=paths), provider='ark', status='succeeded'))
+    assert cost_estimate.reference_video_durations(old, task_db.get_db()) == [2, 9]
+    remote_only = task_db.get_task(task_db.create_task('video', 'p', _video_params(
+        ref_video_urls=['https://elsewhere.invalid/a.mp4'], ref_video_paths=paths), provider='ark', status='succeeded'))
+    assert cost_estimate.reference_video_durations(remote_only, task_db.get_db()) == [None]

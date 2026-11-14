@@ -29,6 +29,8 @@ class Worker:
         self.last_heartbeat = 0.0
         self.last_memory_trim = 0.0
         self.cleanup_future = None
+        self.group_run_future = None
+        self.last_group_run_sweep = None
         server_config = application.config.get('server', {})
         default_concurrency = server_config.get(
             'generation_concurrency', server_config.get('worker_concurrency', 3)
@@ -41,6 +43,7 @@ class Worker:
         self.heartbeat_interval = max(5, min(20, int(server_config.get('worker_heartbeat_seconds', 10))))
         self.cleanup_interval = max(60, int(server_config.get('cleanup_interval_seconds', 3600)))
         self.orphan_grace_seconds = max(0, int(server_config.get('orphan_grace_hours', 24))) * 60 * 60
+        self.group_run_sweep_interval = max(5, int(server_config.get('group_run_sweep_seconds', 30)))
 
     def request_stop(self, *_):
         self.stopping = True
@@ -76,6 +79,9 @@ class Worker:
                 maintenance = stack.enter_context(ThreadPoolExecutor(
                     max_workers=1, thread_name_prefix='maintenance',
                 ))
+                group_runs = stack.enter_context(ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix='group-run',
+                ))
                 while True:
                     self.heartbeat()
                     completed = set()
@@ -88,10 +94,11 @@ class Worker:
                         self.last_memory_trim = time.monotonic()
                     if not self.stopping:
                         self._maybe_cleanup(maintenance)
+                        self._maybe_sweep_group_runs(group_runs)
                         for executor, futures, concurrency, task_types in pools:
                             self._fill_pool(executor, futures, concurrency, task_types)
                     busy = any(futures for _, futures, _, _ in pools)
-                    cleaning = self.cleanup_future is not None and not self.cleanup_future.done()
+                    cleaning = any(f is not None and not f.done() for f in (self.cleanup_future, self.group_run_future))
                     # Keep the lease owner alive until all executor work has drained.
                     if self.stopping and not busy and not cleaning:
                         break
@@ -193,6 +200,7 @@ class Worker:
             if task_db.cancellation_requested(task['id']):
                 task_db.finalize_task_cancel(task['id'])
             self._write_back(task['id'])
+            self._advance_group_run(task['id'])
             task_db.close_db()
 
     @staticmethod
@@ -204,6 +212,41 @@ class Worker:
             canvas_writeback.apply_task_result_safely(task_id)
         except Exception:
             LOG.exception('canvas_writeback_hook_failed id=%s', task_id)
+
+    @staticmethod
+    def _advance_group_run(task_id):
+        # GROUP-RUN B4: after the write-back, record the task on its group-run node and submit
+        # ready downstream nodes. Non-terminal tasks are ignored; failures only log, the patrol
+        # (_sweep_group_runs) catches up.
+        try:
+            import canvas_group_run
+            with application.app.app_context():
+                canvas_group_run.on_task_terminal(task_id)
+        except Exception:
+            LOG.exception('group_run_hook_failed id=%s', task_id)
+
+    def _maybe_sweep_group_runs(self, executor):
+        # First sweep right after start = restart recovery; then a low-frequency patrol.
+        if self.group_run_future is not None and not self.group_run_future.done():
+            return
+        now = time.monotonic()
+        if self.last_group_run_sweep is not None and now - self.last_group_run_sweep < self.group_run_sweep_interval:
+            return
+        self.group_run_future = executor.submit(self._sweep_group_runs)
+        self.last_group_run_sweep = now
+
+    @staticmethod
+    def _sweep_group_runs():
+        try:
+            import canvas_group_run
+            with application.app.app_context():
+                touched = canvas_group_run.sweep()
+            if touched:
+                LOG.info('group_run_sweep touched=%s', len(touched))
+        except Exception:
+            LOG.exception('group_run_sweep_failed')
+        finally:
+            task_db.close_db()
 
     def _process_image(self, task):
         payload, status_code = application.execute_image_task(task['id'])
@@ -289,6 +332,7 @@ class Worker:
             status='pending' if state == 'preparing' else 'processing',
             error=outcome.get('error'),
             progress=outcome.get('progress'),
+            stage=outcome.get('stage'),
         )
 
     def _process_audio(self, task):
@@ -309,6 +353,7 @@ class Worker:
             task['id'], delay,
             status='pending' if state == 'preparing' else 'processing',
             error=outcome.get('error'), progress=outcome.get('progress'),
+            stage=outcome.get('stage'),
         )
 
     def _video_max_attempts(self):

@@ -252,3 +252,39 @@ def test_failed_layer_task_stays_in_failed_bucket(monkeypatch):
     task_db.fail_task(task_id, 'boom')
     entry = _ledger_task(task_id)
     assert entry['bucket'] == 'failed' and entry['estimate_usd'] is None
+
+
+# ---- ESTIMATE-DEBT-20261115 #1: the price family follows the model of the interface the
+# node actually uses (saved profile or original config), never the deployment default alone.
+# Shared with client/tests/imageProfileFamily.test.js: both sides must reach these results.
+PROFILE_CASES = json.loads((Path(__file__).parent / 'data' / 'image_profile_family_parity.json').read_text())
+
+
+@pytest.mark.parametrize('case', PROFILE_CASES, ids=[case['name'] for case in PROFILE_CASES])
+def test_image_family_follows_the_interface_model(case, monkeypatch):
+    import profile_runtime
+    from provider_profiles import init_profiles_db, save_profile
+    init_profiles_db()
+    _forbid_provider(monkeypatch)
+    deployment = {'api_key': 'test-key', 'endpoint': 'https://provider.invalid', 'model': case['deployment_model']}
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', profile_runtime.ProfileConfig(deployment, 'ark'))
+    monkeypatch.setitem(application.config['generation']['image']['byteplus'], 'model', case['deployment_model'])
+    client = application.app.test_client()
+    # The fixture's deployment capability model is what /api/provider really reports.
+    assert client.get('/api/provider').get_json()['providers']['ark']['capability_model'] == case['deployment_capability_model']
+    body = {'prompt': 'cat', 'provider': 'ark', 'aspect_ratio': '1:1', 'resolution': '1K'}
+    if case['profile_model'] is not None:
+        profile = save_profile({'name': 'debt', 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'api_key': 'fake-debt',
+                                'settings': {'endpoint': 'https://debt.invalid', 'model': case['profile_model']}})
+        body['profile_id'] = profile['id']
+    response = client.post('/api/generate', json=body)
+    assert response.status_code == 202, response.get_json()
+    task = task_db.get_task(response.get_json()['task_id'])
+    snapshot = task['params']['cost_estimate']
+    assert snapshot['model'] == case['expected']['model']
+    assert snapshot['minimum_cost'] == pytest.approx(case['expected']['minimumCost'])
+    # The ledger re-derivation (no snapshot) reaches the same family from the task's own params.
+    params = dict(task['params'])
+    params.pop('cost_estimate')
+    derived = cost_estimate.compute_task_estimate({**task, 'params': params}, task_db.get_db())
+    assert derived['model'] == case['expected']['model']

@@ -1,0 +1,4797 @@
+{
+ "note": "GROUP-RUN-20261115 D3: expectations generated from client reconcileReferenceMentions",
+ "cases": [
+  {
+   "name": "d3_unbound_first_result_before_external",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 的风格",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 的风格",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片2 的风格",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片2": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "d3_bound_first_result_before_external",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 的风格",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "00000000000000000000000000000001"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 的风格",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "00000000000000000000000000000001"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片2 的风格",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片2": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "first_result_after_external",
+   "before": {
+    "nodes": [
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 和 @图片2",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "src",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 和 @图片2",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "src",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1 和 @图片2",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "00000000000000000000000000000001",
+      "@图片2": "0000000000000000000000000000000a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "upstream_without_result_unbound_token",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "参考 @图片1 画同一只猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "参考 @图片1 画同一只猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "参考 @图片1 画同一只猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "0000000000000000000000000000000a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "rerun_replaces_old_result_bound_and_ordered",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片2 背景 @图片1 主体",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceAssets": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "referenceOrder": [
+       "00000000000000000000000000000001",
+       "0000000000000000000000000000000b"
+      ],
+      "referenceMentions": {
+       "@图片1": "00000000000000000000000000000001",
+       "@图片2": "0000000000000000000000000000000b"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       },
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片2 背景 @图片1 主体",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceAssets": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "referenceOrder": [
+       "00000000000000000000000000000001",
+       "0000000000000000000000000000000b"
+      ],
+      "referenceMentions": {
+       "@图片1": "00000000000000000000000000000001",
+       "@图片2": "0000000000000000000000000000000b"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片2 背景 @图片1 主体",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceAssets": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "referenceOrder": [
+      "00000000000000000000000000000001",
+      "0000000000000000000000000000000a"
+     ],
+     "referenceMentions": {
+      "@图片2": "0000000000000000000000000000000a",
+      "@图片1": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "rerun_replaces_old_result_unbound",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 然后 @图片2",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       },
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 然后 @图片2",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1 然后 @图片2",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "0000000000000000000000000000000a",
+      "@图片2": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "task_only_change_is_noop",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "task": {
+       "id": 1,
+       "status": "pending",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "task": {
+       "id": 1,
+       "status": "processing",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "task": {
+      "id": 1,
+      "status": "processing",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "upstream_text_tokens_block_renumbering",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "t",
+      "type": "text",
+      "title": "t",
+      "x": 0,
+      "y": 0,
+      "text": "保持 @图片1 的构图"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 的风格",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     },
+     {
+      "id": "e2",
+      "source": "t",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "t",
+      "type": "text",
+      "title": "t",
+      "x": 0,
+      "y": 0,
+      "text": "保持 @图片1 的构图"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 的风格",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     },
+     {
+      "id": "e2",
+      "source": "t",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "t",
+     "type": "text",
+     "title": "t",
+     "x": 0,
+     "y": 0,
+     "text": "保持 @图片1 的构图"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1 的风格",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "video_reference_kinds",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "video",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "镜头一",
+      "params": {
+       "model": "seedance-2.5"
+      },
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "v",
+      "type": "asset",
+      "title": "v",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000015",
+       "kind": "video",
+       "name": "video21",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000015",
+       "mime_type": "video/mp4",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000015",
+        "kind": "video",
+        "name": "video21",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000015",
+        "mime_type": "video/mp4",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000015"
+     },
+     {
+      "id": "i",
+      "type": "asset",
+      "title": "i",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "s",
+      "type": "asset",
+      "title": "s",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "0000000000000000000000000000001e",
+       "kind": "audio",
+       "name": "audio30",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000001e",
+       "mime_type": "audio/wav",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000001e",
+        "kind": "audio",
+        "name": "audio30",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000001e",
+        "mime_type": "audio/wav",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000001e"
+     },
+     {
+      "id": "b",
+      "type": "video",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "延续 @视频1，人物 @图片1，配乐 @音频1",
+      "params": {
+       "model": "seedance-2.5"
+      },
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "v",
+      "target": "b"
+     },
+     {
+      "id": "e2",
+      "source": "i",
+      "target": "b"
+     },
+     {
+      "id": "e3",
+      "source": "s",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "video",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "镜头一",
+      "params": {
+       "model": "seedance-2.5"
+      },
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "00000000000000000000000000000014",
+       "kind": "video",
+       "name": "video20",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000014",
+       "mime_type": "video/mp4",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000014",
+        "kind": "video",
+        "name": "video20",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000014",
+        "mime_type": "video/mp4",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000014",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "v",
+      "type": "asset",
+      "title": "v",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000015",
+       "kind": "video",
+       "name": "video21",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000015",
+       "mime_type": "video/mp4",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000015",
+        "kind": "video",
+        "name": "video21",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000015",
+        "mime_type": "video/mp4",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000015"
+     },
+     {
+      "id": "i",
+      "type": "asset",
+      "title": "i",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "s",
+      "type": "asset",
+      "title": "s",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "0000000000000000000000000000001e",
+       "kind": "audio",
+       "name": "audio30",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000001e",
+       "mime_type": "audio/wav",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000001e",
+        "kind": "audio",
+        "name": "audio30",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000001e",
+        "mime_type": "audio/wav",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000001e"
+     },
+     {
+      "id": "b",
+      "type": "video",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "延续 @视频1，人物 @图片1，配乐 @音频1",
+      "params": {
+       "model": "seedance-2.5"
+      },
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "v",
+      "target": "b"
+     },
+     {
+      "id": "e2",
+      "source": "i",
+      "target": "b"
+     },
+     {
+      "id": "e3",
+      "source": "s",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "video",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "镜头一",
+     "params": {
+      "model": "seedance-2.5"
+     },
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "00000000000000000000000000000014",
+      "kind": "video",
+      "name": "video20",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000014",
+      "mime_type": "video/mp4",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000014",
+       "kind": "video",
+       "name": "video20",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000014",
+       "mime_type": "video/mp4",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000014",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "v",
+     "type": "asset",
+     "title": "v",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000015",
+      "kind": "video",
+      "name": "video21",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000015",
+      "mime_type": "video/mp4",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000015",
+       "kind": "video",
+       "name": "video21",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000015",
+       "mime_type": "video/mp4",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000015"
+    },
+    {
+     "id": "i",
+     "type": "asset",
+     "title": "i",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "s",
+     "type": "asset",
+     "title": "s",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "0000000000000000000000000000001e",
+      "kind": "audio",
+      "name": "audio30",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000001e",
+      "mime_type": "audio/wav",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000001e",
+       "kind": "audio",
+       "name": "audio30",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000001e",
+       "mime_type": "audio/wav",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000001e"
+    },
+    {
+     "id": "b",
+     "type": "video",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "延续 @视频2，人物 @图片1，配乐 @音频1",
+     "params": {
+      "model": "seedance-2.5"
+     },
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@视频2": "00000000000000000000000000000015",
+      "@图片1": "00000000000000000000000000000001",
+      "@音频1": "0000000000000000000000000000001e"
+     }
+    }
+   ]
+  },
+  {
+   "name": "video_keyframe_frames",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "首帧",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "i",
+      "type": "asset",
+      "title": "i",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "video",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "从 @图片1 到 @图片2",
+      "params": {
+       "model": "seedance-2.5",
+       "video_mode": "keyframe"
+      },
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "i",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "首帧",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "i",
+      "type": "asset",
+      "title": "i",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "video",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "从 @图片1 到 @图片2",
+      "params": {
+       "model": "seedance-2.5",
+       "video_mode": "keyframe"
+      },
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "i",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "首帧",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "i",
+     "type": "asset",
+     "title": "i",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "video",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "从 @图片2 到 @图片2",
+     "params": {
+      "model": "seedance-2.5",
+      "video_mode": "keyframe"
+     },
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片2": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "binding_to_removed_asset_positional",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 和 @图片2",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "0000000000000000000000000000000b",
+       "@图片2": "00000000000000000000000000000001"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 和 @图片2",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "0000000000000000000000000000000b",
+       "@图片2": "00000000000000000000000000000001"
+      }
+     },
+     {
+      "id": "src2",
+      "type": "asset",
+      "title": "src2",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000002",
+       "kind": "image",
+       "name": "image2",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000002",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000002",
+        "kind": "image",
+        "name": "image2",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000002",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000002"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     },
+     {
+      "id": "e9",
+      "source": "src2",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000b",
+      "kind": "image",
+      "name": "image11",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000b",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1 和 @图片2",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "0000000000000000000000000000000b",
+      "@图片2": "00000000000000000000000000000001"
+     }
+    },
+    {
+     "id": "src2",
+     "type": "asset",
+     "title": "src2",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000002",
+      "kind": "image",
+      "name": "image2",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000002",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000002",
+       "kind": "image",
+       "name": "image2",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000002",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000002"
+    }
+   ]
+  },
+  {
+   "name": "explicit_mentions_change_kept",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "00000000000000000000000000000001"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片2",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片2": "00000000000000000000000000000001"
+     }
+    }
+   ]
+  },
+  {
+   "name": "node_without_text",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "猫",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "猫",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "text": ""
+    }
+   ]
+  },
+  {
+   "name": "audio_node_image_reference",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "人物",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "audio",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "为 @图片1 配音",
+      "params": {},
+      "providerSelection": {
+       "provider": "cupsy",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "人物",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "audio",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "为 @图片1 配音",
+      "params": {},
+      "providerSelection": {
+       "provider": "cupsy",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "人物",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "b",
+     "type": "audio",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "为 @图片1 配音",
+     "params": {},
+     "providerSelection": {
+      "provider": "cupsy",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "0000000000000000000000000000000a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "two_results_same_round",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "c",
+      "type": "image",
+      "title": "c",
+      "x": 0,
+      "y": 0,
+      "text": "y",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 @图片2 @图片3",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "c",
+      "target": "b"
+     },
+     {
+      "id": "e2",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "c",
+      "type": "image",
+      "title": "c",
+      "x": 0,
+      "y": 0,
+      "text": "y",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000c",
+       "kind": "image",
+       "name": "image12",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000c",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000c",
+        "kind": "image",
+        "name": "image12",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000c",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000c",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 @图片2 @图片3",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "c",
+      "target": "b"
+     },
+     {
+      "id": "e2",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "x",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "c",
+     "type": "image",
+     "title": "c",
+     "x": 0,
+     "y": 0,
+     "text": "y",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000c",
+      "kind": "image",
+      "name": "image12",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000c",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000c",
+       "kind": "image",
+       "name": "image12",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000c",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000c",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片3 @图片2 @图片3",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片3": "00000000000000000000000000000001",
+      "@图片2": "0000000000000000000000000000000c"
+     }
+    }
+   ]
+  },
+  {
+   "name": "ambiguous_two_sources_same_old",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "c",
+      "type": "image",
+      "title": "c",
+      "x": 0,
+      "y": 0,
+      "text": "y",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "0000000000000000000000000000000b"
+      },
+      "referenceOrder": [
+       "0000000000000000000000000000000b"
+      ]
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "c",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       },
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "c",
+      "type": "image",
+      "title": "c",
+      "x": 0,
+      "y": 0,
+      "text": "y",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "0000000000000000000000000000000b"
+      },
+      "referenceOrder": [
+       "0000000000000000000000000000000b"
+      ]
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "c",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "x",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "c",
+     "type": "image",
+     "title": "c",
+     "x": 0,
+     "y": 0,
+     "text": "y",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000b",
+      "kind": "image",
+      "name": "image11",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000b",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "0000000000000000000000000000000b"
+     },
+     "referenceOrder": [
+      "0000000000000000000000000000000b"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "unrelated_node_with_stale_binding",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "z",
+      "type": "image",
+      "title": "z",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 旧",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "0000000000000000000000000000000b"
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "z"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000a",
+        "kind": "image",
+        "name": "image10",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000a",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "z",
+      "type": "image",
+      "title": "z",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1 旧",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "referenceMentions": {
+       "@图片1": "0000000000000000000000000000000b"
+      }
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "z"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "x",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": {
+      "id": "0000000000000000000000000000000a",
+      "kind": "image",
+      "name": "image10",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000a",
+       "kind": "image",
+       "name": "image10",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000a",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000a",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "z",
+     "type": "image",
+     "title": "z",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1 旧",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "00000000000000000000000000000001"
+     }
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片1",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片1": "0000000000000000000000000000000a"
+     }
+    }
+   ]
+  },
+  {
+   "name": "upstream_result_removed_text_unchanged",
+   "before": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片2 和 @图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "after": {
+    "nodes": [
+     {
+      "id": "a",
+      "type": "image",
+      "title": "a",
+      "x": 0,
+      "y": 0,
+      "text": "x",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      },
+      "asset": null,
+      "candidates": [
+       {
+        "id": "0000000000000000000000000000000b",
+        "kind": "image",
+        "name": "image11",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "0000000000000000000000000000000b",
+      "task": {
+       "id": 1,
+       "status": "succeeded",
+       "error": null
+      }
+     },
+     {
+      "id": "src",
+      "type": "asset",
+      "title": "src",
+      "x": 0,
+      "y": 0,
+      "asset": {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      },
+      "candidates": [
+       {
+        "id": "00000000000000000000000000000001",
+        "kind": "image",
+        "name": "image1",
+        "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+        "mime_type": "image/png",
+        "size_bytes": 1
+       }
+      ],
+      "selectedCandidateId": "00000000000000000000000000000001"
+     },
+     {
+      "id": "b",
+      "type": "image",
+      "title": "b",
+      "x": 0,
+      "y": 0,
+      "text": "@图片2 和 @图片1",
+      "params": {},
+      "providerSelection": {
+       "provider": "ark",
+       "profile_id": null
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "e0",
+      "source": "a",
+      "target": "b"
+     },
+     {
+      "id": "e1",
+      "source": "src",
+      "target": "b"
+     }
+    ]
+   },
+   "expected": [
+    {
+     "id": "a",
+     "type": "image",
+     "title": "a",
+     "x": 0,
+     "y": 0,
+     "text": "x",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "asset": null,
+     "candidates": [
+      {
+       "id": "0000000000000000000000000000000b",
+       "kind": "image",
+       "name": "image11",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/0000000000000000000000000000000b",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "0000000000000000000000000000000b",
+     "task": {
+      "id": 1,
+      "status": "succeeded",
+      "error": null
+     }
+    },
+    {
+     "id": "src",
+     "type": "asset",
+     "title": "src",
+     "x": 0,
+     "y": 0,
+     "asset": {
+      "id": "00000000000000000000000000000001",
+      "kind": "image",
+      "name": "image1",
+      "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+      "mime_type": "image/png",
+      "size_bytes": 1
+     },
+     "candidates": [
+      {
+       "id": "00000000000000000000000000000001",
+       "kind": "image",
+       "name": "image1",
+       "url": "/api/canvas/workflows/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww/assets/00000000000000000000000000000001",
+       "mime_type": "image/png",
+       "size_bytes": 1
+      }
+     ],
+     "selectedCandidateId": "00000000000000000000000000000001"
+    },
+    {
+     "id": "b",
+     "type": "image",
+     "title": "b",
+     "x": 0,
+     "y": 0,
+     "text": "@图片2 和 @图片1",
+     "params": {},
+     "providerSelection": {
+      "provider": "ark",
+      "profile_id": null
+     },
+     "referenceMentions": {
+      "@图片2": "00000000000000000000000000000001",
+      "@图片1": "0000000000000000000000000000000b"
+     }
+    }
+   ]
+  }
+ ]
+}

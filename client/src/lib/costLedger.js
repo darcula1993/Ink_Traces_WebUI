@@ -33,16 +33,12 @@ export async function fetchCostLedger({ projectId, workflowId, from, to, tzOffse
   return (await axios.get('/api/cost-ledger', { params, signal })).data
 }
 
-// Amounts under $1 keep 3 decimals so per-image sums (e.g. $0.458) are not rounded away;
-// a trailing third zero is dropped ($0.410 -> $0.41). $1 and above keep 2 decimals.
+// Three decimals at every amount (ESTIMATE-DEBT-20261115), the same rule as the
+// "运行所选节点" dialog (canvasBatchRun.formatUsd): $0.410, $4.731. Unknown is never '$0'.
 export function formatUsd(value) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '—'
-  if (n > 0 && n < 1) {
-    const text = n.toFixed(3)
-    return `$${text.endsWith('0') ? text.slice(0, -1) : text}`
-  }
-  return `$${n.toFixed(2)}`
+  return `$${n.toFixed(3)}`
 }
 
 export function formatUsdRange(min, max) {
