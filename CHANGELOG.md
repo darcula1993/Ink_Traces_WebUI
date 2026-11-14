@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.2 - 2026-11-14
+
+- Clicking an asset node now pans the canvas when needed so the node and its panel below are both visible, the same as generation nodes. Double-click still centres and zooms in.
+
 ## 1.5.1 - 2026-11-14
 
 - Fixed: the prompt box in the image tool had collapsed to one or two lines; it fills its panel again.

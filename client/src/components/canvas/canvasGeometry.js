@@ -52,10 +52,10 @@ export function generationPanelPlacement(node,view,size,nodes=[]) {
 }
 export const generationPanelStyle=(node,view,size,nodes=[])=>generationPanelPlacement(node,view,size,nodes).style
 export function nodeEditorViewport(node,view,size,center=false,nodes=[]) {
- const geometry=nodeGeometry(node),generation=['image','video','audio','text'].includes(node.type),panel=generation?editorPanelSize(size):{width:0,height:0},margin=16,bottom=generation?72:0
+ const geometry=nodeGeometry(node),asset=node.type==='asset',generation=(asset&&!center)||['image','video','audio','text'].includes(node.type),panel=asset&&!center?{width:Math.min(340,size.width-24),height:100}:generation?editorPanelSize(size):{width:0,height:0},margin=16,bottom=generation?72:0
  // UI-ITER-R2A #1: when locating, frame the node together with a free panel side (below first, then
  // right/left/above) so the editor does not land on a neighbour; fall back to the legacy below layout.
- if(center&&generation&&nodes.length>1){
+ if(center&&generation&&!asset&&nodes.length>1){
   const gap=12,availW=size.width-2*margin,availH=size.height-margin-bottom-margin
   for(const side of PANEL_SIDES){
    const vertical=side==='below'||side==='above'
