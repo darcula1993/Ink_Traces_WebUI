@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1 - 2026-11-14
+
+- Fixed: the prompt box in the image tool had collapsed to one or two lines; it fills its panel again.
+- Fixed: the image output settings could be cut off at the top (only options from "Custom size" down were visible), notably on smaller or Retina-scaled screens. The panel now always stays inside the visible canvas, scrolling inside only when the canvas itself is too short.
+- The node input panel now always sits directly below its node instead of jumping to the side or above.
+
 ## 1.5.0 - 2026-11-14
 
 - Paste from the clipboard onto the canvas: images, videos and audio (including screenshots) become asset nodes at the pointer. Without files, Ctrl+V still pastes copied canvas nodes; plain text is ignored. Pasting inside text fields works as usual.

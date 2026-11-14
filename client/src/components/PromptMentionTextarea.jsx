@@ -319,7 +319,7 @@ export default function PromptMentionTextarea({
   )
 
   return (
-    <div className={wrapperClassName} style={{ position: 'relative' }}>
+    <div className={wrapperClassName} style={/(^|\s)(absolute|fixed|sticky|relative)(\s|$)/.test(wrapperClassName || '') ? undefined : { position: 'relative' }}>
       <textarea
         {...textareaProps}
         ref={textareaRef}

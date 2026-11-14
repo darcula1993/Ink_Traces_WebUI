@@ -38,28 +38,17 @@ export function nodeGeometry(node){
 export const editorPanelSize = size => ({width:Math.min(720,Math.max(240,size.width-32)),height:Math.min(240,Math.max(160,size.height-160))})
 const screenBox=(node,view)=>{const g=nodeGeometry(node),left=node.x*view.zoom+view.x,top=node.y*view.zoom+view.y;return {left,top,right:left+g.width*view.zoom,bottom:top+g.height*view.zoom}}
 const overlapArea=(a,b)=>Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left))*Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top))
-export const PANEL_SIDES=['below','right','left','above']
-// UI-ITER-R2A #1: the editor panel goes below the node when that spot is free and on screen,
-// otherwise to the right, left or above — whichever covers the least of the selected node (weighted)
-// and of other on-screen nodes. Always clamped inside the surface (above the bottom toolbar);
-// recomputed from the viewport on every render, so it follows pan and zoom.
+// IMAGE-POPOVER-CLIP-20261114 #5 (user decision 11-14, replaces the v1.3.0 / UI-ITER-R2A automatic
+// below/right/left/above avoidance): the editor panel is always directly below its node, centred and
+// clamped inside the surface (above the bottom toolbar); covering other nodes is accepted. Selecting a
+// node still moves the viewport to reveal the panel (nodeEditorViewport). Recomputed every render.
+export const PANEL_SIDES=['below']
 export function generationPanelPlacement(node,view,size,nodes=[]) {
  const panel=editorPanelSize(size),margin=16,gap=12,bottom=size.height-72,box=screenBox(node,view)
- const clampX=x=>Math.max(margin,Math.min(size.width-panel.width-margin,x)),clampY=y=>Math.max(margin,Math.min(bottom-panel.height,y))
- const centerX=(box.left+box.right)/2-panel.width/2
- const ideal={below:[centerX,box.bottom+gap],right:[box.right+gap,box.top],left:[box.left-gap-panel.width,box.top],above:[centerX,box.top-gap-panel.height]}
- const viewportBox={left:0,top:0,right:size.width,bottom:size.height}
- const others=nodes.filter(other=>other.id!==node.id).map(other=>screenBox(other,view)).filter(other=>overlapArea(other,viewportBox)>0)
- let best=null
- PANEL_SIDES.forEach((side,index)=>{
-  const [x,y]=ideal[side],left=clampX(x),top=clampY(y),rect={left,top,right:left+panel.width,bottom:top+panel.height}
-  // Sliding along the node's own edge is fine; being pushed onto it is not.
-  const self=overlapArea(rect,box),covered=others.reduce((sum,other)=>sum+overlapArea(rect,other),0)
-  const offAxis=side==='below'||side==='above'?Math.abs(top-y):Math.abs(left-x)
-  const score=self*4+covered+offAxis*panel.width*.01+index
-  if(!best||score<best.score)best={score,side,free:self===0&&covered===0,style:{width:panel.width,height:panel.height,left,top}}
- })
- return {side:best.side,free:best.free,style:best.style}
+ const left=Math.max(margin,Math.min(size.width-panel.width-margin,(box.left+box.right)/2-panel.width/2)),top=Math.max(margin,Math.min(bottom-panel.height,box.bottom+gap))
+ const rect={left,top,right:left+panel.width,bottom:top+panel.height},viewportBox={left:0,top:0,right:size.width,bottom:size.height}
+ const free=overlapArea(rect,box)===0&&nodes.every(other=>other.id===node.id||overlapArea(rect,screenBox(other,view))===0||overlapArea(screenBox(other,view),viewportBox)===0)
+ return {side:'below',free,style:{width:panel.width,height:panel.height,left,top}}
 }
 export const generationPanelStyle=(node,view,size,nodes=[])=>generationPanelPlacement(node,view,size,nodes).style
 export function nodeEditorViewport(node,view,size,center=false,nodes=[]) {

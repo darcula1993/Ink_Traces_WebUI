@@ -38,10 +38,26 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
   if(popover!=='output'||expanded)return
   const pop=panelRef.current?.querySelector('.cv-output-parameters'),box=panelRef.current?.getBoundingClientRect(),area=panelRef.current?.closest('.cv-surface')?.getBoundingClientRect()
   if(!pop||!box||!area)return
-  const need=(node.type==='image'?pop.scrollHeight:Math.min(pop.scrollHeight,520))+8,margin=8
+  const image=node.type==='image',height=pop.scrollHeight+2,need=(image?height:Math.min(pop.scrollHeight,520))+8,margin=8
   // A panel placed above its node opens the popover upward first, so the node stays visible.
   const fitsBelow=box.bottom+need<=area.bottom-margin,fitsAbove=box.top-need>=area.top+margin
-  pop.dataset.side=placement==='above'?(fitsAbove?'above':fitsBelow?'below':''):fitsBelow?'below':fitsAbove?'above':''
+  const side=placement==='above'?(fitsAbove?'above':fitsBelow?'below':''):fitsBelow?'below':fitsAbove?'above':''
+  pop.dataset.side=side
+  if(!image)return
+  // IMAGE-POPOVER-CLIP-20261114: the uncapped image popover's in-panel fallback grew upward past the
+  // canvas surface (overflow:hidden), hiding its title and model row. Clamp it into the surface instead;
+  // only when it is taller than the whole surface does it pin to both edges and scroll inside.
+  Object.assign(pop.style,{top:'',bottom:'',maxHeight:'',overflow:'',right:''})
+  if(!side){
+   const origin=box.top+panelRef.current.clientTop,room=area.height-2*margin
+   if(height<=room){
+    const top=Math.max(area.top+margin,Math.min(area.bottom-margin-height,box.bottom-55-height))
+    Object.assign(pop.style,{top:`${top-origin}px`,bottom:'auto',maxHeight:'none'})
+   }else Object.assign(pop.style,{top:`${area.top+margin-origin}px`,bottom:'auto',maxHeight:`${room}px`,overflow:'auto'})
+  }
+  // Keep it horizontally inside the surface too (it is right-aligned to a panel that may be narrower).
+  const rect=pop.getBoundingClientRect(),shift=Math.max(0,area.left+margin-rect.left)-Math.max(0,rect.right-(area.right-margin))
+  if(shift)pop.style.right=`${parseFloat(getComputedStyle(pop).right)-shift}px`
  })
  function closePopover(){const trigger=popover==='output'?outputTrigger:detailTrigger;setPopover(null);trigger.current?.focus()}
  const panel=<aside ref={panelRef} tabIndex={-1} role={expanded?'dialog':undefined} aria-modal={expanded?true:undefined} className={`cv-node-panel cv-generation-panel ${expanded?'is-expanded':''}`} data-panel-node-id={node.id} data-placement={expanded?undefined:placement||undefined} aria-label={`${node.title}的编辑面板`} style={style} onPointerDown={e=>e.stopPropagation()} onWheel={e=>e.stopPropagation()} onKeyDown={e=>{if(e.defaultPrevented)return;if(expanded&&e.key==='Tab'){const items=[...panelRef.current.querySelectorAll('button:not(:disabled),input:not(:disabled),textarea,select:not(:disabled)')].filter(el=>el.getClientRects().length);if(e.shiftKey&&[panelRef.current,items[0]].includes(document.activeElement)){e.preventDefault();items.at(-1)?.focus()}else if(!e.shiftKey&&document.activeElement===items.at(-1)){e.preventDefault();items[0]?.focus()}}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){if(expanded){e.preventDefault();e.stopPropagation();onSave?.()}return;}e.stopPropagation();if(e.key==='Escape'){e.preventDefault();if(popover)closePopover();else if(expanded)setExpanded(false);else onClose()}}}>
