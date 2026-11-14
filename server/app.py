@@ -49,6 +49,9 @@ app.register_blueprint(canvas_api)
 init_canvas_db()
 init_profiles_db()
 app.register_blueprint(provider_api)
+import cost_ledger
+cost_ledger.register_routes(app)
+import cost_estimate
 
 
 @app.teardown_appcontext
@@ -2524,6 +2527,8 @@ def _queue_cupsy_video(
     for asset, role, link_position in pending_links:
         task_db.link_task_provider_asset(task_id, asset['id'], role, link_position)
         task_db.link_asset(asset['local_path'], task_id, expires_at=None)
+    # Estimate snapshot only (never an actual charge); best effort.
+    cost_estimate.store_snapshot(task_id)
     return jsonify({
         'success': True, 'queued': True, 'db_task_id': task_id,
         'provider': 'cupsy', 'status': 'pending',
@@ -2731,6 +2736,7 @@ def video_generate():
         output_dir = storage.task_output_dir('video', db_task_id)
         task_db.update_task(db_task_id, output_dir=output_dir)
         _persist_ark_video_references(db_task_id, output_dir, files_data)
+        cost_estimate.store_snapshot(db_task_id)
 
         upload_timeout, request_timeout = resolve_ark_timeouts(prov)
 

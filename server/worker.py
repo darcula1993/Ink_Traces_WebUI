@@ -192,7 +192,18 @@ class Worker:
         finally:
             if task_db.cancellation_requested(task['id']):
                 task_db.finalize_task_cancel(task['id'])
+            self._write_back(task['id'])
             task_db.close_db()
+
+    @staticmethod
+    def _write_back(task_id):
+        # CANVAS-WRITEBACK B: after the task row is final, write its result into the
+        # canvas once. No provider call, no retry, no task change; failures only log.
+        try:
+            import canvas_writeback
+            canvas_writeback.apply_task_result_safely(task_id)
+        except Exception:
+            LOG.exception('canvas_writeback_hook_failed id=%s', task_id)
 
     def _process_image(self, task):
         payload, status_code = application.execute_image_task(task['id'])

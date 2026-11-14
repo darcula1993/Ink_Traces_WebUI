@@ -432,6 +432,9 @@ def create_task(task_type, prompt, params, provider=None, external_task_id=None,
         incoming = request.form if request.mimetype == 'multipart/form-data' else (request.get_json(silent=True) or {})
         if incoming.get('canvas_workflow_id'):
             params['canvas_workflow_id'] = incoming['canvas_workflow_id']
+            node_id = incoming.get('canvas_node_id')
+            if isinstance(node_id, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,80}', node_id):
+                params['canvas_node_id'] = node_id
             from result_names import clean_result_name
             if clean_result_name(incoming.get('result_name')):
                 params['result_name'] = clean_result_name(incoming['result_name'])

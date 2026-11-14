@@ -58,6 +58,8 @@ def init_canvas_db():
     initialize_existing_defaults()
     from canvas_catalog import init_catalog_db
     init_catalog_db()
+    from canvas_writeback import init_writeback_db
+    init_writeback_db()
 
 
 _transaction_files = ContextVar('canvas_transaction_files', default=None)
@@ -418,17 +420,26 @@ def create_workflow(project_id, title, document=None):
     return workflow(workflow_id)
 
 
-def update_workflow(workflow_id, title, document, revision):
+def update_workflow(workflow_id, title, document, revision, with_merge=False):
+    """Save a document. A stale base whose later revisions are all server
+    write-backs (canvas_writebacks) is merged instead of rejected; with
+    ``with_merge`` the result is (workflow, merged)."""
     workflow(workflow_id)
     if type(revision) is not int or revision < 1:
         raise CanvasError('revision 必须为正整数')
     title = title_value(title)
     db = task_db.get_db()
+    merged = False
     with write_transaction():
         # A stale editor gets the conflict flow even when its document references
         # assets a newer revision removed (e.g. local material deletion).
-        if workflow(workflow_id)['revision'] != revision:
-            raise CanvasError('画布已被其他窗口修改，请重新载入后重试', 409)
+        current = workflow(workflow_id)['revision']
+        if current != revision:
+            from canvas_writeback import merge_stale_save
+            document = merge_stale_save(db, workflow_id, revision, current, document)
+            if document is None:
+                raise CanvasError('画布已被其他窗口修改，请重新载入后重试', 409)
+            merged, revision = True, current
         encoded = validate_document(document, workflow_id)
         changed = db.execute('''UPDATE canvas_workflows SET title=?, document=?,revision=revision+1,updated_at=?
                                 WHERE id=? AND revision=?''',
@@ -437,7 +448,7 @@ def update_workflow(workflow_id, title, document, revision):
             db.execute('UPDATE canvas_projects SET updated_at=? WHERE id=(SELECT project_id FROM canvas_workflows WHERE id=?)', (task_db.utcnow(), workflow_id))
     if not changed:
         raise CanvasError('画布已被其他窗口修改，请重新载入后重试', 409)
-    return workflow(workflow_id)
+    return (workflow(workflow_id), merged) if with_merge else workflow(workflow_id)
 
 
 def asset_public(row):

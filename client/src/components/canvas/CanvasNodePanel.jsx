@@ -9,6 +9,7 @@ import {imageParameterIssues,imageSizeSummary} from '../../lib/imageGenerationRu
 import CanvasVideoEstimate from './CanvasVideoEstimate'
 import {isBusyTaskStatus,isFailureTaskStatus} from '../../lib/taskStatus'
 import ReferenceThumbnails from './ReferenceThumbnails'
+import PromptLibraryPicker from './PromptLibraryPicker'
 import {resolveKeyframeRoles,canvasMentionItems,referenceMentionIssues,referenceTokenState,positionalMentionRebinds} from '../../lib/canvasReferences'
 import {effectiveVideoModel,videoCapabilities,videoDurations,videoRatio,VIDEO_RATIOS} from '../../lib/videoGenerationRules'
 import {selectionOptionId,toSelection} from '../../lib/canvasProviderSelection'
@@ -69,6 +70,7 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
    {inputAssets.length>0&&<div className="cv-panel-reference-section"><ReferenceThumbnails assets={inputAssets} frames={frames} onReorder={onReorderReferences}/><button className="btn btn-ghost btn-sm" onClick={onClearReferences}>清空所有参考</button>{node.referenceGroups?.map(group=><small key={group.id}>旧素材组：{group.title}</small>)}</div>}
    {node.type==='video'&&params.video_mode==='keyframe'&&frames.issues.length>0&&<div className="cv-panel-frames">{frames.issues.map(issue=><span key={issue} role="status">{issue}</span>)}</div>}
    <PromptMentionTextarea wrapperClassName="cv-prompt-mention" menuClassName="cv-mention-menu" className="cv-panel-prompt" aria-label={`${node.title}的${node.type==='text'?'文本':'提示词'}`} value={node.text||''} mentionItems={mentionItems} referenceTokenState={referenceTokenState(node,inputAssets)} placeholder="描述希望生成的画面、动作或声音，输入 @ 引用已接入素材（如 @图片1）…" onValueChange={text=>{setMentionError('');onChange({text})}} onMentionSelect={item=>{if(node.referenceMentions?.[item.token]&&node.referenceMentions[item.token]!==item.assetId&&node.text?.includes(item.token)){setMentionError(`请先删除原来的失效提及 ${item.token}，再选择新素材`);return false}}}/>
+   <PromptLibraryPicker getTextarea={()=>panelRef.current?.querySelector('textarea.cv-panel-prompt')} value={node.text||''} onInsertFallback={text=>{setMentionError('');onChange({text})}}/>
    {(mentionError||mentionIssues.length>0)&&<div className="cv-reference-warning" role="alert">{mentionError||mentionIssues.join('；')}</div>}
    {(()=>{const live=positionalMentionRebinds(node,inputAssets).map(item=>`${item.token} 已改为指向 ${item.name}`).join('；'),text=mentionNotice||live;return text&&<div className="cv-reference-note" role="status" data-testid="mention-rebind-note">{text}（按参考顺序解释，可撤销或重新 @ 选择）</div>})()}
    {node.type!=='text'&&!provider&&<div className="cv-reference-warning" role="status">{selection?'节点所选接口已停用或不可用，请重新选择。':'请先为节点选择接口。'}</div>}{unsupported&&<span role="status">当前接口不支持原模型，请选择受支持的模型；原参数已保留。</span>}{audioIssue&&<div className="cv-reference-warning" role="status" data-testid="audio-param-issue">{audioIssue}</div>}{imageInvalid&&<div className="cv-reference-warning" role="status">图片参数不适用于当前接口。<button onClick={()=>setPopover('output')}>处理输出参数</button></div>}

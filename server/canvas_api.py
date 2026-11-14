@@ -1,13 +1,10 @@
 """Authenticated canvas endpoints; application-wide auth guards this blueprint."""
 import json
-from pathlib import Path
 
 from flask import Blueprint, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
 import canvas_store as store
-import storage
-import tasks as task_db
 
 canvas_api = Blueprint('canvas_api', __name__)
 PREFIX = '/api/canvas/workflows'
@@ -70,7 +67,11 @@ def workflow_detail(workflow_id):
     if request.method == 'GET':
         return jsonify(success=True, workflow=store.workflow(workflow_id))
     data = body()
-    return jsonify(success=True, workflow=store.update_workflow(workflow_id, data.get('title'), data.get('document'), data.get('revision')))
+    saved, merged = store.update_workflow(workflow_id, data.get('title'), data.get('document'), data.get('revision'), with_merge=True)
+    if merged:
+        # CANVAS-WRITEBACK C: the stale base only missed server write-backs.
+        return jsonify(success=True, merged=True, revision=saved['revision'], document=saved['document'], workflow=saved)
+    return jsonify(success=True, merged=False, workflow=saved)
 
 
 @canvas_api.route(PREFIX + '/<workflow_id>/assets', methods=['POST'])
@@ -102,34 +103,15 @@ def import_task_results(workflow_id):
     task_id = body().get('task_id')
     if type(task_id) is not int or task_id < 1:
         raise store.CanvasError('task_id 必须为正整数')
-    task = task_db.get_task(task_id)
-    if not task or task.get('deleted_at'):
-        raise store.CanvasError('任务不存在', 404)
-    if task['status'] != 'succeeded':
-        raise store.CanvasError('只能导入成功任务的结果', 409)
-    output_root = Path(storage.OUTPUT_DIR).absolute()
-    sources = []
-    for asset in task_db.list_assets(task_id):
-        if asset['kind'] not in ('output_image', 'output_video', 'output_audio'):
-            continue
-        path = Path(asset['path']).absolute()
-        if path.resolve() != path or not path.is_relative_to(output_root) or not path.is_file():
-            raise store.CanvasError('任务输出文件不可读取', 409)
-        sources.append(path)
-    if not sources:
-        raise store.CanvasError('任务没有可导入的本地输出', 409)
-    assets = []
-    for path in sources:
-        try:
-            with path.open('rb') as handle:
-                from result_names import result_display_name, task_result_name
-                assets.append(store.save_asset(workflow_id, handle, result_display_name(task_result_name(task.get('params')), task_id, path.name) or path.name))
-        except OSError:
-            raise store.CanvasError('任务输出文件已改变，请重新检查', 409)
-    from canvas_cleanup import record_task_reference
-    with store.write_transaction():
-        record_task_reference(workflow_id,task_id)
-    return jsonify(success=True, assets=assets)
+    from canvas_writeback import import_task_assets
+    return jsonify(success=True, assets=import_task_assets(workflow_id, task_id))
+
+
+@canvas_api.route(PREFIX + '/<workflow_id>/task-sync', methods=['POST'])
+def sync_task_results(workflow_id):
+    # CANVAS-WRITEBACK B: idempotent compensation; never calls a provider or changes a task.
+    from canvas_writeback import sync_tasks
+    return jsonify(success=True, **sync_tasks(workflow_id, body().get('task_ids')))
 
 
 from canvas_library import register_library_routes

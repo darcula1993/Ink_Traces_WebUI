@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 - 2026-11-14
+
+- Generation results are now written into the canvas by the server when a task finishes. A canvas open in two windows no longer reports "updated in another window" when a result arrives; edits made meanwhile are kept, and genuine edits in both windows still raise a conflict. Downstream "upstream updated" markers and reference ids are saved with the result.
+- Video frame capture: "Capture last frame" and "Capture current frame" on video nodes create an image asset node (full resolution) next to the video, ready to start the next shot.
+- Project cost ledger (Project menu → Cost (estimates)): estimated costs by canvas, node, type and date for canvas and legacy-tool tasks. Tasks without price data are counted as unknown and never as zero; failed, cancelled, result-unknown and in-progress tasks are listed separately. Estimates only, not actual charges.
+- Long-task notifications: an in-page notice when a task succeeds, fails, is cancelled or has an unknown result (click to jump to the node), an unread count in the tab title while in the background, and optional system notifications (asked in-page first; can be turned off). While the tab is hidden the canvas checks task status every 30 seconds.
+- Prompt library in canvas nodes: search and insert saved prompts at the caret, or save the current prompt; shared with the legacy tools.
+- Test suite: all previously quarantined browser tests fixed (outdated assertions and shared fixture state).
+
 ## 1.5.2 - 2026-11-14
 
 - Clicking an asset node now pans the canvas when needed so the node and its panel below are both visible, the same as generation nodes. Double-click still centres and zooms in.

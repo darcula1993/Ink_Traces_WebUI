@@ -1,0 +1,286 @@
+[
+ {
+  "name": "2.0 720p 16:9 5s",
+  "model": "seedance-2.0",
+  "provider": "ark",
+  "resolution": "720p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": false,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 0.756,
+   "maximumCost": 0.756,
+   "minimumTokens": 108000,
+   "maximumTokens": 108000,
+   "unitPrice": 7,
+   "width": 1280,
+   "height": 720,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.0 fast 480p 9:16 10s",
+  "model": "seedance-2.0",
+  "provider": "ark",
+  "resolution": "480p",
+  "ratio": "9:16",
+  "duration": 10,
+  "fast": true,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 0.562464,
+   "maximumCost": 0.562464,
+   "minimumTokens": 100440,
+   "maximumTokens": 100440,
+   "unitPrice": 5.6,
+   "width": 496,
+   "height": 864,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.0 fast 1080p falls back to 720p row",
+  "model": "seedance-2.0",
+  "provider": "ark",
+  "resolution": "1080p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": true,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 1.3607999999999998,
+   "maximumCost": 1.3607999999999998,
+   "minimumTokens": 243000,
+   "maximumTokens": 243000,
+   "unitPrice": 5.6,
+   "width": 1920,
+   "height": 1080,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.0 adaptive assumed 16:9",
+  "model": "seedance-2.0",
+  "provider": "cupsy",
+  "resolution": "1080p",
+  "ratio": "adaptive",
+  "duration": 8,
+  "fast": false,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 2.99376,
+   "maximumCost": 2.99376,
+   "minimumTokens": 388800,
+   "maximumTokens": 388800,
+   "unitPrice": 7.7,
+   "width": 1920,
+   "height": 1080,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.0 auto duration range",
+  "model": "seedance-2.0",
+  "provider": "ark",
+  "resolution": "720p",
+  "ratio": "1:1",
+  "duration": -1,
+  "fast": false,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 0.6048,
+   "maximumCost": 2.2680000000000002,
+   "minimumTokens": 86400,
+   "maximumTokens": 324000,
+   "unitPrice": 7,
+   "width": 960,
+   "height": 960,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.0 short ref video min 4s",
+  "model": "seedance-2.0",
+  "provider": "ark",
+  "resolution": "720p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": false,
+  "ref": [
+   2
+  ],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 0.8359199999999999,
+   "maximumCost": 0.8359199999999999,
+   "minimumTokens": 194400,
+   "maximumTokens": 194400,
+   "unitPrice": 4.3,
+   "width": 1280,
+   "height": 720,
+   "inputVideoSeconds": 4
+  }
+ },
+ {
+  "name": "2.0 unknown ref durations 5s each, cap 15",
+  "model": "seedance-2.0",
+  "provider": "ark",
+  "resolution": "720p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": false,
+  "ref": [
+   null,
+   null,
+   null,
+   null
+  ],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 1.8576,
+   "maximumCost": 1.8576,
+   "minimumTokens": 432000,
+   "maximumTokens": 432000,
+   "unitPrice": 4.3,
+   "width": 1280,
+   "height": 720,
+   "inputVideoSeconds": 15
+  }
+ },
+ {
+  "name": "2.5 720p 21:9 12s",
+  "model": "seedance-2.5",
+  "provider": "ark",
+  "resolution": "720p",
+  "ratio": "21:9",
+  "duration": 12,
+  "fast": false,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 2.7869821874999996,
+   "maximumCost": 2.7869821874999996,
+   "minimumTokens": 260465.625,
+   "maximumTokens": 260465.625,
+   "unitPrice": 10.7,
+   "width": 1470,
+   "height": 630,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.5 moderated auto duration",
+  "model": "seedance-2.5-moderated",
+  "provider": "ark",
+  "resolution": "480p",
+  "ratio": "4:3",
+  "duration": -1,
+  "fast": false,
+  "ref": [],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 0.422436,
+   "maximumCost": 3.1682699999999997,
+   "minimumTokens": 39480,
+   "maximumTokens": 296100,
+   "unitPrice": 10.7,
+   "width": 752,
+   "height": 560,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.5 with ref video 7.5s",
+  "model": "seedance-2.5",
+  "provider": "cupsy",
+  "resolution": "720p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": false,
+  "ref": [
+   7.5
+  ],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 1.7280000000000002,
+   "maximumCost": 1.7280000000000002,
+   "minimumTokens": 270000,
+   "maximumTokens": 270000,
+   "unitPrice": 6.4,
+   "width": 1280,
+   "height": 720,
+   "inputVideoSeconds": 7.5
+  }
+ },
+ {
+  "name": "2.5 1080p ark inside promotion",
+  "model": "seedance-2.5",
+  "provider": "ark",
+  "resolution": "1080p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": false,
+  "ref": [],
+  "now": "2026-08-22T00:00:00Z",
+  "expected": {
+   "minimumCost": 2.0470319999999997,
+   "maximumCost": 2.0470319999999997,
+   "minimumTokens": 243000,
+   "maximumTokens": 243000,
+   "unitPrice": 8.424,
+   "width": 1920,
+   "height": 1080,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.5 1080p cupsy inside promotion window (no discount)",
+  "model": "seedance-2.5",
+  "provider": "cupsy",
+  "resolution": "1080p",
+  "ratio": "16:9",
+  "duration": 5,
+  "fast": false,
+  "ref": [],
+  "now": "2026-08-22T00:00:00Z",
+  "expected": {
+   "minimumCost": 2.8430999999999997,
+   "maximumCost": 2.8430999999999997,
+   "minimumTokens": 243000,
+   "maximumTokens": 243000,
+   "unitPrice": 11.7,
+   "width": 1920,
+   "height": 1080,
+   "inputVideoSeconds": 0
+  }
+ },
+ {
+  "name": "2.5 1080p ark after promotion",
+  "model": "seedance-2.5",
+  "provider": "ark",
+  "resolution": "1080p",
+  "ratio": "9:16",
+  "duration": 5,
+  "fast": false,
+  "ref": [
+   40
+  ],
+  "now": "2026-11-14T00:00:00Z",
+  "expected": {
+   "minimumCost": 11.907,
+   "maximumCost": 11.907,
+   "minimumTokens": 1701000,
+   "maximumTokens": 1701000,
+   "unitPrice": 7,
+   "width": 1080,
+   "height": 1920,
+   "inputVideoSeconds": 30
+  }
+ }
+]

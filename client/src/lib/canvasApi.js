@@ -1,5 +1,6 @@
 import {isServerTaskStatus,isTerminalTaskStatus} from './taskStatus.js'
 import axios from 'axios'
+import {normalizeSavedWorkflow} from './canvasTaskPolling.js'
 import {resolveNodeInputs} from './canvasReferences'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
 import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue } from './generationSettings.js'
@@ -18,7 +19,24 @@ export const renameCanvasProject = async (id, title) => (await data(axios.patch(
 export const listCanvasWorkflows = async id => (await data(axios.get(`${projectUrl(id)}/workflows`))).workflows
 export const createCanvasWorkflow = async (id, title) => (await data(axios.post(`${projectUrl(id)}/workflows`, { title }))).workflow
 export const getCanvasWorkflow = async id => (await data(axios.get(workflowUrl(id)))).workflow
-export const saveCanvasWorkflow = async (id, value) => (await data(axios.put(workflowUrl(id), value))).workflow
+// CANVAS-WRITEBACK-20261114 C: a PUT whose base revision is only behind server
+// write-backs is merged by the server and answered with {merged:true, revision, document}
+// (accepted at the top level or inside `workflow`).
+export const saveCanvasWorkflow = async (id, value) => normalizeSavedWorkflow(id, await data(axios.put(workflowUrl(id), value)))
+// D: idempotent compensation; the server writes terminal results into the document
+// (no Provider call) and returns {revision, nodes:{node_id: written-back fields}}.
+export const TASK_SYNC_BATCH = 100
+export async function syncCanvasTasks(workflowId, taskIds) {
+  const ids = [...new Set(taskIds.map(Number).filter(id => Number.isInteger(id) && id > 0))]
+  let revision = null
+  const nodes = {}
+  for (let index = 0; index < ids.length; index += TASK_SYNC_BATCH) {
+    const result = await data(axios.post(`${workflowUrl(workflowId)}/task-sync`, { task_ids: ids.slice(index, index + TASK_SYNC_BATCH) }))
+    if (Number.isInteger(result.revision)) revision = Math.max(revision ?? 0, result.revision)
+    Object.assign(nodes, result.nodes || {})
+  }
+  return { revision, nodes }
+}
 
 export {selectedProvider,nodeProvider,defaultProviderSelection} from './canvasProviderSelection.js'
 // Last interface chosen per node type; server workspace state keeps it consistent across devices.
@@ -161,6 +179,12 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   if (!Number.isInteger(id) || id <= 0) throw new Error('提交结果未返回本地任务编号，请在任务记录中核查')
   // A created task is always in flight; a non-vocabulary status is not stored.
   return { id, status: isServerTaskStatus(result.status) && !isTerminalTaskStatus(result.status) ? result.status : 'pending', ...(result.status && !isServerTaskStatus(result.status) ? { invalidStatus: String(result.status) } : {}) }
+}
+
+// Task detail without importing results (result_unknown fallback for older status previews).
+export async function getTaskDetail(taskId) {
+  const { task } = await data(axios.get(`/api/tasks/${taskId}`))
+  return { id: task.id, status: task.status, error: task.error, resultUnknown: task.status === 'failed' && task.result?.result_unknown === true }
 }
 
 export async function getCanvasTask(workflowId, taskId) {
