@@ -1,6 +1,6 @@
 {
   "name": "ink-traces-webui",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Ink Traces WebUI: AI image, video and audio generation workbench",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run worker\" \"npm run client\"",

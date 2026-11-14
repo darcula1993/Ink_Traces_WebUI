@@ -1,4 +1,4 @@
-import {resolveNodeInputs,canvasMentionItems,referenceTokenPattern,bindReferenceMentions,referenceTokens} from './canvasReferences.js'
+import {resolveNodeInputs,canvasMentionItems,referenceTokenPattern,bindReferenceMentions,referenceTokens,positionalMentionRebinds} from './canvasReferences.js'
 export function reorderNodeReferences(document,nodeId,order) {
  const node=document.nodes.find(item=>item.id===nodeId)
  if(!node)throw new Error('节点已不存在，请重新选择')
@@ -40,6 +40,8 @@ export function reconcileReferenceMentions(before,after) {
   const changedOrder=node.referenceOrder&&node.referenceOrder.some(id=>replacements.has(id))
   if(changedOrder){node={...node,referenceOrder:[...new Set(node.referenceOrder.map(id=>replacements.get(id)||id))]};nextInputs=resolveNodeInputs(node,after.nodes,after.edges)}
   for(const token of Object.keys(bindings))bindings[token]=replacements.get(bindings[token])||bindings[token]
+  // CANVAS-INPUT-20261114 #6: a binding whose material left the references follows the same position (see positionalMentionRebinds).
+  if(!explicit)for(const item of positionalMentionRebinds(node,nextInputs.assets,bindings,`${nextInputs.prompt}`))bindings[item.token]=item.to
   const byId=new Map(canvasMentionItems(node,nextInputs.assets).map(item=>[item.assetId,item.token]))
   const upstream=after.edges.filter(edge=>edge.target===node.id).map(edge=>after.nodes.find(item=>item.id===edge.source)).filter(source=>source?.type==='text').map(source=>source.text||'').join('\n')
   const upstreamTokens=referenceTokens(upstream)

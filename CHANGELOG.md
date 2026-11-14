@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.0 - 2026-11-14
+
+- Paste from the clipboard onto the canvas: images, videos and audio (including screenshots) become asset nodes at the pointer. Without files, Ctrl+V still pastes copied canvas nodes; plain text is ignored. Pasting inside text fields works as usual.
+- Connect nodes by dragging from an output port and releasing over the target node (anywhere on it) or its input; releasing on empty canvas or pressing Escape cancels. Click-to-connect still works.
+- Delete or Backspace removes the selected nodes (or the selected connection) in one undoable step; nodes that are generating are skipped with a notice.
+- Double-clicking a node smoothly centres it and zooms to 300% (less if it would not fit). Maximum canvas zoom is now 800%. Reduced-motion settings jump without animation.
+- The node menu has a "Preview" entry for images, video and audio; video and audio asset nodes now play inside the node.
+- The image output settings panel shows every option at once without inner scrolling.
+- When the generate button is disabled, hovering it explains why.
+- Fixed: after deleting a reference's asset node and connecting a new image, `@图片1` stayed bound to the removed image and the generate button stayed disabled. A reference whose image was removed now points to the image at the same position (with a notice, undoable).
+- Dropping or pasting several files adds all nodes at once after uploading, as one undo step.
+
 ## 1.4.0 - 2026-11-14
 
 - Prompt references now use the `@图片1` / `@视频1` / `@音频1` form (per media type, in reference order), matching the Seedance 2.5 prompt guide. References behave as one unit: Backspace/Delete removes the whole reference, arrow keys and clicks never stop inside it, double-click selects it, and undo still works. Valid references are highlighted green, broken ones amber; hovering a reference previews its thumbnail. The old `[Image1]` form is no longer recognised and is treated as plain text.

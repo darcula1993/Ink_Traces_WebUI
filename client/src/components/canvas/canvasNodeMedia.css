@@ -91,3 +91,6 @@
 .canvas-studio .cv-node.cv-node-sized .cv-node-media:has(> .cv-media-player.is-video) > .cv-reference-thumbnails.is-compact { top: 0; bottom: auto; padding: 6px 6px 18px; background: linear-gradient(to bottom, rgba(12, 13, 14, .85), rgba(12, 13, 14, 0)); }
 /* Canvas notices stay above the node editor (z 8) so their close button is always reachable. */
 .canvas-studio .cv-alert { z-index: 9; }
+/* NODE-FOCUS-PREVIEW #7b: visible reason when the node menu "预览" item is disabled. */
+.canvas-studio .cv-context-menu button:has(> .cv-menu-note) { white-space: normal; align-items: flex-start; gap: 8px; height: auto; }
+.canvas-studio .cv-context-menu .cv-menu-note { flex: 1; min-width: 0; font-size: 12px; line-height: 1.35; text-align: right; white-space: normal; color: var(--cv-secondary); }

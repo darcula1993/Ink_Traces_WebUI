@@ -657,3 +657,8 @@
 /* V140 #4: floating notices never swallow clicks meant for node ports underneath; only their buttons are interactive. */
 .canvas-studio .cv-alert.cv-alert-stack{pointer-events:none}
 .canvas-studio .cv-alert.cv-alert-stack :is(button,a){pointer-events:auto}
+
+/* CANVAS-INPUT-20261114 #2: drag-to-connect preview line and hovered target. */
+.canvas-studio .cv-edge.cv-edge-preview { stroke: var(--cv-focus); stroke-dasharray: 6 5; pointer-events: none; }
+.canvas-studio .cv-node.is-drop-target { outline: 2px dashed var(--cv-focus); outline-offset: 3px; }
+.canvas-studio .cv-port-out { cursor: crosshair; touch-action: none; }

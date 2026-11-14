@@ -45,10 +45,25 @@ export function bindReferenceMentions(node,assets,text=node.text) {
  for(const token of referenceTokens(text)){const id=node.referenceMentions?.[token]||current.get(token);if(id)bindings[token]=id}
  return bindings
 }
+// CANVAS-INPUT-20261114 #6 (user decision 11-14): a mention whose bound material is no longer a reference is
+// read by position, like the request sent to the provider: @图片N follows the current N-th image reference,
+// unless that reference is already bound by another mention (then it stays invalid).
+export function positionalMentionRebinds(node,assets,mentions=node.referenceMentions,text=node.text) {
+ const items=canvasMentionItems(node,assets),current=new Map(items.map(item=>[item.token,item])),ids=new Set(assets.map(asset=>asset.id))
+ const used=new Set(Object.values(mentions||{}).filter(id=>ids.has(id))),rebinds=[]
+ for(const token of referenceTokens(text)){
+  const bound=mentions?.[token],target=current.get(token)
+  if(!bound||ids.has(bound)||!target||used.has(target.assetId))continue
+  used.add(target.assetId);rebinds.push({token,from:bound,to:target.assetId,name:assets.find(asset=>asset.id===target.assetId)?.name||target.label||target.token})
+ }
+ return rebinds
+}
 export function referenceMentionIssues(node,assets,upstreamText='') {
  const current=new Map(canvasMentionItems(node,assets).map(item=>[item.token,item.assetId])),ids=new Set(assets.map(asset=>asset.id)),issues=[]
+ const positional=new Set(positionalMentionRebinds(node,assets,node.referenceMentions,`${upstreamText}\n${node.text||''}`).map(item=>item.token))
  for(const token of referenceTokens(`${upstreamText}\n${node.text||''}`)){
   const bound=node.referenceMentions?.[token]
+  if(positional.has(token))continue
   if(bound&&!ids.has(bound))issues.push(`提及 ${token} 的素材已移除，请删除该提及后重新选择素材`)
   else if(bound&&current.get(token)!==bound)issues.push(`提及 ${token} 的编号已变化，请调整或移除该提及后重新选择`)
   else if(!current.has(token))issues.push(`提及 ${token} 没有对应素材，请删除或重新选择`)
@@ -58,6 +73,6 @@ export function referenceMentionIssues(node,assets,upstreamText='') {
 // V140 #18: highlight state per token — "valid" only when the token resolves to
 // a current reference and any saved binding still points at that same reference.
 export function referenceTokenState(node,assets) {
- const current=new Map(canvasMentionItems(node,assets).map(item=>[item.token,item.assetId]))
- return token=>{const id=current.get(token),bound=node.referenceMentions?.[token];return id&&(!bound||bound===id)?'valid':'invalid'}
+ const current=new Map(canvasMentionItems(node,assets).map(item=>[item.token,item.assetId])),positional=new Set(positionalMentionRebinds(node,assets).map(item=>item.token))
+ return token=>{const id=current.get(token),bound=node.referenceMentions?.[token];return id&&(!bound||bound===id||positional.has(token))?'valid':'invalid'}
 }
