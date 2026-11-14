@@ -4,6 +4,7 @@ import axios from 'axios'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Braces, Copy, FileImage, Send, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react'
 import IconButton from './ui/IconButton'
+import useModalFocus, { isTopModal } from './ui/useModalFocus'
 
 const PARAM_LABELS = {
   aspect_ratio: '画幅',
@@ -30,6 +31,7 @@ function formatValue(key, value) {
 
 export default function PngInfoModal({ open, onClose, onApply }) {
   const inputRef = useRef(null)
+  const dialogRef = useRef(null)
   const previewUrlRef = useRef('')
   const requestRef = useRef(null)
   const [file, setFile] = useState(null)
@@ -65,11 +67,13 @@ export default function PngInfoModal({ open, onClose, onApply }) {
   useEffect(() => {
     if (!open) return undefined
     const onKeyDown = event => {
-      if (event.key === 'Escape') close()
+      if (event.key === 'Escape' && isTopModal(dialogRef)) close()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open])
+
+  useModalFocus(dialogRef, open)
 
   useEffect(() => () => {
     requestRef.current?.abort()
@@ -124,6 +128,8 @@ export default function PngInfoModal({ open, onClose, onApply }) {
           onMouseDown={event => { if (event.target === event.currentTarget) close() }}
         >
           <motion.section
+            ref={dialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="PNG Info"
@@ -150,7 +156,7 @@ export default function PngInfoModal({ open, onClose, onApply }) {
                   </IconButton>
                 )}
                 {file && <IconButton label="清除 PNG" onClick={clear}><Trash2 size={15} /></IconButton>}
-                <IconButton label="关闭 PNG Info" onClick={close}><X size={17} /></IconButton>
+                <IconButton label="关闭 PNG Info" className="png-info-close" tooltipClassName="!left-auto !right-0 !translate-x-0" onClick={close}><X size={17} /></IconButton>
               </div>
             </header>
 

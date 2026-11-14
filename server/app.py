@@ -31,6 +31,7 @@ from logging_config import configure_logging
 from response_compression import install_compression
 from request_utils import as_bool, normalize_newlines
 from task_api import task_api
+from task_public import mask_layer_fields, public_layer_project, public_task, restore_layer_remote_fields
 from canvas_api import canvas_api
 from canvas_store import init_canvas_db
 import profile_runtime
@@ -1311,6 +1312,8 @@ def _queue_layer_task(project, prompt, size, options_data=None):
     source_path = os.path.join(output_dir, 'source.png')
     storage.clone_workspace_image(project['source_path'], source_path)
     storage.register_file(task_id, 'input_image', source_path, 'image/png')
+    # Per-layer price basis snapshot (layer count is only known after the run); best effort.
+    cost_estimate.store_snapshot(task_id)
     task_db.update_task(task_id, output_dir=output_dir, status='pending', next_run_at=task_db.utcnow())
     task_db.update_layer_project(project['id'], current_task_id=task_id)
     return task_id
@@ -1463,6 +1466,8 @@ def generate():
                     imported = create_cupsy_asset_from_path(asset['path'], 'image')
                     task_db.link_task_provider_asset(db_task_id, imported['id'], 'reference_image', index)
 
+        # Estimate snapshot only (never an actual charge); best effort, never blocks submission.
+        cost_estimate.store_snapshot(db_task_id)
         task_db.update_task(db_task_id, status='pending', next_run_at=task_db.utcnow())
         return jsonify({
             'success': True,
@@ -2932,7 +2937,7 @@ def api_cancel_task(task_id):
     status = task_db.request_task_cancel(task_id)
     if status is None:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
-    return jsonify({'success': True, 'status': status, 'task': task_db.get_task(task_id)})
+    return jsonify({'success': True, 'status': status, 'task': public_task(task_db.get_task(task_id))})
 
 
 @app.route('/api/tasks/<int:task_id>/retry', methods=['POST'])
@@ -2985,7 +2990,7 @@ def api_retry_task(task_id):
             retry_id,
             [group['id'] for group in task.get('favorite_groups', [])],
         )
-    return jsonify({'success': True, 'task_id': retry_id, 'task': task_db.get_task(retry_id)}), 202
+    return jsonify({'success': True, 'task_id': retry_id, 'task': public_task(task_db.get_task(retry_id))}), 202
 
 
 @app.route('/api/images/inspect', methods=['POST'])
@@ -3003,18 +3008,22 @@ def api_inspect_image():
 @app.route('/api/layer/projects', methods=['GET', 'POST'])
 def api_layer_projects():
     if request.method == 'GET':
-        return jsonify({'success': True, 'projects': task_db.list_layer_projects()})
+        return jsonify({'success': True, 'projects': [public_layer_project(item) for item in task_db.list_layer_projects()]})
     upload = request.files.get('image')
     if not upload or not upload.filename:
         return jsonify({'success': False, 'error': '请选择需要分解的 PNG 或 JPEG 图片'}), 400
+    # decompose=0 only stores the source as a project (listed immediately, no task);
+    # the studio then queues decomposition through /decompose when the user asks.
+    decompose = str(request.form.get('decompose', '1')).strip().lower() not in {'0', 'false', 'no'}
     try:
         requested_size = 'auto' if request.form.get('size', 'auto').lower() == 'auto' else request.form.get('size', 'auto').upper()
         if requested_size not in {'auto', '1K', '1.5K', '2K'}:
             raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
-        provider, provider_config = get_layer_provider_config()
-        if not get_provider_key(provider, provider_config):
-            raise ValueError('Ark 未配置 API Key')
-        layer_options.options(request.form, get_provider_default_model(provider, provider_config))
+        if decompose:
+            provider, provider_config = get_layer_provider_config()
+            if not get_provider_key(provider, provider_config):
+                raise ValueError('Ark 未配置 API Key')
+            layer_options.options(request.form, get_provider_default_model(provider, provider_config))
         upload.stream.seek(0, os.SEEK_END)
         size_bytes = upload.stream.tell()
         upload.stream.seek(0)
@@ -3030,10 +3039,15 @@ def api_layer_projects():
         stored_metadata['size_bytes'] = size_bytes
         task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
         project = task_db.get_layer_project(project_id)
+        if not decompose:
+            return jsonify({
+                'success': True, 'project_id': project_id, 'task_id': None,
+                'project': public_layer_project(project),
+            }), 201
         task_id = _queue_layer_task(project, normalize_newlines(request.form.get('prompt', '')), requested_size, request.form)
         return jsonify({
             'success': True, 'project_id': project_id, 'task_id': task_id,
-            'project': task_db.get_layer_project(project_id),
+            'project': public_layer_project(task_db.get_layer_project(project_id)),
         }), 202
     except (OSError, ValueError, UnidentifiedImageError) as error:
         return jsonify({'success': False, 'error': str(error)}), 400
@@ -3045,7 +3059,7 @@ def api_layer_project(project_id):
     if not project:
         return jsonify({'success': False, 'error': '图层项目不存在'}), 404
     if request.method == 'GET':
-        return jsonify({'success': True, 'project': project})
+        return jsonify({'success': True, 'project': public_layer_project(project)})
     if request.method == 'DELETE':
         current = project.get('current_task') or {}
         if current.get('status') in task_db.ACTIVE_TASK_STATUSES:
@@ -3070,10 +3084,11 @@ def api_layer_project(project_id):
         return jsonify({'success': False, 'error': '图层文档格式无效'}), 400
     if len(document['layers']) > 100 or len(json.dumps(document).encode()) > 16 * 1024 * 1024:
         return jsonify(success=False, error='图层文档最多100层、16MB元数据'), 400
+    document = restore_layer_remote_fields(document, project)
     updated = task_db.save_layer_document(project_id, document, data.get('revision'))
     if not updated:
         return jsonify({'success': False, 'error': '项目已在其他页面更新，请刷新后重试'}), 409
-    return jsonify({'success': True, 'project': updated})
+    return jsonify({'success': True, 'project': public_layer_project(updated)})
 
 
 @app.route('/api/layer/projects/<int:project_id>/source', methods=['GET'])
@@ -3109,7 +3124,7 @@ def api_restore_layer_revision(project_id, revision_id):
     if not revision or not revision.get('document'):
         return jsonify({'success': False, 'error': '图层版本不存在或无法恢复'}), 404
     updated = task_db.save_layer_document(project_id, revision['document'])
-    return jsonify({'success': True, 'project': updated})
+    return jsonify({'success': True, 'project': public_layer_project(updated)})
 
 
 @app.route('/api/layer/projects/<int:project_id>/layers.zip', methods=['GET'])
@@ -3132,7 +3147,7 @@ def api_download_layer_project(project_id):
             extension = os.path.splitext(path)[1].lower() or '.png'
             archive_name = f'{index:02d}_{re.sub(r"[^a-zA-Z0-9_-]+", "_", layer.get("name") or "layer")}{extension}'
             bundle.write(path, archive_name)
-            manifest['layers'].append({**{key: value for key, value in layer.items() if key not in {'local_url', 'thumbnail_url'}}, 'file': archive_name})
+            manifest['layers'].append({**{key: value for key, value in mask_layer_fields(layer).items() if key not in {'local_url', 'thumbnail_url'}}, 'file': archive_name})
         bundle.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
     archive.seek(0)
     return send_file(

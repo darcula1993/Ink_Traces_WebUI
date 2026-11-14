@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.0 - 2026-11-14
+
+- Image and layer cost estimates from the official BytePlus price list: canvas image nodes show "预估 $x USD" with the model, output size, pixel tier and reference-image price on hover; the layer tool shows the per-layer price before submission and the ledger prices each output layer by its actual size. Seedream 5.5 layers below 921,600 pixels are counted at the lowest tier and marked as derived. Unknown prices are never shown as zero. Small amounts show three decimals.
+- Signed provider URLs are no longer sent to the browser: task lists and details, canvas documents and layer projects show only the host (layer `source_url` fields are restored server-side on save; user text containing URLs is kept as typed). Copy actions copy the local result link.
+- Deleting a local asset lists the affected projects and canvases (with node counts) first and highlights references from other projects. Uploads made from a character are labelled with the character in All projects.
+- Canvas: "Fit all nodes" now fits every node; unsaved input is sent when the page is closed or hidden; leaving after a failed save warns again; if the server rejects the final save, the next visit offers to restore or discard the local draft, merged field by field so finished results are never lost. New nodes land in view and selected; panels no longer cover focus targets or the prompt library.
+- Canvas feedback: completion notices dismiss themselves, carry the task number and no longer cover the cost or generate button; node-group rename commits on Enter and the group bar stays usable at low zoom; larger connection hit areas; video progress shows stages instead of a fixed 50%; previews fit the window by default; per-type placeholders and consistent model names.
+- Library and legacy tools: folder menus are no longer clipped; dialogs trap focus and return it on Esc (nested dialogs close one at a time); native confirms replaced; tags shown on cards; legacy task search matches substrings and model names; the layer studio shows the loaded source and lists the project immediately (marked 未分解 until decomposed); the cost ledger shows failed and cancelled tasks as not billed, with project/canvas and submit time.
+- Each browser tab remembers its own project and canvas; new tabs open the most recent canvas.
+- Consistent danger buttons and notice placement across the app.
+
 ## 1.7.0 - 2026-11-14
 
 - Character library (Asset library → Characters, shared across all projects): each character has a text description, up to 8 reference images and an optional voice reference (WAV/MP3, up to 30 s). Images and audio are local assets referenced by the character, not copies; uploads made in the character library also appear in Local assets. Right-click an image node and choose "Add to character" to add a result.

@@ -282,5 +282,555 @@
    "height": 1920,
    "inputVideoSeconds": 30
   }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 1K 1:1 no refs",
+  "family": "seedream-5.5",
+  "width": 1024,
+  "height": 1024,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.02,
+   "maximumCost": 0.02,
+   "outputUnitPrice": 0.02,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 2K 16:9 1 ref",
+  "family": "seedream-5.5",
+  "width": 2816,
+  "height": 1584,
+  "references": 1,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.043000000000000003,
+   "maximumCost": 0.043000000000000003,
+   "outputUnitPrice": 0.035,
+   "inputCost": 0.008,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 custom 1280x720 (921,600 floor) 3 refs",
+  "family": "seedream-5.5",
+  "width": 1280,
+  "height": 720,
+  "references": 3,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.044,
+   "maximumCost": 0.044,
+   "outputUnitPrice": 0.02,
+   "inputCost": 0.024,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 1.5K 21:9 low tier",
+  "family": "seedream-5.5",
+  "width": 2352,
+  "height": 1008,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.02,
+   "maximumCost": 0.02,
+   "outputUnitPrice": 0.02,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 pixels 2,601,123 low tier",
+  "family": "seedream-5.5",
+  "width": 2601123,
+  "height": 1,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.02,
+   "maximumCost": 0.02,
+   "outputUnitPrice": 0.02,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 pixels 2,601,124 high tier",
+  "family": "seedream-5.5",
+  "width": 2601124,
+  "height": 1,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.035,
+   "maximumCost": 0.035,
+   "outputUnitPrice": 0.035,
+   "inputCost": 0,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 pixels 4,624,220 ceiling",
+  "family": "seedream-5.5",
+  "width": 4624220,
+  "height": 1,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.035,
+   "maximumCost": 0.035,
+   "outputUnitPrice": 0.035,
+   "inputCost": 0,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 below floor 1280x704",
+  "family": "seedream-5.5",
+  "width": 1280,
+  "height": 704,
+  "references": 0,
+  "expected": {
+   "known": false,
+   "reason": "below_price_floor"
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.5 above ceiling 2176x2176",
+  "family": "seedream-5.5",
+  "width": 2176,
+  "height": 2176,
+  "references": 0,
+  "expected": {
+   "known": false,
+   "reason": "above_price_ceiling"
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro 1K 1:1 no refs",
+  "family": "seedream-5.0-pro",
+  "width": 1024,
+  "height": 1024,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.045,
+   "maximumCost": 0.045,
+   "outputUnitPrice": 0.045,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro 1K 1 ref (first free)",
+  "family": "seedream-5.0-pro",
+  "width": 1024,
+  "height": 1024,
+  "references": 1,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.045,
+   "maximumCost": 0.045,
+   "outputUnitPrice": 0.045,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro 1K 3 refs",
+  "family": "seedream-5.0-pro",
+  "width": 1152,
+  "height": 864,
+  "references": 3,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.051,
+   "maximumCost": 0.051,
+   "outputUnitPrice": 0.045,
+   "inputCost": 0.006,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro 2K 1:1 1 ref",
+  "family": "seedream-5.0-pro",
+  "width": 2048,
+  "height": 2048,
+  "references": 1,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.09,
+   "maximumCost": 0.09,
+   "outputUnitPrice": 0.09,
+   "inputCost": 0,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro 2K 16:9 3 refs",
+  "family": "seedream-5.0-pro",
+  "width": 2816,
+  "height": 1584,
+  "references": 3,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.096,
+   "maximumCost": 0.096,
+   "outputUnitPrice": 0.09,
+   "inputCost": 0.006,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro custom 1280x720 (921,600)",
+  "family": "seedream-5.0-pro",
+  "width": 1280,
+  "height": 720,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.045,
+   "maximumCost": 0.045,
+   "outputUnitPrice": 0.045,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro pixels 2,601,124 low tier",
+  "family": "seedream-5.0-pro",
+  "width": 2601124,
+  "height": 1,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.045,
+   "maximumCost": 0.045,
+   "outputUnitPrice": 0.045,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro pixels 2,610,000 low tier",
+  "family": "seedream-5.0-pro",
+  "width": 2610000,
+  "height": 1,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.045,
+   "maximumCost": 0.045,
+   "outputUnitPrice": 0.045,
+   "inputCost": 0,
+   "tier": 0
+  }
+ },
+ {
+  "kind": "image",
+  "name": "5.0 pro pixels 2,610,001 high tier",
+  "family": "seedream-5.0-pro",
+  "width": 2610001,
+  "height": 1,
+  "references": 0,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.09,
+   "maximumCost": 0.09,
+   "outputUnitPrice": 0.09,
+   "inputCost": 0,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "image",
+  "name": "cupsy 2K 16:9 (5.0 pro rate)",
+  "family": "seedream-5.0-pro",
+  "width": 2560,
+  "height": 1440,
+  "references": 2,
+  "expected": {
+   "known": true,
+   "minimumCost": 0.093,
+   "maximumCost": 0.093,
+   "outputUnitPrice": 0.09,
+   "inputCost": 0.003,
+   "tier": 1
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.0-pro 1K",
+  "family": "seedream-5.0-pro",
+  "size": "1K",
+  "expected": {
+   "perLayerMin": 0.0225,
+   "perLayerMax": 0.0225,
+   "inputCost": 0
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.0-pro 1.5K",
+  "family": "seedream-5.0-pro",
+  "size": "1.5K",
+  "expected": {
+   "perLayerMin": 0.0225,
+   "perLayerMax": 0.0225,
+   "inputCost": 0
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.0-pro 2K",
+  "family": "seedream-5.0-pro",
+  "size": "2K",
+  "expected": {
+   "perLayerMin": 0.0225,
+   "perLayerMax": 0.045,
+   "inputCost": 0
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.0-pro auto",
+  "family": "seedream-5.0-pro",
+  "size": "auto",
+  "expected": {
+   "perLayerMin": 0.0225,
+   "perLayerMax": 0.045,
+   "inputCost": 0
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.5 1K",
+  "family": "seedream-5.5",
+  "size": "1K",
+  "expected": {
+   "perLayerMin": 0.02,
+   "perLayerMax": 0.02,
+   "inputCost": 0.008
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.5 2K",
+  "family": "seedream-5.5",
+  "size": "2K",
+  "expected": {
+   "perLayerMin": 0.02,
+   "perLayerMax": 0.035,
+   "inputCost": 0.008
+  }
+ },
+ {
+  "kind": "layer_unit",
+  "name": "layer unit seedream-5.5 auto",
+  "family": "seedream-5.5",
+  "size": "auto",
+  "expected": {
+   "perLayerMin": 0.02,
+   "perLayerMax": 0.035,
+   "inputCost": 0.008
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.0 pro mixed tiers",
+  "family": "seedream-5.0-pro",
+  "sizes": [
+   [
+    2048,
+    2048
+   ],
+   [
+    1024,
+    1024
+   ],
+   [
+    512,
+    512
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.09,
+   "outputCount": 3
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.5 two tiers",
+  "family": "seedream-5.5",
+  "sizes": [
+   [
+    1536,
+    1536
+   ],
+   [
+    2048,
+    2048
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.063,
+   "outputCount": 2
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.5 small layer at floor tier (推算)",
+  "family": "seedream-5.5",
+  "sizes": [
+   [
+    1536,
+    1536
+   ],
+   [
+    640,
+    640
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.048,
+   "outputCount": 2,
+   "belowFloorLayers": 1,
+   "assumption": "below_floor_min_tier"
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.5 all layers below floor (推算)",
+  "family": "seedream-5.5",
+  "sizes": [
+   [
+    960,
+    959
+   ],
+   [
+    64,
+    64
+   ],
+   [
+    32,
+    48
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.068,
+   "outputCount": 3,
+   "belowFloorLayers": 3,
+   "assumption": "below_floor_min_tier"
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.5 floor boundary 921,600 not assumed",
+  "family": "seedream-5.5",
+  "sizes": [
+   [
+    1280,
+    720
+   ],
+   [
+    2048,
+    2048
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.063,
+   "outputCount": 2,
+   "belowFloorLayers": 0,
+   "assumption": null
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.5 small layer with high tier base",
+  "family": "seedream-5.5",
+  "sizes": [
+   [
+    2048,
+    2048
+   ],
+   [
+    100,
+    100
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.063,
+   "outputCount": 2,
+   "belowFloorLayers": 1,
+   "assumption": "below_floor_min_tier"
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.5 above ceiling still unknown",
+  "family": "seedream-5.5",
+  "sizes": [
+   [
+    2400,
+    2400
+   ],
+   [
+    64,
+    64
+   ]
+  ],
+  "expected": {
+   "known": false,
+   "reason": "above_price_ceiling"
+  }
+ },
+ {
+  "kind": "layer_outputs",
+  "name": "layer outputs 5.0 pro small layers unchanged",
+  "family": "seedream-5.0-pro",
+  "sizes": [
+   [
+    1024,
+    1024
+   ],
+   [
+    64,
+    64
+   ]
+  ],
+  "expected": {
+   "known": true,
+   "minimumCost": 0.045,
+   "outputCount": 2,
+   "belowFloorLayers": 0,
+   "assumption": null
+  }
  }
 ]

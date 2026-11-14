@@ -4,7 +4,7 @@ export const NODE_HEIGHT = 240
 export const NODE_PORT_Y = 120
 // UI-ITER-R1: readable zoom levels. Node text is >=12px in canvas space; below LOD_ZOOM it would render <10px.
 export const LOCATE_ZOOM = 1
-export const FIT_MIN_ZOOM = .75
+export const FIT_MIN_ZOOM = .2
 export const LOD_ZOOM = 10/12
 // UI-ITER-R2A #2: image/video nodes take the shape of their media. The media box follows the measured
 // result aspect (runtime cache), else the selected output ratio, within per-kind bounds; text keeps the
@@ -82,10 +82,13 @@ export function overlapsNode(position,node,padding=20) {
  return position.x<node.x+b.width+padding&&position.x+a.width+padding>node.x&&position.y<node.y+b.height+padding&&position.y+a.height+padding>node.y
 }
 
-// Fit all nodes, but never below FIT_MIN_ZOOM: if they still do not fit, keep the top-left of the content in view.
-export function fitViewport(bounds,size,pad={x:90,y:50}) {
+// FIX-B2-20261114 #1 (replaces UI-ITER-R1 "never below 0.75"): fit-all zooms out as far as the canvas
+// minimum (FIT_MIN_ZOOM = 0.2) so every node is visible; the bottom pad keeps content clear of the
+// floating zoom bar / tool bar. Only content that does not fit even at the minimum keeps its top-left in view.
+export function fitViewport(bounds,size,pad={left:60,right:60,top:40,bottom:96}) {
  const width=Math.max(1,bounds.maxX-bounds.minX),height=Math.max(1,bounds.maxY-bounds.minY)
- const zoom=Math.min(1.3,Math.max(FIT_MIN_ZOOM,Math.min((size.width-2*pad.x)/width,(size.height-2*pad.y)/height)))
- const axis=(span,extent,min,margin)=>span*zoom<=extent-2*margin?(extent-span*zoom)/2-min*zoom:margin-min*zoom
- return {zoom,x:axis(width,size.width,bounds.minX,pad.x),y:axis(height,size.height,bounds.minY,pad.y)}
+ const availW=Math.max(1,size.width-pad.left-pad.right),availH=Math.max(1,size.height-pad.top-pad.bottom)
+ const zoom=Math.min(1.3,Math.max(FIT_MIN_ZOOM,Math.min(availW/width,availH/height)))
+ const axis=(span,avail,start,min)=>span*zoom<=avail?start+(avail-span*zoom)/2-min*zoom:start-min*zoom
+ return {zoom,x:axis(width,availW,pad.left,bounds.minX),y:axis(height,availH,pad.top,bounds.minY)}
 }

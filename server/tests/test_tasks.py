@@ -128,6 +128,40 @@ def test_full_text_search_tracks_provider_updates_and_deletes():
     assert task_db.list_task_ids(search='cupsy') == []
 
 
+def test_search_matches_chinese_substrings_model_names_and_server_pagination():
+    red = task_db.create_task('image', '红色圆形图标', {'model': 'ep-test', 'seedream55': True}, provider='ark')
+    cat = task_db.create_task('image', '一只橘猫在窗台', {'model': 'seedream-5.0-pro'}, provider='cupsy')
+    video = task_db.create_task('video', '海边日落', {'model': 'seedance-2.5'}, provider='cupsy')
+    other = task_db.create_task('image', 'plain 50%_off', {}, provider='ark')
+
+    assert task_db.list_task_ids(search='红色') == [red]
+    assert task_db.list_task_ids(search='圆形图标') == [red]
+    assert task_db.list_task_ids(search='橘猫') == [cat]
+    assert task_db.list_task_ids(search='猫') == [cat]
+    assert task_db.list_task_ids(search='SEEDREAM', task_type='image', sort='oldest') == [red, cat, other]
+    assert task_db.list_task_ids(search='seedream 5.5') == [red]
+    assert task_db.list_task_ids(search='seedance') == [video]
+    assert task_db.list_task_ids(search='红色 ark') == [red]
+    assert task_db.list_task_ids(search='红色 cupsy') == []
+    # LIKE wildcards are literal text, not patterns.
+    assert task_db.list_task_ids(search='%') == [other]
+    assert task_db.list_task_ids(search='0%_') == [other]
+    assert video in task_db.list_task_ids(search=str(video))
+
+    page, total = task_db.list_tasks(task_type='image', search='seedream', limit=2, offset=0, sort='oldest')
+    assert total == 3
+    assert [task['id'] for task in page] == [red, cat]
+    page, total = task_db.list_tasks(task_type='image', search='seedream', limit=2, offset=2, sort='oldest')
+    assert total == 3 and [task['id'] for task in page] == [other]
+
+
+def test_search_input_is_bounded():
+    task_id = task_db.create_task('image', 'a' * 50, {}, provider='ark')
+    assert task_db.list_task_ids(search='a' * 100 + 'zzz') == []
+    assert len(task_db._search_terms(' '.join(f't{i}' for i in range(20)))) == task_db.SEARCH_MAX_TERMS
+    assert task_db.list_task_ids(search='  ') == [task_id]
+
+
 def test_workspace_state_round_trip():
     stored = task_db.set_workspace_state('appMode', 'video')
     assert stored['value'] == 'video'

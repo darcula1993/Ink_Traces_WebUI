@@ -6,7 +6,7 @@
 .ul-video-thumb{width:100%;height:160px;background:#e0e3e206}.ul-video-thumb video{width:100%;height:100%;object-fit:contain}.ul-selected .ul-video-thumb{height:100%}.ul-preview-host .cv-media-overlay{position:fixed;inset:0;background:#050505e8;display:flex;align-items:center;justify-content:center;padding:30px}.ul-preview-host .cv-media-viewer{background:#1b1e1d;border:1px solid #c2c6c449;border-radius:8px;width:min(1100px,95vw);max-height:90vh;padding:18px;color:#ebedec;display:flex;flex-direction:column;gap:12px}.ul-preview-host .cv-media-viewer header{display:flex;justify-content:space-between}.ul-preview-host .cv-preview-content{overflow:auto;max-height:72vh;text-align:center}.ul-preview-host video{max-width:100%;max-height:70vh}.ul-preview-host audio{width:min(600px,100%);margin:40px 0}
 
 .ul-item-tools{flex-wrap:wrap}.ul-item-tools button:where(:not(.btn)){white-space:nowrap}
-.ul-context-hint{font-size:12px;color:#a5aba8;padding:10px}.ul-more{position:relative;margin-left:auto}.ul-more-menu{position:absolute;right:0;bottom:100%;z-index:10;display:flex;flex-direction:column;min-width:130px;padding:6px;background:#1b1e1df5;border:1px solid #c6cac855;border-radius:8px;box-shadow:0 8px 24px #00000088}.ul-item-tools button:where(:not(.btn)){min-height:28px}.ul-more-menu button:where(:not(.btn)){text-align:left}.ul-upload-controls{position:relative}.ul-upload-options{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ul-upload-options label{display:flex;align-items:center;gap:6px}.ul-upload-options select{max-width:220px}.ul-error button:where(:not(.btn)),.ul-muted button:where(:not(.btn)){margin-left:10px}.ul-item{min-width:0}
+.ul-context-hint{font-size:12px;color:#a5aba8;padding:10px}.ul-more{position:relative;margin-left:auto}.ul-more-menu{position:fixed;left:0;top:0;z-index:60;display:flex;flex-direction:column;min-width:130px;overflow:auto;padding:6px;background:#1b1e1d;border:1px solid #c6cac855;border-radius:8px;box-shadow:0 8px 24px #00000088}.ul-item-tools button:where(:not(.btn)){min-height:28px}.ul-more-menu button:where(:not(.btn)){text-align:left}.ul-upload-controls{position:relative}.ul-upload-options{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ul-upload-options label{display:flex;align-items:center;gap:6px}.ul-upload-options select{max-width:220px}.ul-error button:where(:not(.btn)),.ul-muted button:where(:not(.btn)){margin-left:10px}.ul-item{min-width:0}
 
 /* CANVAS-UX-20261112: two-row header, floating popovers, compact cards. */
 .ul-title{flex-wrap:nowrap;overflow:hidden}.ul-title h3{white-space:nowrap}.ul-title select{max-width:200px}.ul-kinds{display:flex;gap:6px;margin-left:auto;flex-shrink:0}
@@ -63,3 +63,15 @@
 @media(min-width:1921px){
   .ul-grid .ul-card img,.ul-grid .ul-card video,.ul-grid .ul-audio,.ul-grid .ul-video-thumb{height:clamp(150px,min(11vw,calc(9vh + 60px)),260px)}
 }
+/* FIX-B1B-20261114: named canvases in the local delete preview; other-project impact called out. */
+.ul-delete-workflows{margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto;font-size:13px}.ul-delete-workflows li{margin:2px 0;overflow-wrap:anywhere}.ul-delete-warning{border:1px solid #d89a5a;background:#d89a5a1f;border-radius:8px;padding:8px 10px}.ul-delete-warning p{margin:0}.ul-delete-warning strong{color:#f3c48f}
+.ul-card-tags{display:flex;flex-wrap:nowrap;gap:4px;padding:0 10px 8px;min-width:0;overflow:hidden}.ul-card-tags i{font-style:normal;font-size:11px;line-height:16px;padding:0 6px;border-radius:6px;border:1px solid var(--btn-active-rim,#45c08859);color:var(--btn-active-text,#9fe0c0);white-space:nowrap;flex-shrink:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+.ul-empty-center{display:flex;align-items:center;justify-content:center;min-height:min(320px,40vh);text-align:center;margin:0}
+.ul-popover-section>button:where(:not(.btn))[aria-pressed=true]{background:rgba(69,192,136,.18);border-color:rgba(79,196,140,.6);color:#9fe0c0}
+/* Unified destructive menu items: borderless list rows in the danger colour (shared with .btn-danger). */
+.ul-more-menu button:where(:not(.btn)){border-color:transparent;background:transparent}
+.ul-more-menu button:where(:not(.btn)):hover:not(:disabled),.ul-more-menu button:where(:not(.btn)):focus-visible{background:rgba(255,255,255,.06)}
+.ul-more-menu button.is-danger:where(:not(.btn)){color:var(--btn-danger-text)}
+.ul-more-menu button.is-danger:where(:not(.btn)):hover:not(:disabled){background:var(--btn-danger-fill-hover);color:#efb3b7}
+.ul-item-tools button.is-danger:where(:not(.btn)){color:var(--btn-danger-text)}

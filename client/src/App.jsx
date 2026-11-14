@@ -8,6 +8,7 @@ import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imag
 import PromptCollection from './components/PromptCollection'
 import TaskGallery from './components/TaskGallery'
 import PngInfoModal from './components/PngInfoModal'
+import useModalFocus, { isTopModal } from './components/ui/useModalFocus'
 import ReferenceMediaModal from './components/ReferenceMediaModal'
 import ToolAssetLibrary from './components/library/ToolAssetLibrary'
 import PromptMentionTextarea from './components/PromptMentionTextarea'
@@ -21,6 +22,7 @@ import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, 
 import {videoCapabilities as getVideoCapabilities,videoDurations,videoRatio,VIDEO_RATIOS,VIDEO_AUTO_DURATION} from './lib/videoGenerationRules.js'
 import { estimateBytePlusVideoCost, formatUsdEstimate, formatWanTokens } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceObjectUrls, useWorkspaceState, workspaceImageFields } from './lib/useWorkspaceState'
+import { initialTabMode, writeTabMode } from './lib/canvasLastLocation'
 import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CUPSY_AUDIO_MODEL, AUDIO_SAMPLE_RATES, AUDIO_SPEAKERS, VIDEO_MODEL_CAPABILITIES } from './lib/generationSettings.js'
 import { currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile, readFileDataUrl, videoDropZoneHandlers } from './lib/referenceMedia.js'
 import { makeImgTab, makeVideoTab, DEFAULT_AUDIO_FORM, IMAGE_WORKSPACE_OPTIONS, VIDEO_WORKSPACE_OPTIONS } from './lib/workspaceTabs.js'
@@ -99,7 +101,12 @@ function App({ onLogout }) {
   }, [setImgTabs])
 
   // 顶部模式切换：image / video / audio
-  const [appMode, setAppMode] = useWorkspaceState('appMode', 'canvas')
+  // WINDOW-PROJECT-20261114: the server appMode is still written on every switch, but it no longer
+  // decides where a fresh tab lands: a new tab always opens the canvas (user decision 11-14);
+  // a reload keeps this tab's own tool.
+  const [, setServerAppMode] = useWorkspaceState('appMode', 'canvas')
+  const [appMode, setTabAppMode] = useState(initialTabMode)
+  const setAppMode = useCallback(mode => { setTabAppMode(mode); writeTabMode(mode); setServerAppMode(mode) }, [setServerAppMode])
   const canvasBeforeLeave = useRef(null), modeSwitchPending = useRef(false)
   async function changeAppMode(mode) {
     if (mode === appMode || modeSwitchPending.current) return
@@ -592,8 +599,11 @@ function App({ onLogout }) {
     updateTab(activeTab.id, { fast: false })
   }, [activeTab.fast, activeTab.id, updateTab, videoFastAvailable])
 
+  const fullEditorRef = useRef(null)
+  useModalFocus(fullEditorRef, showFullEditor)
+
   useEffect(() => {
-    const handleEsc = (e) => { if (e.key === 'Escape') { setShowFullEditor(false); setShowEditorVault(false) } }
+    const handleEsc = (e) => { if (e.key === 'Escape' && isTopModal(fullEditorRef)) { setShowFullEditor(false); setShowEditorVault(false) } }
     if (showFullEditor) window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
   }, [showFullEditor])
@@ -1987,6 +1997,8 @@ function App({ onLogout }) {
           {showFullEditor && (
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              ref={fullEditorRef}
+              tabIndex={-1}
               role="dialog"
               aria-modal="true"
               aria-label="提示词编辑器"
@@ -2052,12 +2064,12 @@ function App({ onLogout }) {
       <AnimatePresence>
         {notification && (
           <motion.div
-            initial={{ opacity: 0, y: 12 }}
+            initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
+            exit={{ opacity: 0, y: -8 }}
             role={notification.tone === 'error' ? 'alert' : 'status'}
             aria-live="polite"
-            className={`fixed ${appMode === 'layer' ? 'bottom-24 right-[308px]' : 'bottom-4 right-4'} z-[1200] flex max-w-[calc(100vw-32px)] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
+            className={`fixed top-[64px] right-4 z-[1200] pointer-events-none flex max-w-[calc(100vw-32px)] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
           >
             {notification.tone === 'error' ? <CircleAlert size={15} /> : <Check size={15} className="text-nexus-green" />}
             {notification.message}

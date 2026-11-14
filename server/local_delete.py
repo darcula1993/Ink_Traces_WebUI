@@ -219,35 +219,62 @@ def _plan(db, keys):
     by_workflow = {}
     for asset in canvas_assets.values():
         by_workflow.setdefault(asset['workflow_id'], set()).add(asset['id'])
-    documents, touched_nodes, removed_nodes = {}, 0, 0
+    documents, touched_nodes, removed_nodes, per_workflow = {}, 0, 0, {}
     for workflow_id, ids in by_workflow.items():
         row = db.execute('SELECT document FROM canvas_workflows WHERE id=?', (workflow_id,)).fetchone()
         document, touched, dropped = strip_document(json.loads(row['document']), ids)
         documents[workflow_id] = document
         touched_nodes += touched
         removed_nodes += dropped
+        per_workflow[workflow_id] = {'canvas_copies': len(ids & set(deletable)), 'direct_assets': len(ids & set(direct)),
+                                     'affected_nodes': touched, 'removed_nodes': dropped}
     from characters import usage
     characters = usage(db, [r['id'] for r in local_rows])
     return {'characters': characters, 'local_rows': local_rows, 'library_rows': library_rows, 'direct': direct, 'missing': missing, 'rejected': rejected,
             'copies': deletable, 'canvas_assets': canvas_assets, 'archived_copies': len(copies) - len(deletable),
             'documents': documents, 'affected_nodes': touched_nodes, 'removed_nodes': removed_nodes,
-            'deleted_keys': [k for k in sources]}
+            'per_workflow': per_workflow, 'deleted_keys': [k for k in sources]}
 
 
-def _summary(plan):
-    return {'items': len(plan['deleted_keys']), 'canvas_copies': len(plan['copies']),
+def _affected_workflows(db, plan, context_project_id=None):
+    """Display-only breakdown of the canvases a deletion rewrites (FIX-B1B-20261114).
+
+    ``other_project`` marks canvases outside the user's current project (``context_project_id``);
+    without one, outside the projects owning the selected items. When neither is known (only
+    unowned 本地素材 selected outside a project) every affected canvas is flagged, so the
+    warning errs on the visible side. It never changes what is deleted.
+    """
+    if context_project_id:
+        reference = {context_project_id}
+    else:
+        reference = {r['project_id'] for r in plan['library_rows']}
+        reference |= {r['project_id'] for r in (db.execute('SELECT project_id FROM canvas_workflows WHERE id=?', (a['workflow_id'],)).fetchone()
+                                                for a in plan['direct'].values()) if r}
+    rows = []
+    for workflow_id, counts in plan['per_workflow'].items():
+        row = db.execute('SELECT w.title AS workflow_title, w.project_id, p.title AS project_title FROM canvas_workflows w '
+                         'LEFT JOIN canvas_projects p ON p.id=w.project_id WHERE w.id=?', (workflow_id,)).fetchone()
+        rows.append({'workflow_id': workflow_id, 'workflow_title': row['workflow_title'], 'project_id': row['project_id'],
+                     'project_title': row['project_title'], **counts,
+                     'other_project': not reference or row['project_id'] not in reference})
+    return sorted(rows, key=lambda r: (not r['other_project'], r['project_title'] or '', r['workflow_title'] or '', r['workflow_id']))
+
+
+def _summary(plan, affected=None):
+    return {'affected_workflows': affected or [],'items': len(plan['deleted_keys']), 'canvas_copies': len(plan['copies']),
             'workflows': len(plan['documents']), 'workflow_ids': sorted(plan['documents']), 'affected_nodes': plan['affected_nodes'],
             'removed_nodes': plan['removed_nodes'], 'archived_copies_retained': plan['archived_copies'],
             'missing': plan['missing'], 'rejected': plan['rejected'], 'characters': plan['characters']}
 
 
-def preview(keys):
+def preview(keys, context_project_id=None):
     db = tasks.get_db()
     owns = not db.in_transaction
     if owns:
         db.execute('BEGIN')
     try:
-        return _summary(_plan(db, keys))
+        plan = _plan(db, keys)
+        return _summary(plan, _affected_workflows(db, plan, context_project_id))
     finally:
         if owns:
             db.rollback()
@@ -351,7 +378,11 @@ def register_routes(bp, body):
     @bp.post('/api/canvas/library/items/delete-preview')
     def delete_preview():
         require_same_origin(request)
-        return jsonify(success=True, **preview(parse_keys(body().get('keys'))))
+        data = body()
+        context = data.get('project_id')
+        if context is not None and (not isinstance(context, str) or len(context) > 200):
+            raise store.CanvasError('project_id 须为字符串')
+        return jsonify(success=True, **preview(parse_keys(data.get('keys')), context or None))
 
     @bp.post('/api/canvas/library/items/bulk-delete')
     def bulk_delete():

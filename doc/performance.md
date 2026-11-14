@@ -22,6 +22,25 @@
   Filesystem cleanup runs in one background maintenance executor, no longer in
   prompt autosave requests or the scheduler's heartbeat loop.
 
+## Task search (2026-11-14, FIX-B3B)
+
+Gallery search (`q` on task list, id list and navigation) is a substring match
+so Chinese text without word breaks ("红色", "橘猫") and model names
+("seedream", "seedance") are found. Each whitespace term must occur in the
+prompt, provider or model text (Ark image/layer tasks, which store an endpoint
+id, also match "seedream"); the whole query also matches favorite group names
+and an exact task id. Matching uses `instr()`, so `%` and `_` are literal.
+
+This replaces the FTS5 prefix match for filtering (the `task_search` table and
+triggers are kept, unused by filtering, so no schema change). A substring scan
+cannot use an index, so it is bounded instead: input is cut to 100 characters
+and 8 terms, and the scan runs after the type/deleted/favorite filters.
+Synthetic benchmark (image tab, 20–120 term prompts, page of 50 plus count):
+5,000 tasks about 4–8 ms (FTS prefix: under 1 ms), 50,000 tasks about
+40–85 ms. Pagination, counts and select-all ids are still computed by the
+server with the same filter. Revisit with a trigram index if the task table
+grows well beyond 50,000 rows.
+
 ## Worker settings
 
 Under `server` in local `config.json`:

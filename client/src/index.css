@@ -2304,3 +2304,8 @@
 .prompt-reference-highlight mark{color:transparent;border-radius:4px;padding:0;margin:0}
 .prompt-reference-highlight mark.is-valid{background:rgba(69,192,136,.28);box-shadow:inset 0 -1px 0 rgba(69,192,136,.9)}
 .prompt-reference-highlight mark.is-invalid{background:rgba(224,164,72,.22);box-shadow:inset 0 -1px 0 rgba(224,164,72,.9)}
+.ink-confirm-backdrop.ink-confirm-top { z-index: 2000; }
+
+/* FIX-B3 ada: programmatic initial focus must show a ring too */
+.png-info-modal .png-info-close:focus,
+.png-info-modal .png-info-close:focus-visible { outline: 2px solid #9fe0c0; outline-offset: 2px; }

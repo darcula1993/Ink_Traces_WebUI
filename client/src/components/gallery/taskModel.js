@@ -163,6 +163,19 @@ export function taskDisplayUrl(taskId, url) {
   return `${value}${value.includes('?') ? '&' : '?'}png_info=1`
 }
 
+// FIX-B1-20261114: Provider result URLs may be pre-signed (credential/signature in
+// the query). The detail view only names the remote host; the server already
+// masks them, this is a defensive second layer for stale or mocked payloads.
+export function remoteResultHost(url) {
+  const value = String(url || '')
+  if (!/^https?:\/\//i.test(value)) return ''
+  try {
+    return new URL(value).host
+  } catch {
+    return ''
+  }
+}
+
 export function serverItem(task) {
   const result = task.result || {}
   const params = task.params || {}
@@ -185,7 +198,7 @@ export function serverItem(task) {
     resultUnknownReason: task.status === 'failed' && isResultUnknown(task) ? resultUnknownReason(task) : '',
     params,
     images: (result.local_images || []).map(url => taskDisplayUrl(task.id, url)),
-    sourceUrls: Array.isArray(result.source_urls) ? result.source_urls : [],
+    remoteHosts: Array.isArray(result.source_urls) ? result.source_urls.map(remoteResultHost) : [],
     thumbnail: result.local_thumbnail || result.local_thumbnails?.[0] || null,
     video: taskDisplayUrl(task.id, result.local_video) || null,
     audio: result.local_audio || null,

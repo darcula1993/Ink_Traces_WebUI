@@ -4,6 +4,7 @@ import LayerOcrDetails from './LayerOcrDetails'
 import './layer-options.css'
 import {renderLayerDocument} from '../lib/layerExport'
 import {isSeedream55} from '../lib/imageGenerationRules'
+import LayerCostEstimate from './LayerCostEstimate'
 import { Group, Image as KonvaImage, Layer, Stage, Transformer } from 'react-konva'
 import {
   BoxSelect, Download, Eye, EyeOff, FolderOpen, GripVertical, ImagePlus,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react'
 import CodeRainCanvas from './CodeRainCanvas'
 import IconButton from './ui/IconButton'
+import Select from './ui/Select'
 import { CLIENT_IN_FLIGHT_TASK_STATUSES } from '../lib/taskStatus.js'
 
 // Server in-flight statuses plus the optimistic local "submitting" placeholder.
@@ -81,8 +83,8 @@ export default function LayerStudio({ notify }) {
   const [documentState, setDocumentState] = useState(EMPTY_DOCUMENT)
   const [prompt, setPrompt] = useState('')
   const [size, setSize] = useState('auto')
-  const [maxImages,setMaxImages]=useState(30),[recognize,setRecognize]=useState(false),[modern,setModern]=useState(false),[exporting,setExporting]=useState(false)
-  useEffect(()=>{let alive=true;axios.get('/api/provider').then(({data})=>{if(alive)setModern(isSeedream55(data.providers?.ark?.capability_model||data.providers?.ark?.model))}).catch(()=>{});return()=>{alive=false}},[])
+  const [maxImages,setMaxImages]=useState(30),[recognize,setRecognize]=useState(false),[modern,setModern]=useState(false),[modelKnown,setModelKnown]=useState(false),[exporting,setExporting]=useState(false)
+  useEffect(()=>{let alive=true;axios.get('/api/provider').then(({data})=>{if(alive){setModern(isSeedream55(data.providers?.ark?.capability_model||data.providers?.ark?.model));setModelKnown(true)}}).catch(()=>{});return()=>{alive=false}},[])
   const [sourceFile, setSourceFile] = useState(null)
   const [sourcePreview, setSourcePreview] = useState('')
   const [busy, setBusy] = useState(false)
@@ -128,7 +130,7 @@ export default function LayerStudio({ notify }) {
   }, [])
 
   useEffect(() => {
-    loadProjects().catch(() => notify?.('Layer Studio 项目加载失败', 'error'))
+    loadProjects().catch(() => notify?.('图层工作室项目加载失败', 'error'))
   }, [loadProjects, notify])
 
   useEffect(() => {
@@ -223,29 +225,32 @@ export default function LayerStudio({ notify }) {
     setDirty(true)
   }
 
-  const chooseSource = file => {
-    if (!file || !String(file.type).startsWith('image/')) return
+  // Loading a source stores it as a project right away (no task, no provider call),
+  // so it is listed and shown at once; decomposition is queued only on the button.
+  const chooseSource = async file => {
+    if (!file || !String(file.type).startsWith('image/') || busy) return
     if (sourcePreview?.startsWith('blob:')) URL.revokeObjectURL(sourcePreview)
     setSourceFile(file)
     setSourcePreview(URL.createObjectURL(file))
-  }
-
-  const createProject = async () => {
-    if (!sourceFile) return notify?.('请先添加需要分解的 PNG 或 JPEG 图片', 'error')
     setBusy(true)
     try {
       const data = new FormData()
-      data.append('image', sourceFile)
-      data.append('name', sourceFile.name.replace(/\.[^.]+$/, ''))
-      data.append('prompt', prompt)
-      data.append('size', size)
-      if(modern){data.append('max_images',String(maxImages));data.append('text_recognition',String(recognize))}
+      data.append('image', file)
+      data.append('name', file.name.replace(/\.[^.]+$/, ''))
+      data.append('decompose', '0')
       const response = await axios.post('/api/layer/projects', data)
+      await openProject(response.data.project_id, true)
+      history.current = []
+      future.current = []
+      setDirty(false)
+      setSaveState('saved')
+      setSourceFile(null)
+      setSourcePreview('')
       await loadProjects()
-      await openProject(response.data.project_id)
-      notify?.(`图层任务 #${response.data.task_id} 已创建`)
     } catch (error) {
-      notify?.(error.response?.data?.error || '图层任务创建失败', 'error')
+      setSourceFile(null)
+      setSourcePreview('')
+      notify?.(error.response?.data?.error || '源图片载入失败', 'error')
     } finally {
       setBusy(false)
     }
@@ -256,9 +261,10 @@ export default function LayerStudio({ notify }) {
     setBusy(true)
     try {
       const response = await axios.post(`/api/layer/projects/${project.id}/decompose`, { prompt, size, ...(modern?{max_images:maxImages,text_recognition:recognize}:{}) })
+      const first = !project.current_task
       await openProject(project.id, true)
       await loadProjects()
-      notify?.(`新的分解版本 #${response.data.task_id} 已创建`)
+      notify?.(first ? `图层任务 #${response.data.task_id} 已创建` : `新的分解版本 #${response.data.task_id} 已创建`)
     } catch (error) {
       notify?.(error.response?.data?.error || '重新分解失败', 'error')
     } finally {
@@ -308,7 +314,7 @@ export default function LayerStudio({ notify }) {
       <header className="layer-studio-commandbar liquid-glass">
         <div className="layer-project-identity">
           <BoxSelect size={16} className="text-nexus-cyan" />
-          <strong>{project?.name || 'Layer Studio'}</strong>
+          <strong>{project?.name || '图层工作室'}</strong>
           {project && <span className={`layer-save-state state-${saveState}`}><Save size={11} />{saveState === 'saving' ? '保存中' : saveState === 'error' ? '保存失败' : '已保存'}</span>}
         </div>
         <div className="layer-command-tools">
@@ -333,7 +339,7 @@ export default function LayerStudio({ notify }) {
           {projects.map(item => (
             <button key={item.id} type="button" className={project?.id === item.id ? 'active' : ''} onClick={() => openProject(item.id)}>
               <span>{item.name}</span>
-              <small>{ACTIVE_STATUSES.has(item.current_task?.status) ? '分解中' : item.current_task?.status === 'failed' ? '失败' : '项目'}</small>
+              <small>{ACTIVE_STATUSES.has(item.current_task?.status) ? '分解中' : item.current_task?.status === 'failed' ? '失败' : item.current_task ? '已分解' : '未分解'}</small>
             </button>
           ))}
         </div>
@@ -346,11 +352,11 @@ export default function LayerStudio({ notify }) {
                 await openProject(project.id)
                 notify?.(`已恢复到 V${project.revisions.length - index}`)
               }}>
-                <span>V{project.revisions.length - index}</span><small>{revision.size}</small>
+                <span>V{project.revisions.length - index}</span><small>{revision.size === 'auto' ? '自动' : revision.size}</small>
               </button>
             ))}
           </div>
-          <button type="button" className="layer-delete-project" onClick={deleteProject}><Trash2 size={13} />删除项目</button>
+          <button type="button" className="btn btn-ghost btn-danger layer-delete-project" onClick={deleteProject}><Trash2 size={13} />删除项目</button>
         </>}
       </aside>
 
@@ -367,13 +373,22 @@ export default function LayerStudio({ notify }) {
         onDragOver={event => { if (!project) event.preventDefault() }}
         onDrop={event => { if (!project) { event.preventDefault(); chooseSource(event.dataTransfer.files?.[0]) } }}
       >
-        {!project ? (
+        {!project && sourcePreview ? (
+          <div className="layer-source-stage" data-testid="layer-source-stage">
+            <img src={sourcePreview} alt={sourceFile ? `源图 ${sourceFile.name}` : '源图'} />
+            <div className="layer-source-status" role="status">正在载入源图…</div>
+          </div>
+        ) : !project ? (
           <label className="layer-studio-empty" data-testid="layer-source-drop-zone">
-            {sourcePreview ? <img src={sourcePreview} alt="待分解源图" /> : <ImagePlus size={34} />}
-            <strong>{sourceFile ? sourceFile.name : '添加一张源图片'}</strong>
+            <ImagePlus size={34} />
+            <strong>添加一张源图片</strong>
             <span>PNG / JPEG · 512×512 至 6000×6000</span>
-            <input type="file" accept="image/png,image/jpeg" onChange={event => chooseSource(event.target.files?.[0])} />
+            <input type="file" accept="image/png,image/jpeg" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = '' }} />
           </label>
+        ) : !currentTask && documentState.layers.length === 0 ? (
+          <div className="layer-source-stage" data-testid="layer-source-stage">
+            <img src={`/api/layer/projects/${project.id}/source`} alt={`源图 ${project.source_name || project.name}`} />
+          </div>
         ) : processing ? (
           <div className="layer-processing-stage">
             <img src={`/api/layer/projects/${project.id}/source`} alt="正在分解的源图" />
@@ -455,21 +470,22 @@ export default function LayerStudio({ notify }) {
             </div>
             <LayerOcrDetails value={selectedLayer.text_recognition} notify={notify}/>
             {selectedLayer.description && <p>{selectedLayer.description}</p>}
-            {!selectedLayer.locked && <button type="button" className="layer-property-delete" onClick={() => commit(current => ({ ...current, layers: current.layers.filter(layer => layer.id !== selectedLayer.id), selected_layer_id: null }))}><Trash2 size={13} />删除图层</button>}
+            {!selectedLayer.locked && <button type="button" className="btn btn-ghost btn-danger layer-property-delete" onClick={() => commit(current => ({ ...current, layers: current.layers.filter(layer => layer.id !== selectedLayer.id), selected_layer_id: null }))}><Trash2 size={13} />删除图层</button>}
           </> : <div className="layer-properties-empty">选择一个图层</div>}
         </div>
       </aside>
 
       <footer className={`layer-prompt-dock liquid-glass-strong ${modern?'layer-prompt-modern':''}`}>
-        <div className="layer-prompt-title"><Sparkles size={14} />DECOMPOSE PROMPT</div>
+        <div className="layer-prompt-title"><Sparkles size={14} />分解提示词</div>
         <textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述需要如何拆分主体、文字、前景与背景..." aria-label="图层分解提示词" />
-        {modern&&<><label>最大输出数（含底图）<input aria-label="最大输出数" type="number" min="2" max="100" step="1" value={maxImages} onChange={e=>setMaxImages(e.target.value===''?'':Number(e.target.value))}/></label><label><input aria-label="识别文字" type="checkbox" checked={recognize} onChange={e=>setRecognize(e.target.checked)}/>识别文字</label></>}
-        <select value={size} onChange={event => setSize(event.target.value)} aria-label="图层分解分辨率">
-          <option value="auto">Auto</option><option value="1K">1K</option><option value="1.5K">1.5K</option><option value="2K">2K</option>
-        </select>
-        <button type="button" className="btn btn-primary btn-lg" disabled={busy || processing || (modern&&(!Number.isInteger(maxImages)||maxImages<2||maxImages>100)) || (!project && !sourceFile)} onClick={project ? decomposeAgain : createProject}>
-          <Sparkles size={14} />{processing ? '分解中' : project ? '创建新版本' : '分解图层'}
-        </button>
+        {modern&&<><label className="layer-dock-field"><span>最大输出数（含底图）</span><input aria-label="最大输出数" type="number" min="2" max="100" step="1" value={maxImages} onChange={e=>setMaxImages(e.target.value===''?'':Number(e.target.value))}/></label><label className="layer-dock-check"><input aria-label="识别文字" type="checkbox" checked={recognize} onChange={e=>setRecognize(e.target.checked)}/><span>识别文字</span></label></>}
+        <Select className="layer-size-select" value={size} onChange={setSize} ariaLabel="图层分解分辨率" options={[{ value: 'auto', label: '自动' }, '1K', '1.5K', '2K']} />
+        <div className="layer-decompose-action">
+          <button type="button" className="btn btn-primary btn-lg" disabled={busy || processing || (modern&&(!Number.isInteger(maxImages)||maxImages<2||maxImages>100)) || !project} onClick={decomposeAgain}>
+            <Sparkles size={14} />{processing ? '分解中' : project?.current_task ? '创建新版本' : '分解图层'}
+          </button>
+          <LayerCostEstimate modern={modern} modelKnown={modelKnown} size={size} />
+        </div>
       </footer>
     </section>
   )

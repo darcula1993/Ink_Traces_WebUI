@@ -1,5 +1,6 @@
 """SQL filtering/counting/pagination; never materialize all task details in Python."""
 import json
+import sqlite3
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -101,6 +102,15 @@ def select_all(args):
     return {'success': True, 'items': result['items'], 'total': result['total']}
 
 
+def character_refs(db, local_id):
+    """Characters currently referencing a 本地素材 item (display-only source marker, FIX-B1B-20261114)."""
+    try:
+        return [{'id':r['id'],'name':r['name']} for r in db.execute(
+            'SELECT DISTINCT c.id,c.name FROM character_media m JOIN characters c ON c.id=m.character_id WHERE m.local_id=? ORDER BY c.name,c.id',(local_id,))]
+    except sqlite3.OperationalError:
+        return []  # character tables not initialised (isolated tools/tests)
+
+
 def _query(args, max_limit=100):
     from canvas_catalog import SOURCES, KINDS
     source,scope,kind=args.get('source','local'),args.get('scope','project'),args.get('kind') or None
@@ -152,5 +162,6 @@ def _query(args, max_limit=100):
                      'created_at':row['created_at'],'origins':json.loads(row['effective_origins']),'origin_unknown':bool(row['origin_unknown']),
                      'folder_id':row['folder_id'],'tags':tags_for(row['key']),'task_id':row['task_id'],
                      'available':bool(available(row['path'],row['source'])),
+                     'characters':character_refs(db,row['id']) if row['source']=='local' else [],
                      'thumbnail_url':task_thumbnail(row,db) or (f"/api/canvas/library/items/{row['key']}/thumbnail" if row['kind']=='image' else None)})
     return {'success':True,'items':page,'total':counts[source],'counts':counts,'source_counts':counts,'kind_counts':kind_counts,'limit':limit,'offset':offset}

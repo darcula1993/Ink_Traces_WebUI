@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AudioLines, Film, Image as ImageIcon, X } from 'lucide-react'
 import IconButton from './ui/IconButton'
+import useModalFocus, { isTopModal } from './ui/useModalFocus'
 
 const MEDIA_LABELS = {
   image: '参考图片预览',
@@ -32,11 +33,14 @@ export default function ReferenceMediaModal({ media, onClose }) {
   useEffect(() => {
     if (!media) return undefined
     const handleKeyDown = event => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && isTopModal(dialogRef)) onClose()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [media, onClose])
+
+  const dialogRef = useRef(null)
+  useModalFocus(dialogRef, Boolean(media))
 
   const type = media?.type || 'image'
   const source = media?.src || media?.preview || objectUrl
@@ -54,6 +58,8 @@ export default function ReferenceMediaModal({ media, onClose }) {
           onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
         >
           <motion.section
+            ref={dialogRef}
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label={label}

@@ -2,7 +2,7 @@
 // Each one later becomes its own real task; nothing chains to downstream nodes.
 import {resolveNodeInputs} from './canvasReferences.js'
 import {BUSY_TASK_STATUSES} from './taskStatus.js'
-import {estimateBytePlusVideoCost} from './byteplusPricing.js'
+import {estimateBytePlusVideoCost,estimateImageParamsCost} from './byteplusPricing.js'
 import {effectiveVideoModel,videoRatio,videoParameterError} from './videoGenerationRules.js'
 
 const GENERATION = new Set(['image', 'video', 'audio'])
@@ -10,7 +10,11 @@ const BUSY = new Set(BUSY_TASK_STATUSES)
 
 // Returns {known:true,min,max} or {known:false,reason}. Never a zero for unknown prices.
 export function estimateNodeCost(node, provider, references = []) {
-  if (node.type !== 'video') return { known: false, reason: `暂无${node.type === 'image' ? '图像' : '音频'}接口价格资料` }
+  if (node.type === 'image') {
+    const image = estimateImageParamsCost({ provider, params: node.params || {}, references })
+    return image.known ? { known: true, min: image.min, max: image.max, assumed: image.assumed } : { known: false, reason: image.reason }
+  }
+  if (node.type !== 'video') return { known: false, reason: '暂无音频接口价格资料' }
   if (!provider) return { known: false, reason: '接口未配置' }
   const params = node.params || {}, model = effectiveVideoModel(params.model, provider.models)
   if (!provider.models?.some(item => item.id === model)) return { known: false, reason: '接口不支持此模型' }
@@ -43,10 +47,14 @@ export function batchRunPlan(document, ids, { providerFor, isUnknownResult = () 
   return { ready, skipped, total: summarizeCosts(ready.map(item => item.cost)) }
 }
 
+// FIX-B2B-20261114: three decimals, so small image prices (e.g. $0.028) never read as $0.00.
+export const formatUsd = value => `$${Number(value).toFixed(3)}`
+export const formatCostRange = (min, max) => formatUsd(min) === formatUsd(max) ? formatUsd(min) : `${formatUsd(min)}~${formatUsd(max)}`
+
 export function summarizeCosts(costs) {
   const known = costs.filter(cost => cost.known), unknown = costs.length - known.length
   const min = known.reduce((sum, cost) => sum + cost.min, 0), max = known.reduce((sum, cost) => sum + cost.max, 0)
-  const range = !known.length ? '' : min.toFixed(2) === max.toFixed(2) ? `$${min.toFixed(2)}` : `$${min.toFixed(2)}~$${max.toFixed(2)}`
+  const range = !known.length ? '' : formatCostRange(min, max)
   const text = !known.length ? '费用待估' : `${range} USD${unknown ? ` + ${unknown} 个节点费用待估` : ''}`
   return { knownCount: known.length, unknownCount: unknown, min, max, text }
 }

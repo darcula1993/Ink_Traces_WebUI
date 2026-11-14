@@ -15,7 +15,8 @@ from billing_support import (  # noqa: F401  (fixtures)
     ACCEPTED_ID, Response, billing_env, posts, submit_video,
 )
 
-CASES = json.loads((Path(__file__).parent / 'data' / 'cost_estimate_parity.json').read_text())
+CASES = [case for case in json.loads((Path(__file__).parent / 'data' / 'cost_estimate_parity.json').read_text())
+         if case.get('kind', 'video') == 'video']  # image cases: test_image_cost.py
 
 
 @pytest.mark.parametrize('case', CASES, ids=[case['name'] for case in CASES])
@@ -82,7 +83,9 @@ def test_ledger_groups_project_workflow_node_type_and_date(monkeypatch):
     assert tasks[video]['node_id'] == 'v1' and tasks[video]['project_id'] == project['id']
     for task_id in (image, audio, legacy_image):
         assert tasks[task_id]['estimate_usd'] is None
-        assert tasks[task_id]['unknown_reason'] == 'no_price_data'
+    # Audio has no price data; images without a resolvable size cannot be derived (IMAGE-COST-20261114).
+    assert tasks[audio]['unknown_reason'] == 'no_price_data'
+    assert tasks[image]['unknown_reason'] == tasks[legacy_image]['unknown_reason'] == 'no_estimate_snapshot'
     assert tasks[legacy]['project_id'] == '__unassigned__'
 
     totals = data['totals']['billable']

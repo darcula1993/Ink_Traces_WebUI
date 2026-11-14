@@ -662,3 +662,6 @@
 .canvas-studio .cv-edge.cv-edge-preview { stroke: var(--cv-focus); stroke-dasharray: 6 5; pointer-events: none; }
 .canvas-studio .cv-node.is-drop-target { outline: 2px dashed var(--cv-focus); outline-offset: 3px; }
 .canvas-studio .cv-port-out { cursor: crosshair; touch-action: none; }
+
+/* Informational overlap notice: neutral, parked at the top so it never covers node panel price/generate. */
+.canvas-studio .cv-alert.cv-alert-info{top:12px;bottom:auto;background:var(--cv-glass-solid);border-color:var(--cv-border);color:var(--cv-secondary)}

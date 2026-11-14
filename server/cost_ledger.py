@@ -134,12 +134,18 @@ def _entry(task, db, projects, workflows, node_by_task, offset):
         'unknown_reason': reason,
         'unknown_reason_label': cost_estimate.UNKNOWN_REASONS.get(reason) if reason else None,
         'basis': estimate.get('basis'),
+        'assumption': estimate.get('assumption') if known else None,
         'assumptions': {
             'ratio_assumed': estimate.get('ratio_assumed'),
             'input_duration_assumed': estimate.get('input_duration_assumed'),
             'input_video_seconds': estimate.get('input_video_seconds'),
             'output_seconds': [estimate.get('minimum_output_seconds'), estimate.get('maximum_output_seconds')],
             'promotion_active': estimate.get('promotion_active'),
+            'image_size': [estimate.get('width'), estimate.get('height')] if task.get('type') == 'image' else None,
+            'size_assumed': estimate.get('size_assumed'),
+            'reference_image_count': estimate.get('reference_count'),
+            'output_count': estimate.get('output_count'),
+            'below_floor_layers': estimate.get('below_floor_layers'),
         } if known else None,
     }
 
@@ -211,7 +217,8 @@ def build_ledger(project_id=None, workflow_id=None, date_from=None, date_to=None
 
     return {
         'success': True, 'disclaimer': DISCLAIMER, 'currency': 'USD',
-        'formula': 'byteplus-seedance-tokens-v%d' % cost_estimate.FORMULA_VERSION,
+        'formula': 'byteplus-seedance-tokens-v%d+byteplus-image-v%d' % (
+            cost_estimate.FORMULA_VERSION, cost_estimate.IMAGE_FORMULA_VERSION),
         'bucket_labels': BUCKET_LABELS, 'unknown_reason_labels': cost_estimate.UNKNOWN_REASONS,
         'filters': {'project_id': project_id, 'workflow_id': workflow_id,
                     'from': date_from.isoformat() if date_from else None,

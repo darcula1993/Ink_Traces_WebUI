@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom'
 import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, Heart, Image as ImageIcon, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import IconButton from '../ui/IconButton'
+import useModalFocus, { isTopModal } from '../ui/useModalFocus'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, providerLabel, downloadExtension, uniqueDownloadName, taskDownloadUrl } from './taskModel.js'
 import { AudioArtwork, TaskPreview } from './TaskPreview.jsx'
 
@@ -73,9 +74,11 @@ export function CompareMedia({ item, zoom }) {
 
 export function TaskCompareModal({ items, onClose, onReuse }) {
   const [zoom, setZoom] = useState(1)
+  const dialogRef = useRef(null)
+  useModalFocus(dialogRef)
   useEffect(() => {
     const onKeyDown = event => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && isTopModal(dialogRef)) onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -93,6 +96,8 @@ export function TaskCompareModal({ items, onClose, onReuse }) {
       onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
     >
       <motion.section
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="任务对比"
@@ -216,6 +221,10 @@ export function TaskDetailModal({
   const backdropRef = useRef(null)
   const downloadMenuRef = useRef(null)
   const dragControls = useDragControls()
+  const dialogRef = useRef(null)
+  const referenceRef = useRef(null)
+  useModalFocus(dialogRef)
+  useModalFocus(referenceRef, referenceIndex !== null)
   useEffect(() => {
     setOutputIndex(0)
     setReferenceIndex(null)
@@ -247,7 +256,7 @@ export function TaskDetailModal({
         }
         return
       }
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape' && isTopModal(dialogRef)) onClose()
       if (event.key === 'ArrowLeft') onPrevious()
       if (event.key === 'ArrowRight') onNext()
     }
@@ -285,6 +294,8 @@ export function TaskDetailModal({
       onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
     >
       <motion.section
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="任务详情"
@@ -347,20 +358,26 @@ export function TaskDetailModal({
                 ))}
               </dl>
             </section>
-            {item.type === 'image' && item.sourceUrls?.length > 0 && (
-              <section className="border-b border-white/8 p-4">
-                <div className="mb-3 text-xs font-semibold text-nexus-text-light">端点图像 URL</div>
+            {item.type === 'image' && item.remoteHosts?.length > 0 && (
+              <section className="border-b border-white/8 p-4" data-testid="task-remote-results">
+                <div className="mb-1 text-xs font-semibold text-nexus-text-light">远端结果</div>
+                <p className="mb-3 text-xs leading-5 text-nexus-muted">供应商临时地址含签名，不在此展示；复制得到本地结果链接。</p>
                 <div className="space-y-2">
-                  {item.sourceUrls.map((url, index) => (
-                    <div key={`${url}-${index}`} className="flex min-w-0 items-start gap-2 rounded border border-white/8 bg-black/20 p-2">
-                      <a href={url} target="_blank" rel="noreferrer" title={url} className="min-w-0 flex-1 break-all font-mono text-xs leading-4 text-nexus-cyan hover:text-white">
-                        {url}
-                      </a>
-                      <button type="button" aria-label={`复制端点图像 URL ${index + 1}`} title="复制 URL" onClick={() => navigator.clipboard?.writeText(url)} className="btn btn-icon btn-sm shrink-0">
-                        <Copy size={12} />
-                      </button>
-                    </div>
-                  ))}
+                  {item.remoteHosts.map((host, index) => {
+                    const localUrl = item.images?.[index] ? new URL(item.images[index], window.location.origin).href : ''
+                    return (
+                      <div key={`${host}-${index}`} className="flex min-w-0 items-center gap-2 rounded border border-white/8 bg-black/20 p-2">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs leading-4 text-nexus-text-light" title={host ? `远端结果 ${index + 1}：${host}` : `远端结果 ${index + 1}`}>
+                          {host || '远端结果'}
+                        </span>
+                        {localUrl && (
+                          <button type="button" aria-label={`复制本地结果链接 ${index + 1}`} title="复制本地结果链接" onClick={() => navigator.clipboard?.writeText(localUrl)} className="btn btn-icon btn-sm shrink-0">
+                            <Copy size={12} />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </section>
             )}
@@ -474,6 +491,8 @@ export function TaskDetailModal({
             }}
           >
             <motion.section
+              ref={referenceRef}
+              tabIndex={-1}
               role="dialog"
               aria-modal="true"
               aria-label="参考素材预览"

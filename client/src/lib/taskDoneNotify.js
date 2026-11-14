@@ -54,6 +54,11 @@ export function completionNotices({ patches, document, workflowId, notified, eli
   return notices
 }
 
+// FIX-B2B-20261114: visible milliseconds before a reminder dismisses itself. Failures and
+// unknown results stay longer (the node keeps showing its state either way).
+export const NOTICE_LIFETIME = Object.freeze({ succeeded: 8000, cancelled: 8000, failed: 15000, unknown: 15000 })
+export const noticeLifetime = kind => NOTICE_LIFETIME[kind] || NOTICE_LIFETIME.succeeded
+
 // Newest first, at most MAX_NOTICES kept.
 export function mergeNotices(current, added, limit = MAX_NOTICES) {
   if (!added.length) return current

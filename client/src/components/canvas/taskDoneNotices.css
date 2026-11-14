@@ -1,10 +1,12 @@
-/* TASK-DONE-NOTIFY-20261114: completion reminders, bottom-right of the canvas surface. */
-.canvas-studio .cv-done-notices{position:absolute;right:16px;bottom:18px;z-index:9;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:min(360px,calc(100% - 32px));pointer-events:none}
+/* TASK-DONE-NOTIFY-20261114: completion reminders. FIX-B2B-20261114: moved to the top-right of the canvas
+   surface and below the node panel layer (z 8), so a reminder never covers the cost estimate or generate button. */
+.canvas-studio .cv-done-notices{position:absolute;right:16px;top:62px;z-index:7;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:min(360px,calc(100% - 32px));pointer-events:none}
 .canvas-studio .cv-done-list{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 .canvas-studio .cv-done-notice,.canvas-studio .cv-done-ask{pointer-events:auto;display:flex;align-items:center;gap:4px;background:var(--cv-popover-solid);border:1px solid var(--cv-border);border-radius:8px;box-shadow:var(--cv-glass-shadow);color:var(--cv-text);font-size:13px;animation:cv-done-in 160ms ease-out}
 .canvas-studio .cv-done-notice{padding:4px 4px 4px 0}
 .canvas-studio .cv-done-main{display:flex;align-items:center;gap:8px;min-width:0;padding:4px 8px 4px 12px;background:none;border:0;border-radius:6px;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .canvas-studio .cv-done-main span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.canvas-studio .cv-done-task{flex:none;color:var(--cv-secondary);font-size:12px;font-variant-numeric:tabular-nums}
 .canvas-studio .cv-done-main:hover{background:var(--cv-green-hover)}
 .canvas-studio .cv-done-main:focus-visible,.canvas-studio .cv-done-close:focus-visible{outline:2px solid var(--cv-focus);outline-offset:1px}
 .canvas-studio .cv-done-close{display:grid;place-items:center;width:24px;height:24px;flex:none;background:none;border:0;border-radius:6px;color:var(--cv-secondary);cursor:pointer}

@@ -33,3 +33,5 @@
    ellipsizes first; both keep their full name in title. */
 .canvas-studio .cv-sidebar-breadcrumb .cv-sidebar-workflow{flex:0 0 auto;max-width:50%}
 .canvas-studio .cv-sidebar-breadcrumb .cv-project-name{flex:0 1 auto;min-width:3em}
+/* Canvas sidebar danger items share the .btn-danger colour token. */
+.cv-sidebar-menu button.is-danger:where(:not(.btn)),.canvas-studio .cv-sidebar-menu button.is-danger:where(:not(.btn)){color:var(--btn-danger-text)!important}

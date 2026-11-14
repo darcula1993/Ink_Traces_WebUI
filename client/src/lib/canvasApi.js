@@ -3,7 +3,7 @@ import axios from 'axios'
 import {normalizeSavedWorkflow} from './canvasTaskPolling.js'
 import {resolveNodeInputs} from './canvasReferences.js'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
-import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue } from './generationSettings.js'
+import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue, videoModelLabel } from './generationSettings.js'
 import {nodeProvider,selectionKey,normalizeProviderPreferences} from './canvasProviderSelection.js'
 
 import {effectiveVideoModel,videoCapabilities,videoRatio,videoParameterError} from './videoGenerationRules.js'
@@ -23,6 +23,22 @@ export const getCanvasWorkflow = async id => (await data(axios.get(workflowUrl(i
 // write-backs is merged by the server and answered with {merged:true, revision, document}
 // (accepted at the top level or inside `workflow`).
 export const saveCanvasWorkflow = async (id, value) => normalizeSavedWorkflow(id, await data(axios.put(workflowUrl(id), value)))
+// FIX-B2-20261114 #2: page-exit flush. The same PUT as saveCanvasWorkflow (same body, same revision), sent
+// with fetch keepalive so the browser completes it after pagehide. Bodies over KEEPALIVE_MAX_BYTES are not
+// accepted by browsers for keepalive; the caller then keeps the regular save path.
+export const KEEPALIVE_MAX_BYTES = 60 * 1024
+export const keepaliveBodyFits = body => new Blob([body]).size <= KEEPALIVE_MAX_BYTES
+export async function saveCanvasWorkflowKeepalive(id, body) {
+  const response = await fetch(workflowUrl(id), { method: 'PUT', body, keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' } })
+  let result = null
+  try { result = await response.json() } catch { result = null }
+  if (!response.ok) {
+    const error = new Error(result?.error || `保存失败（${response.status}）`)
+    error.status = response.status; error.response = { status: response.status, data: result }
+    throw error
+  }
+  return normalizeSavedWorkflow(id, result || {})
+}
 // D: idempotent compensation; the server writes terminal results into the document
 // (no Provider call) and returns {revision, nodes:{node_id: written-back fields}}.
 export const TASK_SYNC_BATCH = 100
@@ -77,7 +93,7 @@ export async function getCanvasCapabilities() {
   const available = info => Object.entries(info.providers || {}).filter(([, value]) => value.available)
   const legacy = {
     image: available(image).map(([id, p]) => ({ id, provider: id, name: `${p.name || id}（原配置）`, model: p.model, capability_model: p.capability_model })),
-    video: available(video).map(([id, p]) => ({ id, provider: id, name: `${id === 'ark' ? 'BytePlus Ark' : 'Cupsy'}（原配置）`, models: (p.models || []).map(model => ({ id: model, name: model })) })),
+    video: available(video).map(([id, p]) => ({ id, provider: id, name: `${id === 'ark' ? 'BytePlus Ark' : 'Cupsy'}（原配置）`, models: (p.models || []).map(model => ({ id: model, name: videoModelLabel(model) })) })),
     audio: available(audio).map(([id, p]) => ({ id, provider: id, name: 'Cupsy（原配置）', model: p.models?.[0] || CUPSY_AUDIO_MODEL })),
   }
   const profiles = (saved.profiles || []).filter(p => p.enabled && p.has_api_key).sort((a, b) => Number(b.is_default) - Number(a.is_default))
@@ -87,7 +103,7 @@ export async function getCanvasCapabilities() {
       name: `${p.name}${p.is_default ? ' · 默认' : ''}`, revision: p.revision,
       capability_model: p.adapter==='ark' && p.settings.model===image.providers?.ark?.model ? image.providers.ark.capability_model : p.settings.model,
       model: kind === 'video' ? (p.adapter === 'cupsy' ? p.settings.model || 'seedance-2.5' : 'seedance-2.0') : p.settings.model || (kind === 'audio' ? CUPSY_AUDIO_MODEL : image.providers?.[p.adapter]?.model),
-      ...(kind === 'video' ? { models: (video.providers?.[p.adapter]?.models || (p.adapter === 'cupsy' ? ['seedance-2.5', 'seedance-2.5-moderated'] : ['seedance-2.0', 'seedance-2.5'])).map(id => ({ id, name: id })) } : {}),
+      ...(kind === 'video' ? { models: (video.providers?.[p.adapter]?.models || (p.adapter === 'cupsy' ? ['seedance-2.5', 'seedance-2.5-moderated'] : ['seedance-2.0', 'seedance-2.5'])).map(id => ({ id, name: videoModelLabel(id) })) } : {}),
     })), ...legacy[kind],
   ]]))
 }

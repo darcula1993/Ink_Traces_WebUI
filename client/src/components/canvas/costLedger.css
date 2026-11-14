@@ -39,3 +39,6 @@
 .cv-ledger-error{color:var(--danger)}
 .cv-ledger-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (max-width:1400px){.cv-ledger-summary{grid-template-columns:repeat(4,minmax(0,1fr))}.cv-ledger-card.is-main{grid-column:span 4}}
+/* FIX-B3B: detail place column and not-billed counts. */
+.cv-ledger-place{display:inline-block;max-width:220px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.cv-ledger-count{color:var(--text-3);font-size:var(--fs-caption)}

@@ -1,6 +1,7 @@
 import {uploadBatch,uploadSummary} from './uploadBatch'
 import {useCallback,useEffect,useRef,useState} from 'react'
 import axios from 'axios'
+import askConfirm from '../ui/askConfirm'
 export const CUPSY_PAGE_SIZE=30
 const terminal=new Set(['active','failed','deleted'])
 export const cupsyLibraryItem=asset=>({key:`cupsy:${asset.id}`,selection:{source:'cupsy',id:String(asset.id)},asset:{id:String(asset.id),name:asset.name||`Asset ${asset.id}`,kind:asset.kind,url:asset.content_url,mime_type:asset.mime_type,size_bytes:asset.size_bytes},thumbnail_url:asset.thumbnail_url,available:asset.status==='active',remote:asset})
@@ -17,6 +18,6 @@ export default function useCupsyLibrary({kind,query}){
  function toggle(asset){if(lock.current)return;setError('');setSelected(current=>current.some(a=>a.id===asset.id)?current.filter(a=>a.id!==asset.id):[...current,asset])}
  async function selectAll(){await run(async()=>{const data=await request(filters);if(data)setSelected(data.assets||[])})}
  async function upload(files){await run(async()=>{const result=await uploadBatch(files,async file=>{const body=new FormData();body.append('file',file);await axios.post('/api/cupsy/assets',body,{timeout:300000})});setNotice(uploadSummary(result));if(files.length){setOffset(0);setRevision(v=>v+1)}if(result.error)throw result.error})}
- async function remove(items=selected){if(!items.length||!window.confirm(`永久删除选中的 ${items.length} 个 Cupsy 远端素材？此操作无法撤销，本地素材与画布副本保留。`))return;await run(async()=>{const removed=new Set(),failed=[];try{for(let i=0;i<items.length;i+=100){const {data}=await axios.post('/api/cupsy/assets/bulk-delete',{ids:items.slice(i,i+100).map(a=>a.id)},{timeout:600000});for(const id of [...data.deleted_ids||[],...data.missing_ids||[]])removed.add(Number(id));failed.push(...data.failed||[])}if(failed.length)throw new Error(`${removed.size} 个已移除，${failed.length} 个删除失败，请重试`);setNotice(`已删除 ${removed.size} 个远端素材`)}finally{setSelected(current=>current.filter(a=>!removed.has(a.id)));setOffset(0);setRevision(v=>v+1)}})}
+ async function remove(items=selected){if(!items.length||!await askConfirm({title:'删除 Cupsy 远端素材',message:`永久删除选中的 ${items.length} 个 Cupsy 远端素材？此操作无法撤销，本地素材与画布副本保留。`,confirmLabel:'永久删除',danger:true}))return;await run(async()=>{const removed=new Set(),failed=[];try{for(let i=0;i<items.length;i+=100){const {data}=await axios.post('/api/cupsy/assets/bulk-delete',{ids:items.slice(i,i+100).map(a=>a.id)},{timeout:600000});for(const id of [...data.deleted_ids||[],...data.missing_ids||[]])removed.add(Number(id));failed.push(...data.failed||[])}if(failed.length)throw new Error(`${removed.size} 个已移除，${failed.length} 个删除失败，请重试`);setNotice(`已删除 ${removed.size} 个远端素材`)}finally{setSelected(current=>current.filter(a=>!removed.has(a.id)));setOffset(0);setRevision(v=>v+1)}})}
  return {assets,total,counts,offset,setOffset,loading,busy,sourceReady,selected,setSelected,queryError,pollError,error,setError,notice,run,toggle,selectAll,upload,remove,filterChanged,refresh:()=>{setError('');setRevision(v=>v+1)}}
 }

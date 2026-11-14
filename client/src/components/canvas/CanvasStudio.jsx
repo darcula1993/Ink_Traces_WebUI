@@ -13,8 +13,9 @@ import CanvasSidebar from './CanvasSidebar'
 import SidebarNameDialog from './SidebarNameDialog'
 import CanvasShortcutHelp,{canvasModifier} from './CanvasShortcutHelp'
 import {CanvasEditHistory,copyCanvasSelection,pasteCanvasSelection,duplicateCanvasNode} from '../../lib/canvasEditHistory'
-import {freeNodePosition} from '../../lib/canvasPlacement'
-import {readLastLocation,writeLastLocation,pickLastLocation} from '../../lib/canvasLastLocation'
+import {freeNodePosition,freeNodePositionInView} from '../../lib/canvasPlacement'
+import {readRememberedLocation,writeLastLocation,resolveCanvasLocation,MISSED_LOCATION_MESSAGE} from '../../lib/canvasLastLocation'
+import {writeDraft,readDraft,clearDraft,draftIncluded,mergeDraftDocument} from '../../lib/canvasDraftBackup'
 import PendingDeletions from './PendingDeletions'
 import AssetImageToolbar from './AssetImageToolbar'
 import CanvasNodeMenu from './CanvasNodeMenu'
@@ -29,11 +30,11 @@ import {assetPanelPlacement} from './assetPanelPlacement'
 import CanvasContextMenu from './CanvasContextMenu'
 import {reorderNodeReferences,reconcileReferenceMentions} from '../../lib/canvasReferenceOrder'
 import { canConnect, resolveNodeInputs, mediaKind } from '../../lib/canvasReferences'
-import { NODE_WIDTH, NODE_HEIGHT, nodeGeometry, overlapsNode, generationPanelPlacement, fitViewport, LOD_ZOOM } from './canvasGeometry'
+import { NODE_WIDTH, NODE_HEIGHT, nodeGeometry, overlapsNode, generationPanelPlacement, fitViewport, LOD_ZOOM, editorPanelSize } from './canvasGeometry'
 import CanvasNodePanel from './CanvasNodePanel'
 import CanvasLibrary from './CanvasLibrary'
 import {resolveLibraryItems} from '../../lib/libraryApi'
-import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, uploadCanvasMedia, getCanvasCapabilities, submitCanvasGeneration, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, resolveCanvasReferences, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject } from '../../lib/canvasApi'
+import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, uploadCanvasMedia, getCanvasCapabilities, submitCanvasGeneration, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, resolveCanvasReferences, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject } from '../../lib/canvasApi'
 import './canvas.css'
 import ResizableSidebar from './ResizableSidebar'
 import ConfirmDialog from '../ui/ConfirmDialog'
@@ -42,7 +43,7 @@ import './canvasTheme.css'
 import './canvasNodeMedia.css'
 import {collectTaskUpdates,applyTaskUpdates,taskSyncPatches,mergeSavedDocument,sameServerDocument} from '../../lib/canvasTaskPolling'
 import {isActiveTaskStatus,isBusyTaskStatus,isFailureTaskStatus,isServerTaskStatus,documentTask,sanitizeDocumentTasks,INVALID_STATUS_LABEL} from '../../lib/taskStatus'
-import {batchRunPlan} from '../../lib/canvasBatchRun'
+import {batchRunPlan,formatCostRange} from '../../lib/canvasBatchRun'
 import {referenceDropError} from '../../lib/canvasReferenceDrop'
 import {PROJECT_ASSET_DRAG} from './AssetTree'
 import {clipboardFiles} from '../../lib/canvasClipboard'
@@ -57,10 +58,17 @@ const labels = { text: '文本', image: '画面生成', video: '视频生成', a
 const activeTask = isActiveTaskStatus
 // CANVAS-INPUT-20261114 #7a: wheel/buttons zoom up to 800%; double-click frames a node at 300% (less when it would not fit).
 export const MAX_ZOOM = 8, FOCUS_ZOOM = 3, FOCUS_FILL = .9, FOCUS_MS = 350
+// FIX-B2-20261114 #3 (replaces centring the node in 90% of the surface): the focused node is selected, so its
+// editor panel (always below the node) and the bottom bars are reserved; the node is framed above them,
+// centred horizontally, at 300% or less, and never covered.
+export const FOCUS_PANEL_GAP = 12, FOCUS_BOTTOM_BAR = 72, FOCUS_MARGIN = 16
+export function focusPanelHeight(node, size) { return node.type === 'asset' ? 100 : editorPanelSize(size).height }
 export function focusViewport(node, size) {
   const {width, height} = nodeGeometry(node)
-  const zoom = Math.min(FOCUS_ZOOM, FOCUS_FILL * size.width / width, FOCUS_FILL * size.height / height)
-  return { zoom, x: size.width / 2 - (node.x + width / 2) * zoom, y: size.height / 2 - (node.y + height / 2) * zoom }
+  const panel = focusPanelHeight(node, size), top = FOCUS_MARGIN, bottom = size.height - FOCUS_BOTTOM_BAR
+  const zoom = Math.max(.2, Math.min(FOCUS_ZOOM, FOCUS_FILL * size.width / width, (bottom - top - panel - FOCUS_PANEL_GAP) / height))
+  const group = height * zoom + FOCUS_PANEL_GAP + panel, nodeTop = top + Math.max(0, (bottom - top - group) / 2)
+  return { zoom, x: size.width / 2 - (node.x + width / 2) * zoom, y: nodeTop - node.y * zoom }
 }
 // TASK-DONE-NOTIFY-20261114: while the page is hidden, active tasks are still polled (same requests) at this slower cadence so completion reminders can reach a background tab.
 export const HIDDEN_POLL_MS = 30000
@@ -111,6 +119,8 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const [pollWarning,setPollWarning]=useState(null),[alertDismissed,setAlertDismissed]=useState(null),[statusAnomalies,setStatusAnomalies]=useState(null)
   const [unknownTasks,setUnknownTasks]=useState(()=>new Set()),[generateConfirm,setGenerateConfirm]=useState(null),[batchPlan,setBatchPlan]=useState(null)
   const [conflict, setConflict] = useState(false)
+  // FIX-B2 rework: unsaved local draft found when opening a canvas ({draft, newer}); offered, never applied automatically.
+  const [draftOffer, setDraftOffer] = useState(null)
   const [loading, setLoading] = useState(true)
   const [capabilities, setCapabilities] = useState({ image: [], video: [], audio: [] })
   // Last interface chosen per node type (server workspace state); preselects new generation nodes.
@@ -166,16 +176,30 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     finally { setBusy(false) }
   }
 
-  const save = useCallback(() => {
-    const operation = queue.current.catch(() => {}).then(async () => {
+  // FIX-B2-20261114 #2: saves run one at a time through `queue`; when idle, the request starts synchronously
+  // so a page-exit flush ({keepalive:true}) is on the wire before pagehide returns. keepaliveVersion is the
+  // version a keepalive request in flight already carries.
+  const queuedSaves = useRef(0), keepaliveVersion = useRef(-1)
+  // FIX-B2 rework (B2-FLUSH-1/2): lastSaveFailed keeps the leave prompt after a failed save; backupDraft keeps
+  // unsaved edits in localStorage so a keepalive PUT that fails or gets 409 after unload can be restored later.
+  const lastSaveFailed = useRef(false)
+  const backupDraft = useCallback(() => {
+    const current = workflowRef.current
+    if (!current || contentVersion.current === savedContentVersion.current) return
+    writeDraft({ workflowId: current.id, baseRevision: current.revision, title: titleRef.current || '未命名画布', document: docRef.current, known: serverDocRef.current })
+  }, [])
+  const save = useCallback((options = {}) => {
+    const run = async () => {
       const currentWorkflow = workflowRef.current
       if (!currentWorkflow || savedVersion.current === version.current) return currentWorkflow
       if (conflictRef.current) throw new Error('画布有版本冲突，请先保留本地内容并重新载入。')
       const savingVersion = version.current, savingContent = contentVersion.current, silent = savingContent === savedContentVersion.current
       const payload = { title: titleRef.current || '未命名画布', document: sanitizeDocumentTasks(serializableDocument(docRef.current)), revision: currentWorkflow.revision }
+      const body = options.keepalive ? JSON.stringify(payload) : null, keepalive = !!body && keepaliveBodyFits(body)
       if (mounted.current && !silent) setSaveState('保存中…')
+      if (keepalive) keepaliveVersion.current = savingVersion
       try {
-        const result = await saveCanvasWorkflow(currentWorkflow.id, payload)
+        const result = keepalive ? await saveCanvasWorkflowKeepalive(currentWorkflow.id, body) : await saveCanvasWorkflow(currentWorkflow.id, payload)
         if (workflowRef.current?.id === currentWorkflow.id) {
           // Contract C: the server merged write-backs into this save. Take the returned
           // fields, keep input typed after the PUT was sent (no undo step, not "未保存").
@@ -186,7 +210,8 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
           serverDocRef.current = result.merged && result.document ? result.document : payload.document
           const { merged: _merged, ...stored } = result
           workflowRef.current = { ...currentWorkflow, ...stored, document: docRef.current }
-          savedVersion.current = savingVersion; savedContentVersion.current = savingContent
+          savedVersion.current = savingVersion; savedContentVersion.current = savingContent; lastSaveFailed.current = false
+          if (contentVersion.current === savingContent) clearDraft(currentWorkflow.id)
           if (mounted.current) {
             setWorkflow(workflowRef.current)
             setWorkflows(items => items.map(item => item.id === stored.id ? { ...item, ...stored } : item))
@@ -196,13 +221,27 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
         return result
       } catch (failure) {
         if (failure?.status === 409 || failure?.response?.status === 409) { conflictRef.current = true; if (mounted.current) setConflict(true) }
+        if (workflowRef.current?.id === currentWorkflow.id) { lastSaveFailed.current = true; backupDraft() }
         if (mounted.current) setSaveState('保存失败')
         throw failure
-      }
-    })
+      } finally { if (keepaliveVersion.current === savingVersion) keepaliveVersion.current = -1 }
+    }
+    const operation = queuedSaves.current ? queue.current.catch(() => {}).then(run) : run()
+    queuedSaves.current += 1; const settle = () => { queuedSaves.current -= 1 }; operation.then(settle, settle)
     queue.current = operation
     return operation
-  }, [])
+  }, [backupDraft])
+  // Page exit (pagehide / tab hidden / beforeunload): back up and send unsaved edits now. Returns true when the
+  // current version is saved or carried by a keepalive request in flight; false when it could not be guaranteed
+  // (conflict, body too large, a save in flight, or the last save failed — then the leave prompt stays).
+  const flushOnExit = useCallback(() => {
+    backupDraft()
+    if (!workflowRef.current || conflictRef.current) return savedVersion.current === version.current
+    if (savedVersion.current === version.current) return true
+    const failed = lastSaveFailed.current
+    if (keepaliveVersion.current !== version.current) save({ keepalive: true }).catch(() => {})
+    return !failed && keepaliveVersion.current === version.current
+  }, [save, backupDraft])
 
   useEffect(() => {
     if (!beforeLeaveRef) return undefined
@@ -232,7 +271,42 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     writeLastLocation({ projectId: value.project_id ?? projectIdRef.current, workflowId: value.id })
     version.current = hadSubmitting ? 1 : 0; savedVersion.current = 0; contentVersion.current = version.current; savedContentVersion.current = 0; conflictRef.current = false
     setOverlapCount(countOverlappingUnits(normalized)); setWorkflow(value); setDoc(normalized); setTitle(value.title); setSelected(null); setSelectedEdge(null); setConnection(null); setContextMenu(null); setNodeMenu(null);setHistoryNode(null);setPreview(null); setConflict(false); setSaveState(hadSubmitting ? '提交待核查' : '已保存')
+    lastSaveFailed.current = false; setDraftOffer(null); checkDraftRef.current?.(value, 0)
   }, [])
+  // FIX-B2 rework: compare a local draft with the opened version. Contained → cleared silently. Same revision as
+  // the draft's base → its keepalive PUT may still be landing, so re-read twice (800ms apart) while this window
+  // has no edits. Otherwise offer restore / discard.
+  const checkDraftRef = useRef(null)
+  checkDraftRef.current = (value, attempt) => {
+    const draft = readDraft(value.id)
+    if (!draft) return
+    if (draftIncluded(draft, value)) { clearDraft(value.id); return }
+    const current = () => workflowRef.current?.id === value.id && workflowRef.current?.revision === value.revision
+    if (value.revision === draft.baseRevision && attempt < 2) {
+      setTimeout(async () => {
+        if (!mounted.current || !current()) return
+        let fresh = null
+        try { fresh = await getCanvasWorkflow(value.id) } catch { fresh = null }
+        if (!mounted.current || !current()) return
+        if (fresh && fresh.revision !== value.revision && version.current === savedVersion.current && !conflictRef.current) installWorkflow(fresh)
+        else checkDraftRef.current(value, attempt + 1)
+      }, 800)
+      return
+    }
+    if (mounted.current && current()) setDraftOffer({ draft, newer: value.revision !== draft.baseRevision })
+  }
+  function restoreDraft() {
+    const offer = draftOffer
+    if (!offer || workflowRef.current?.id !== offer.draft.workflowId) { setDraftOffer(null); return }
+    const { draft } = offer
+    titleRef.current = draft.title || titleRef.current; setTitle(titleRef.current)
+    // DRAFT-MERGE-FIX-20261114: merge onto the current document (opened server version + results already
+    // taken from task-sync); written-back task/versions/selection come from the server (mergeDraftDocument).
+    // Results written back after this point reach the next PUT through contract C (stale base → merged).
+    edit(current => ({ ...current, ...mergeDraftDocument(draft, current).document, viewport: current.viewport }), { description: '恢复本地未保存修改' })
+    setDraftOffer(null)
+  }
+  function discardDraft() { if (draftOffer) clearDraft(draftOffer.draft.workflowId); setDraftOffer(null) }
 
   useEffect(() => {
     mounted.current = true
@@ -245,13 +319,12 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
         setProjects(listed.value)
         if (listed.value.length) {
           try {
-            // V140 #2: reopen the last project/canvas of this browser; fall back to the first when it no longer exists.
-            const last = readLastLocation()
-            const id = pickLastLocation(listed.value, last?.projectId).id
-            const items = await listCanvasWorkflows(id)
+            // V140 #2 + WINDOW-PROJECT-20261114: reopen this tab's (else this browser's) last project/canvas; gone or unreadable falls back to the server's most recent with a notice.
+            const found = await resolveCanvasLocation({ projects: listed.value, last: readRememberedLocation(), listWorkflows: listCanvasWorkflows, getWorkflow: getCanvasWorkflow })
             if (!alive) return
-            projectIdRef.current = id; setProjectId(id); setWorkflows(items)
-            if (items.length) { const full = await getCanvasWorkflow(pickLastLocation(items, last?.workflowId).id); if (alive) installWorkflow(full) }
+            projectIdRef.current = found.projectId; setProjectId(found.projectId); setWorkflows(found.workflows)
+            if (found.workflow) installWorkflow(found.workflow)
+            if (found.missed) notify?.(MISSED_LOCATION_MESSAGE, 'info')
           } catch (failure) { if (alive) showError(failure) }
         }
       } else showError(listed.reason)
@@ -287,12 +360,17 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   }, [doc, title, workflow?.id, conflict, save, showError])
 
   useEffect(() => {
-    const beforeUnload = event => { if (contentVersion.current !== savedContentVersion.current) { event.preventDefault(); event.returnValue = '' } }
+    // FIX-B2-20261114 #2: leaving/hiding the page flushes unsaved edits (keepalive). The leave prompt only
+    // remains when the flush cannot carry them (version conflict, body too large for keepalive).
+    const beforeUnload = event => { if (contentVersion.current !== savedContentVersion.current && !flushOnExit()) { event.preventDefault(); event.returnValue = '' } }
+    const pageHide = () => { flushOnExit() }
+    const hidden = () => { if (document.visibilityState === 'hidden') flushOnExit() }
     const keydown = event => {
       const target = event.target
       // Dialogs own their keyboard interaction; canvas shortcuts must not leak through.
       if (event.defaultPrevented || target.closest?.('dialog, [role="dialog"], [role="alertdialog"], .cv-studio-overlay')) return
-      const editable = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable
+      // FIX-B2 #3: an open native select reports its <option> as the target; Esc there only closes the list.
+      const editable = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable || !!target.closest?.('select')
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save().catch(showError); return }
       if (editable) return
       const inCanvas=target.closest?.('.cv-surface,.cv-edit-tools')
@@ -330,9 +408,9 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     }
     const keyup = event => { if (event.code === 'Space') space.current = false }
     const blur = () => { space.current = false; editCommands.current?.cancel() }
-    window.addEventListener('beforeunload', beforeUnload); window.addEventListener('keydown', keydown); window.addEventListener('paste', paste); window.addEventListener('keyup', keyup); window.addEventListener('blur', blur)
-    return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('keydown', keydown); window.removeEventListener('paste', paste); window.removeEventListener('keyup', keyup); window.removeEventListener('blur', blur) }
-  }, [save, showError])
+    window.addEventListener('beforeunload', beforeUnload); window.addEventListener('pagehide', pageHide); document.addEventListener('visibilitychange', hidden); window.addEventListener('keydown', keydown); window.addEventListener('paste', paste); window.addEventListener('keyup', keyup); window.addEventListener('blur', blur)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', pageHide); document.removeEventListener('visibilitychange', hidden); window.removeEventListener('keydown', keydown); window.removeEventListener('paste', paste); window.removeEventListener('keyup', keyup); window.removeEventListener('blur', blur) }
+  }, [save, showError, flushOnExit])
 
   // D: with no unsaved local change, take the server revision after a write-back.
   // Revisions between our base and it may include another window's real save; adopt
@@ -522,7 +600,10 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const rect = rootRef.current.getBoundingClientRect()
     const geometry=nodeGeometry({type}),middle=worldPoint(rect.left+rect.width/2,rect.top+rect.height/2)
     // V140 #5: start at the requested point (or the viewport centre) and move to the nearest free slot.
-    const position = freeNodePosition(docRef.current, {type}, point || {x:middle.x-geometry.width/2,y:middle.y-geometry.height/2})
+    // FIX-B2 #3: without a requested point, the free slot is searched inside the visible area first.
+    const view=docRef.current.viewport,margin=24/view.zoom,visible={x:-view.x/view.zoom+margin,y:-view.y/view.zoom+margin,width:rect.width/view.zoom-2*margin,height:(rect.height-FOCUS_BOTTOM_BAR)/view.zoom-2*margin}
+    const start={x:middle.x-geometry.width/2,y:middle.y-geometry.height/2}
+    const position = point ? freeNodePosition(docRef.current, {type}, point) : freeNodePositionInView(docRef.current, {type}, start, visible)
     const providerSelection = defaultProviderSelection(capabilities, type, providerPreferences.current), provider = selectedProvider(capabilities, providerSelection, type)
     const node = { id: uid(), type, title: asset?.name || labels[type], x: position.x, y: position.y, text: '', providerSelection, params: { model: provider?.model || provider?.models?.[0]?.id || '', ratio: type === 'image' ? '1:1' : '16:9', resolution: type === 'image' ? '1K' : '720p', duration: 5 }, asset, candidates: asset ? [asset] : [], selectedCandidateId: asset?.id || null, task: null }
     edit(current => ({ ...current, nodes: [...current.nodes, node] })); setSelected(node.id); setSelectedEdge(null);requestAnimationFrame(()=>interaction.reveal(node.id))
@@ -720,10 +801,10 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const start = performance.now(), ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
     // Interpolate in log-zoom and keep the node's centre on a straight screen path so the node stays in view.
     const cx = node.x + nodeGeometry(node).width / 2, cy = node.y + nodeGeometry(node).height / 2
-    const sx = from.x + cx * from.zoom, sy = from.y + cy * from.zoom
+    const sx = from.x + cx * from.zoom, sy = from.y + cy * from.zoom, tx = target.x + cx * target.zoom, ty = target.y + cy * target.zoom
     const step = now => {
       const t = Math.min(1, (now - start) / FOCUS_MS), k = ease(t), zoom = Math.exp(Math.log(from.zoom) + (Math.log(target.zoom) - Math.log(from.zoom)) * k)
-      const px = sx + (rect.width / 2 - sx) * k, py = sy + (rect.height / 2 - sy) * k, viewport = t >= 1 ? target : { zoom, x: px - cx * zoom, y: py - cy * zoom }
+      const px = sx + (tx - sx) * k, py = sy + (ty - sy) * k, viewport = t >= 1 ? target : { zoom, x: px - cx * zoom, y: py - cy * zoom }
       if (t >= 1) { viewAnimation.current = null; edit(current => ({ ...current, viewport }), { history: false }); return }
       viewAnimation.current = { frame: requestAnimationFrame(step), last: viewport }
       edit(current => ({ ...current, viewport }), { history: false, transient: true })
@@ -950,6 +1031,14 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   }
   const view = doc.viewport
   const selectedNode = doc.nodes.find(node => node.id === selected)
+  // FIX-B2-20261114 #3: when the selected node grows (the status footer appears once a task exists), re-reveal
+  // it so the editor panel below never covers the node or its status line. Only on growth, never on pan.
+  const selectedHeight = selectedNode ? nodeGeometry(selectedNode).height : 0, grownRef = useRef(null)
+  useEffect(() => {
+    const previous = grownRef.current; grownRef.current = { id: selected, height: selectedHeight }
+    if (!selected || previous?.id !== selected || previous.height >= selectedHeight || viewAnimation.current || drag.current) return
+    interaction.reveal(selected)
+  }, [selected, selectedHeight])
   const inputMap = new Map(doc.nodes.map(node => [node.id, resolveNodeInputs(node,doc.nodes,doc.edges)]))
   const contextNode=doc.nodes.find(node=>node.id===nodeMenu?.id)
   const contextDeleteBlocked=generationLocks.current.has(nodeMenu?.id)||isBusyTaskStatus(contextNode?.task?.status)
@@ -980,12 +1069,12 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       {contextMenu && <CanvasContextMenu position={contextMenu} bounds={surfaceSize} onClose={closeContextMenu} onDismiss={()=>setContextMenu(null)} onUpload={()=>{const point=contextMenu.point;closeContextMenu();pickFile(null,point)}} onCreate={type=>{const point=contextMenu.point;closeContextMenu();addNode(type,point)}}/>}
       <div className="cv-tools" onPointerDown={e => e.stopPropagation()}><button title="选择节点" aria-label="选择工具" aria-pressed={tool === 'select'} onClick={() => setTool('select')}><MousePointer2 size={18} /></button><button title="平移画布（空格拖动）" aria-label="平移工具" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}><Hand size={18} /></button><hr />{[['image',Image],['video',Film],['audio',Music]].map(([type, Icon]) => <button key={type} draggable onDragStart={event => { event.dataTransfer.setData("application/x-ink-node", type); event.dataTransfer.effectAllowed = "copy" }} title={`添加${labels[type]}节点（可拖入画布）`} aria-label={`添加${labels[type]}节点`} onClick={() => addNode(type)}><Icon size={18} /></button>)}<hr /><button title="导入素材" aria-label="导入素材" onClick={() => pickFile()}><Upload size={18} /></button></div>
       {loading ? <div className="cv-empty">正在载入画布…</div> : !doc.nodes.length && <div className="cv-empty" onPointerDown={e => e.stopPropagation()}><h2>把想法放上画布</h2><p>拖入素材，连接参考，逐个制作你的镜头。</p><div className="cv-empty-actions"><button className="btn btn-primary" onClick={() => addNode('image')}><Image size={16} />图像生成</button><button onClick={() => addNode('video')}><Film size={16} />视频生成</button><button onClick={() => addNode('audio')}><Music size={16} />音频生成</button></div><small>节点自由摆放 · 连线选择参考 · 点击生成才运行任务</small></div>}
-      {portDrag && <div className="cv-connection-note" role="status">松开到目标节点上建立连接 · 松在空白处或按 Esc 取消</div>}{connection && !portDrag && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}>点击目标节点左侧连接点<button onClick={() => setConnection(null)}>取消</button></div>}
+      {portDrag && <div className="cv-connection-note" role="status">松开到目标节点上建立连接 · 松在空白处或按 Esc 取消</div>}{connection && !portDrag && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}>点击目标节点建立连接<button onClick={() => setConnection(null)}>取消</button></div>}
       {selectedEdge && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}><button onClick={() => deleteEdge(selectedEdge)}><Trash2 size={13} />移除连接</button></div>}
       <div className="cv-bottom" onPointerDown={e => e.stopPropagation()}><button aria-label="缩小画布" title="缩小画布" onClick={() => zoomAt(1 / 1.2)}><Minus size={14} /></button><output aria-label={`画布缩放 ${Math.round(view.zoom * 100)}%`}>{Math.round(view.zoom * 100)}%</output><button aria-label="放大画布" title="放大画布" onClick={() => zoomAt(1.2)}><Plus size={14} /></button><button aria-label="适配全部节点" title="适配全部节点" onClick={fit}><Maximize size={14} /></button><button aria-label="整理画布" title="按依赖从左到右整理，保留组内布局；可撤销" disabled={!doc.nodes.length||busy||ioCount>0||generationCount>0||!!conflict} onClick={organize}><LayoutGrid size={14}/><span className="cv-bottom-label">整理画布</span></button><button aria-label="画布快捷键帮助" title="画布快捷键帮助 (?)" onClick={()=>setShortcutsOpen(true)}><CircleHelp size={14}/></button></div><span className="cv-hint">空格 + 拖动平移 · 滚轮缩放 · 连线不会自动生成</span>
       <TaskDoneNotices notices={doneNotices.filter(notice=>notice.workflowId===workflow?.id)} ask={askSystem&&shouldAskSystem({setting:systemSetting,permission})} onLocate={locateNotice} onDismiss={key=>setDoneNotices(current=>current.filter(item=>item.key!==key))} onEnable={enableSystem} onDecline={declineSystem}/>
       {!error&&alertDismissed!==`${pollWarning?.count||0}|${statusAnomalies?.nodes?.size||0}`&&((pollWarning&&pollWarning.workflowId===workflow?.id)||(statusAnomalies&&statusAnomalies.workflowId===workflow?.id))&&<div className="cv-alert cv-alert-stack" role="status" onPointerDown={e=>e.stopPropagation()}>{pollWarning&&pollWarning.workflowId===workflow?.id&&<span>{pollWarning.count} 个任务暂时无法更新，正在重试；其他任务继续更新。</span>}{statusAnomalies&&statusAnomalies.workflowId===workflow?.id&&<span data-testid="task-status-anomaly">{INVALID_STATUS_LABEL}：{statusAnomalies.nodes.size} 个任务返回未知状态（{[...new Set(statusAnomalies.nodes.values())].join('、').slice(0,60)}），已保留原状态，其他任务照常更新。</span>}<button aria-label="关闭提示" title="关闭提示" onClick={()=>setAlertDismissed(`${pollWarning?.count||0}|${statusAnomalies?.nodes?.size||0}`)}><X size={13} /></button></div>}
-    {!error&&overlapCount>0&&<div className="cv-alert cv-alert-stack" role="status" data-testid="overlap-notice" onPointerDown={e=>e.stopPropagation()}><span>{overlapCount} 个节点因按画面比例显示而相互重叠，可使用「整理画布」（可撤销）；不会自动移动节点。</span><span><button className="btn" onClick={organize} disabled={busy||ioCount>0||generationCount>0||!!conflict}>整理画布</button><button aria-label="关闭提示" title="关闭提示" onClick={()=>setOverlapCount(0)}><X size={13} /></button></span></div>}
+    {!error&&overlapCount>0&&<div className="cv-alert cv-alert-stack cv-alert-info" role="status" data-testid="overlap-notice" onPointerDown={e=>e.stopPropagation()}><span>{overlapCount} 个节点因按画面比例显示而相互重叠，可使用「整理画布」（可撤销）；不会自动移动节点。</span><span><button className="btn" onClick={organize} disabled={busy||ioCount>0||generationCount>0||!!conflict}>整理画布</button><button aria-label="关闭提示" title="关闭提示" onClick={()=>setOverlapCount(0)}><X size={13} /></button></span></div>}
     {error && <div className="cv-alert" role="alert" onPointerDown={e => e.stopPropagation()}><span>{error}</span><button aria-label="关闭提示" title="关闭提示" onClick={() => setError('')}><X size={13} /></button></div>}
     </div>
     </div></div>
@@ -1019,8 +1108,9 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       ioRef.current++;setIoCount(ioRef.current)
       try{const resolved=await resolveLibraryItems(owner.workflowId,items.map(item=>item.selection));if(workflowRef.current?.id!==owner.workflowId||projectIdRef.current!==owner.projectId||target&&!docRef.current.nodes.some(n=>n.id===target))throw new Error('原画布已切换，未添加到其他画布');const currentNode=docRef.current.nodes.find(n=>n.id===target);if(currentNode?.type==='video'&&currentNode.params?.video_mode==='keyframe'){const current=resolveNodeInputs(currentNode,docRef.current.nodes,docRef.current.edges).assets,merged=[...new Map([...current,...resolved.assets].map(asset=>[asset.id,asset])).values()];if(merged.some(asset=>asset.kind!=='image')||merged.length>2)throw new Error('首尾帧最多两个图片参考，请先移除已有参考；本次未添加节点或连线')}addAssetNodes(resolved.assets||[],target);await save();setLibraryTarget(null);setAssetRefresh(value=>value+1)}finally{ioRef.current--;setIoCount(ioRef.current)}
     }} />}
-    {batchPlan && <ConfirmDialog className="canvas-studio-confirm" title={batchPlan.ready.length?`运行 ${batchPlan.ready.length} 个所选节点？`:'没有可运行的节点'} confirmLabel={batchPlan.ready.length?`提交 ${batchPlan.ready.length} 个任务`:'关闭'} onClose={()=>setBatchPlan(null)} onConfirm={async()=>{const ids=batchPlan.ready.map(item=>item.node.id);setBatchPlan(null);if(ids.length)await runBatch(ids)}}><div data-testid="batch-run-summary"><p>将提交 <strong>{batchPlan.ready.length}</strong> 个节点，每个节点创建一个独立任务；不会自动运行下游节点。</p><p>合计预估：<strong>{batchPlan.ready.length?batchPlan.total.text:'—'}</strong>（按现有费率估算，非实际扣费）</p>{batchPlan.ready.length>0&&<ul>{batchPlan.ready.map(({node,cost})=><li key={node.id}>{node.title}：{cost.known?(cost.min.toFixed(2)===cost.max.toFixed(2)?`$${cost.min.toFixed(2)}`:`$${cost.min.toFixed(2)}~$${cost.max.toFixed(2)}`):`费用待估（${cost.reason}）`}</li>)}</ul>}{batchPlan.skipped.length>0&&<><p>以下 {batchPlan.skipped.length} 个节点不会提交：</p><ul>{batchPlan.skipped.map(({node,reason})=><li key={node.id}>{node.title}：{reason}</li>)}</ul></>}</div></ConfirmDialog>}
+    {batchPlan && <ConfirmDialog className="canvas-studio-confirm" title={batchPlan.ready.length?`运行 ${batchPlan.ready.length} 个所选节点？`:'没有可运行的节点'} confirmLabel={batchPlan.ready.length?`提交 ${batchPlan.ready.length} 个任务`:'关闭'} onClose={()=>setBatchPlan(null)} onConfirm={async()=>{const ids=batchPlan.ready.map(item=>item.node.id);setBatchPlan(null);if(ids.length)await runBatch(ids)}}><div data-testid="batch-run-summary"><p>将提交 <strong>{batchPlan.ready.length}</strong> 个节点，每个节点创建一个独立任务；不会自动运行下游节点。</p><p>合计预估：<strong>{batchPlan.ready.length?batchPlan.total.text:'—'}</strong>（按现有费率估算，非实际扣费）</p>{batchPlan.ready.length>0&&<ul>{batchPlan.ready.map(({node,cost})=><li key={node.id}>{node.title}：{cost.known?formatCostRange(cost.min,cost.max):`费用待估（${cost.reason}）`}</li>)}</ul>}{batchPlan.skipped.length>0&&<><p>以下 {batchPlan.skipped.length} 个节点不会提交：</p><ul>{batchPlan.skipped.map(({node,reason})=><li key={node.id}>{node.title}：{reason}</li>)}</ul></>}</div></ConfirmDialog>}
     {generateConfirm && <ConfirmDialog className="canvas-studio-confirm" title="上次结果未知，仍要重新生成？" danger confirmLabel="确认重新生成（可能重复计费）" onClose={()=>setGenerateConfirm(null)} onConfirm={async()=>{const id=generateConfirm;setGenerateConfirm(null);await generate(id)}}><p>该节点上一次任务的请求已发出但未确认结果，<strong>供应商可能已经计费</strong>。</p><p>重新生成会提交新的任务，<strong>可能重复计费</strong>。建议先到任务中心或供应商控制台核查原任务。</p></ConfirmDialog>}
+    {draftOffer && !conflict && <div className="cv-studio-overlay"><div role="alertdialog" aria-modal="true" aria-labelledby="cv-draft-title" data-testid="canvas-draft-offer"><h3 id="cv-draft-title">有未保存的本地修改</h3><p>上次离开前（{new Date(draftOffer.draft.savedAt).toLocaleString()}）的修改未确认保存到服务器。{draftOffer.newer ? '服务器上已有之后保存的版本（可能来自其他窗口）；恢复会用本地修改替换当前内容（任务状态与生成结果保留服务器版本）。' : '恢复后会自动保存。'}</p><button onClick={discardDraft}>丢弃本地修改</button><button className="btn btn-primary" onClick={restoreDraft}>恢复本地修改</button></div></div>}
     {conflict && <div className="cv-studio-overlay"><div><h3>画布已在其他窗口更新</h3><p>本地编辑已保留，自动保存已停止。先下载本地记录，再载入服务器版本；重新载入会替换当前未保存内容。</p><button onClick={downloadLocal}>下载本地记录</button><button onClick={async () => { try { installWorkflow(await getCanvasWorkflow(workflowRef.current.id)); setError('') } catch (failure) { showError(failure) } }}>重新载入</button></div></div>}
   </section>
 }

@@ -9,6 +9,7 @@ import { TaskTypeIcon } from './gallery/TaskPreview.jsx'
 import { TaskCardList } from './gallery/TaskCards.jsx'
 import { TaskCompareModal, TaskDetailModal } from './gallery/TaskModals.jsx'
 import ConfirmDialog from './ui/ConfirmDialog'
+import askConfirm from './ui/askConfirm'
 
 function useLiveCallback(callback) {
   const ref = useRef(callback)
@@ -605,7 +606,7 @@ function TaskGallery({
   }, [editingGroupName, fetchFavoriteGroups])
 
   const removeFavoriteGroup = useCallback(async group => {
-    if (!window.confirm(`删除收藏分组“${group.name}”？任务仍会保留在收藏中。`)) return
+    if (!await askConfirm({ title: '删除收藏分组', message: `删除收藏分组“${group.name}”？任务仍会保留在收藏中。`, confirmLabel: '删除分组', danger: true })) return
     try {
       await axios.delete(`/api/favorite-groups/${group.id}`)
       if (Number(favoriteGroup) === Number(group.id)) setFavoriteGroup('all')
@@ -655,7 +656,7 @@ function TaskGallery({
     const message = permanent
       ? '彻底删除此任务及其输出文件？此操作无法撤销。'
       : '将此任务移到回收站？输出文件会保留，之后可以恢复。'
-    if (!window.confirm(message)) return
+    if (!await askConfirm({ title: permanent ? '彻底删除任务' : '移到回收站', message, confirmLabel: permanent ? '彻底删除' : '移到回收站', danger: permanent })) return
     try {
       await axios.delete(`/api/tasks/${item.taskId}`, { params: permanent ? { permanent: true } : {} })
       setTasks(previous => previous.filter(task => Number(task.id) !== Number(item.taskId)))
@@ -670,7 +671,7 @@ function TaskGallery({
   }, [view])
 
   const cancelTask = useLiveCallback(async item => {
-    if (!item.taskId || !window.confirm('取消这个任务？已开始的上游请求可能仍会完成，但结果不会写入本地任务。')) return
+    if (!item.taskId || !await askConfirm({ title: '取消任务', message: '取消这个任务？已开始的上游请求可能仍会完成，但结果不会写入本地任务。', confirmLabel: '取消任务', cancelLabel: '继续任务', danger: true })) return
     try {
       const response = await axios.post(`/api/tasks/${item.taskId}/cancel`)
       const updated = response.data.task
@@ -803,7 +804,7 @@ function TaskGallery({
     const prompt = permanent
       ? `彻底删除选中的 ${label} 及其输出文件？此操作无法撤销。`
       : `将选中的 ${label} 移到回收站？输出文件会保留。`
-    if (!window.confirm(prompt)) return
+    if (!await askConfirm({ title: permanent ? '彻底删除任务' : '移到回收站', message: prompt, confirmLabel: permanent ? '彻底删除' : '移到回收站', danger: permanent })) return
 
     try {
       let deletedCount = 0
@@ -1334,7 +1335,7 @@ function TaskGallery({
           <div className="task-empty-state">
             <div className="task-empty-icon"><TaskTypeIcon type={mode} size={22} /></div>
             <div className="text-sm font-medium text-nexus-text-light">{emptyTitle}</div>
-            <div className="font-mono text-xs text-nexus-muted">{hasSearchOrFilters ? 'FILTER RESULT: 0' : `${mode.toUpperCase()} TASKS: 0`}</div>
+            <div className="font-mono text-xs text-nexus-muted">{hasSearchOrFilters ? '筛选结果 0 条' : `${({ image: '图片', video: '视频', audio: '音频' })[mode] || ''}任务 0 条`}</div>
             {hasSearchOrFilters && (
               <button type="button" onClick={clearSearchAndFilters} className="btn btn-secondary btn-sm mt-2">清除筛选</button>
             )}

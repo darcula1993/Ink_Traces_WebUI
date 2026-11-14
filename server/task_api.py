@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify, send_file, after_this_request
 import storage
 import tasks as task_db
 from request_utils import as_bool, positive_id
+from task_public import public_task, public_tasks
 from task_media import (
     _task_download_name, _task_png_text_entries, _task_output_asset,
     _task_asset_response, _attach_task_input_references,
@@ -123,7 +124,7 @@ def api_list_tasks():
     )
     for t in tasks:
         t['summary'] = True
-    return jsonify({'success': True, 'tasks': tasks, 'total': total})
+    return jsonify({'success': True, 'tasks': public_tasks(tasks), 'total': total})
 
 
 @task_api.route('/api/tasks/filter-options', methods=['GET'])
@@ -157,7 +158,7 @@ def api_task_statuses():
     found = {int(task['id']) for task in statuses}
     return jsonify({
         'success': True,
-        'tasks': statuses,
+        'tasks': public_tasks(statuses),
         'missing_ids': [task_id for task_id in task_ids if task_id not in found],
     })
 
@@ -234,7 +235,7 @@ def api_get_task(task_id):
     if not t:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
     _attach_task_input_references([t])
-    return jsonify({'success': True, 'task': t})
+    return jsonify({'success': True, 'task': public_task(t)})
 
 
 @task_api.route('/api/tasks/<int:task_id>/favorite', methods=['PATCH'])
@@ -246,7 +247,7 @@ def api_favorite_task(task_id):
     if not isinstance(data.get('favorite'), bool):
         return jsonify({'success': False, 'error': 'favorite 必须是布尔值'}), 400
     task_db.set_task_favorite(task_id, data['favorite'])
-    return jsonify({'success': True, 'favorite': data['favorite'], 'task': task_db.get_task(task_id)})
+    return jsonify({'success': True, 'favorite': data['favorite'], 'task': public_task(task_db.get_task(task_id))})
 
 
 @task_api.route('/api/favorite-groups', methods=['GET'])
@@ -329,7 +330,7 @@ def api_set_task_favorite_groups(task_id):
         task_db.replace_task_favorite_groups(task_id, group_ids)
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
-    return jsonify({'success': True, 'task': task_db.get_task(task_id)})
+    return jsonify({'success': True, 'task': public_task(task_db.get_task(task_id))})
 
 
 @task_api.route('/api/tasks/bulk-favorite-groups', methods=['POST'])
@@ -428,7 +429,7 @@ def api_restore_task(task_id):
     restored = task_db.restore_tasks([task_id])
     if not restored:
         return jsonify({'success': False, 'error': '任务仍在取消中，请稍后再恢复'}), 409
-    return jsonify({'success': True, 'task': task_db.get_task(task_id)})
+    return jsonify({'success': True, 'task': public_task(task_db.get_task(task_id))})
 
 
 @task_api.route('/api/tasks/bulk-restore', methods=['POST'])

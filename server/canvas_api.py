@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
 import canvas_store as store
+from task_public import public_workflow
 
 canvas_api = Blueprint('canvas_api', __name__)
 PREFIX = '/api/canvas/workflows'
@@ -59,15 +60,16 @@ def workflows(project_id):
     if request.method == 'GET':
         return jsonify(success=True, workflows=store.list_workflows(project_id))
     data = body()
-    return jsonify(success=True, workflow=store.create_workflow(project_id, data.get('title', '未命名画布'), data.get('document'))), 201
+    return jsonify(success=True, workflow=public_workflow(store.create_workflow(project_id, data.get('title', '未命名画布'), data.get('document')))), 201
 
 
 @canvas_api.route(PREFIX + '/<workflow_id>', methods=['GET', 'PUT'])
 def workflow_detail(workflow_id):
     if request.method == 'GET':
-        return jsonify(success=True, workflow=store.workflow(workflow_id))
+        return jsonify(success=True, workflow=public_workflow(store.workflow(workflow_id)))
     data = body()
     saved, merged = store.update_workflow(workflow_id, data.get('title'), data.get('document'), data.get('revision'), with_merge=True)
+    saved = public_workflow(saved)
     if merged:
         # CANVAS-WRITEBACK C: the stale base only missed server write-backs.
         return jsonify(success=True, merged=True, revision=saved['revision'], document=saved['document'], workflow=saved)

@@ -1,0 +1,48 @@
+/* FIX-B2B-20261114: canvas controls keep a usable on-screen size at low zoom.
+   --cv-zoom is set on .cv-world by CanvasStudio. */
+
+/* Node-group button bar: counter-scaled so labels stay about 12px on screen below 100%;
+   it grows upwards from the group's top edge, at least as wide as the group and never wrapping. */
+.canvas-studio .cv-node-group header{--cv-group-ui:clamp(1,calc(1 / var(--cv-zoom,1)),5);transform:scale(var(--cv-group-ui));transform-origin:left bottom;width:max-content;min-width:calc(100% / var(--cv-group-ui))}
+.canvas-studio .cv-node-group header button:where(:not(.btn)){min-height:24px;white-space:nowrap}
+.canvas-studio .cv-node-group header button:where(:not(.btn)):first-child{max-width:240px}
+.canvas-studio .cv-node-group header .cv-group-colors summary{white-space:nowrap}
+/* INTEG-FIX-GROUPS-20261114: the transform above makes the header its own stacking context, which traps the
+   colour palette (z-index 30) below selected member nodes (z-index 3); lift the header while the palette is open. */
+.canvas-studio .cv-node-group header:has(.cv-group-colors[open]){position:relative;z-index:20}
+.canvas-studio .cv-node-group header :is(button,summary){cursor:pointer}
+
+/* Edges: wider invisible hit stroke, at least ~14px on screen at any zoom. */
+.canvas-studio .cv-edge-hit{stroke-width:max(20px,calc(14px / var(--cv-zoom,1)))}
+.canvas-studio .cv-connections g:hover > .cv-edge:not(.cv-edge-preview){stroke-width:3}
+
+/* Ports: the 24px hit target never shrinks below ~19px on screen (scaled about its centre). */
+.canvas-studio .cv-node .cv-port{transform:scale(clamp(1,calc(.8 / var(--cv-zoom,1)),3))}
+
+/* Click-to-connect: the whole target node accepts the connection. */
+.canvas-studio .cv-node.is-connect-target{cursor:copy}
+.canvas-studio .cv-node.is-connect-target:hover{box-shadow:0 0 0 2px var(--cv-focus)}
+
+/* In-flight video stage stepper (no percentage). */
+.canvas-studio .cv-task-stages{display:flex;align-items:center;gap:4px;margin:2px 0 0;padding:2px 8px;border-radius:6px;background:rgba(0,0,0,.6);list-style:none;font-size:12px;line-height:1.3;color:var(--cv-secondary)}
+.canvas-studio .cv-task-stages li{display:flex;align-items:center;gap:4px}
+.canvas-studio .cv-task-stages li+li::before{content:'';width:12px;height:1px;background:var(--cv-border)}
+.canvas-studio .cv-task-stages li.is-done{color:var(--cv-text)}
+.canvas-studio .cv-task-stages li.is-current{color:var(--cv-green,var(--accent));font-weight:600}
+.canvas-studio .cv-world.is-lod-low .cv-task-stages{visibility:hidden}
+
+/* Video result still loading after write-back (instead of a silent black frame). */
+.cv-media-player:has(> .cv-media-player-loading){position:relative}
+.cv-media-player-loading{position:absolute;z-index:3;left:50%;top:12px;transform:translateX(-50%);padding:2px 8px;border-radius:6px;background:rgba(0,0,0,.55);color:var(--cv-secondary,#b5bbb8);font-size:12px;pointer-events:none;white-space:nowrap}
+
+/* Media preview: fit / original size controls. */
+.cv-preview-zoom{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.cv-preview-zoom button{min-height:28px;padding:2px 10px;border:1px solid var(--cv-border,#b5bbb833);border-radius:6px;background:transparent;color:inherit;font-size:12px;cursor:pointer}
+.cv-preview-zoom button[aria-pressed=true]{border-color:var(--cv-focus,#5ca07e);color:var(--cv-text,#ebedec);background:var(--cv-green-hover,#5ca07e22)}
+.cv-preview-zoom button:focus-visible{outline:2px solid var(--cv-focus,#5ca07e);outline-offset:1px}
+.cv-preview-zoom label{display:flex;align-items:center;gap:8px;margin-left:auto}
+.cv-preview-zoom input[type=range]{accent-color:var(--cv-focus,#5ca07e)}
+.cv-preview-zoom output{min-width:40px;font-variant-numeric:tabular-nums;font-size:12px}
+/* FIX-B2B-20261114 ada: busy state text sits on a dark backing so code rain never crosses it; timer lives only in the status row. */
+.canvas-studio .cv-media-state.is-busy>:is(strong,.cv-task-stages){background:rgba(8,10,9,.78);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:2px 8px}
+.canvas-studio .cv-media-state.is-busy>.cv-task-stages{background:rgba(8,10,9,.82)}

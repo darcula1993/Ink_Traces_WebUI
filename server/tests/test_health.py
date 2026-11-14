@@ -252,3 +252,20 @@ def test_workspace_state_externalizes_data_urls():
     })
     assert preferences.status_code == 200
     assert preferences.get_json()['state']['value']['cardSize'] == 'large'
+
+
+def test_task_search_api_substring_pages_and_selection_agree():
+    # FIX-B3B: list total, paging, select-all ids and navigation share the server-side filter.
+    ids = [task_db.create_task('image', f'第{i}张红色圆形图标', {'model': 'ep-test'}, provider='ark') for i in range(5)]
+    task_db.create_task('image', '蓝色方块', {'model': 'ep-test'}, provider='ark')
+    client = application.app.test_client()
+    first = client.get('/api/tasks?type=image&q=红色&limit=2&offset=0&sort=oldest').get_json()
+    second = client.get('/api/tasks?type=image&q=红色&limit=2&offset=2&sort=oldest').get_json()
+    assert first['total'] == second['total'] == 5
+    assert [t['id'] for t in first['tasks'] + second['tasks']] == ids[:4]
+    selection = client.get('/api/tasks/selection?type=image&view=all&q=红色&sort=oldest').get_json()
+    assert selection['ids'] == ids and selection['total'] == 5
+    assert client.get('/api/tasks/selection?type=image&view=all&q=seedream').get_json()['total'] == 6
+    navigation = client.get(f'/api/tasks/{ids[2]}/navigation?type=image&q=红色&sort=oldest').get_json()['navigation']
+    assert navigation['total'] == 5
+    assert navigation['previous_id'] == ids[1] and navigation['next_id'] == ids[3]

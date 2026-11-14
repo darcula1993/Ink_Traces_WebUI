@@ -25,6 +25,7 @@ from pathlib import Path
 import canvas_store as store
 import storage
 import tasks as task_db
+from task_public import mask_text, public_document
 
 LOG = logging.getLogger('nanobanana.canvas_writeback')
 
@@ -89,7 +90,8 @@ def _updated_node(node, task, assets):
     current = node.get('task') or {}
     if current.get('status') not in ACTIVE_STATUSES:
         return None
-    next_task = {'id': task['id'], 'status': task['status'], 'error': task.get('error') or None}
+    # FIX-B1 D1: the canvas document is sent to the browser; never store signed URLs in it.
+    next_task = {'id': task['id'], 'status': task['status'], 'error': mask_text(task.get('error')) or None}
     known = {candidate.get('id') for candidate in node.get('candidates') or []}
     additions = [asset for asset in assets if asset['id'] not in known]
     if not additions and current.get('status') == next_task['status'] and (current.get('error') or None) == next_task['error']:
@@ -302,7 +304,7 @@ def sync_tasks(workflow_id, task_ids):
             else:
                 LOG.info('canvas_task_sync_conflict_resolved workflow=%s task=%s error=%s', workflow_id, task_id, error)
     row = store.workflow(workflow_id)
-    nodes = {node['id']: node_fields(node) for node in row['document'].get('nodes', [])
+    nodes = {node['id']: node_fields(node) for node in public_document(row['document']).get('nodes', [])
              if isinstance(node.get('task'), dict) and node['task'].get('id') in owned}
     return {'revision': row['revision'], 'nodes': nodes, 'failed': failed}
 

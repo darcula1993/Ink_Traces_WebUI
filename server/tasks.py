@@ -584,9 +584,27 @@ def get_task_statuses(task_ids):
     return statuses
 
 
-def _fts_search_query(value):
-    tokens = re.findall(r'[\w]+', str(value).lower(), flags=re.UNICODE)
-    return ' AND '.join(f'"{token}"*' for token in tokens[:12])
+SEARCH_MAX_CHARS = 100
+SEARCH_MAX_TERMS = 8
+# Searchable model text: stored params.model plus the family name the UI shows. Ark image
+# and layer tasks store an endpoint id as model, so "seedream" would otherwise never match.
+_SEARCH_MODEL_SQL = (
+    "CASE WHEN json_valid(t.params) THEN "
+    "COALESCE(json_extract(t.params, '$.model'), '') || "
+    "CASE WHEN json_extract(t.params, '$.seedream55') THEN ' seedream 5.5' "
+    "WHEN t.type IN ('image', 'layer') THEN ' seedream' ELSE '' END "
+    "ELSE '' END"
+)
+_SEARCH_HAYSTACK_SQL = (
+    "LOWER(COALESCE(t.prompt, '') || ' ' || COALESCE(t.provider, '') || ' ' || "
+    f"{_SEARCH_MODEL_SQL})"
+)
+
+
+def _search_terms(value):
+    """Whitespace-separated substring terms; bounded so a scan stays cheap."""
+    text = str(value or '').strip().lower()[:SEARCH_MAX_CHARS]
+    return list(dict.fromkeys(text.split()))[:SEARCH_MAX_TERMS]
 
 
 def _task_filters(task_type=None, status=None, favorite=None, active=False, search=None,
@@ -629,29 +647,27 @@ def _task_filters(task_type=None, status=None, favorite=None, active=False, sear
     if ungrouped:
         clauses.append('t.favorite = 1')
         clauses.append('NOT EXISTS (SELECT 1 FROM task_favorite_groups tfg WHERE tfg.task_id = t.id)')
-    if search:
-        pattern = f'%{search.lower()}%'
-        fts_query = _fts_search_query(search)
-        if fts_query:
-            candidate_queries = [
-                'SELECT rowid FROM task_search WHERE task_search MATCH ?',
-                '''SELECT search_tfg.task_id
-                   FROM task_favorite_groups search_tfg
-                   JOIN favorite_groups search_fg ON search_fg.id = search_tfg.group_id
-                   WHERE LOWER(search_fg.name) LIKE ?''',
-            ]
-            params.extend([fts_query, pattern])
-            if str(search).strip().isdigit():
-                candidate_queries.append('SELECT id FROM tasks WHERE id = ?')
-                params.append(int(str(search).strip()))
-            clauses.append(f't.id IN ({" UNION ".join(candidate_queries)})')
-        else:
-            clauses.append('''(
-                CAST(t.id AS TEXT) LIKE ?
-                OR LOWER(COALESCE(t.prompt, '')) LIKE ?
-                OR LOWER(COALESCE(t.provider, '')) LIKE ?
-            )''')
-            params.extend([pattern, pattern, pattern])
+    terms = _search_terms(search) if search else []
+    if terms:
+        # Substring match (Chinese has no word breaks, so FTS prefix tokens missed
+        # "红色" inside "红色圆形图标"). Every term must occur in prompt, provider or model.
+        # instr() avoids LIKE wildcard escaping; the scan is limited by the other filters
+        # and by SEARCH_MAX_CHARS / SEARCH_MAX_TERMS (see doc/performance.md).
+        term_clauses = ' AND '.join(f'instr({_SEARCH_HAYSTACK_SQL}, ?) > 0' for _ in terms)
+        alternatives = [f'({term_clauses})']
+        params.extend(terms)
+        whole = ' '.join(terms)
+        alternatives.append('''t.id IN (
+            SELECT search_tfg.task_id
+            FROM task_favorite_groups search_tfg
+            JOIN favorite_groups search_fg ON search_fg.id = search_tfg.group_id
+            WHERE instr(LOWER(search_fg.name), ?) > 0
+        )''')
+        params.append(whole)
+        if whole.isdigit():
+            alternatives.append('t.id = ?')
+            params.append(int(whole))
+        clauses.append(f'({" OR ".join(alternatives)})')
     return clauses, params
 
 

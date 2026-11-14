@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import { Check, Edit2, Library, Search, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
+import askConfirm from './ui/askConfirm'
 
 function PromptCollection({ onSelectPrompt }) {
   const [prompts, setPrompts] = useState([])
@@ -58,7 +59,7 @@ function PromptCollection({ onSelectPrompt }) {
   }
 
   const deletePrompt = async (id) => {
-    if (!window.confirm('删除这条提示词？')) return
+    if (!await askConfirm({ title: '删除提示词', message: '删除这条提示词？', confirmLabel: '删除', danger: true })) return
     try {
       setLoading(true)
       const response = await axios.delete(`/api/prompts/${id}`)

@@ -4,7 +4,7 @@ const list = value => Array.isArray(value) ? value : []
 const text = value => typeof value === 'string' ? value : ''
 
 export default function LayerOcrDetails({value,notify}) {
- if(value == null)return <small>此图层没有文字识别结果</small>
+ if(value == null)return <small className="layer-ocr-empty">此图层没有文字识别结果</small>
  // Older saved documents may contain malformed provider metadata. Do not mutate it:
  // structured display uses safe entries, while raw JSON remains available to inspect/copy.
  const fullText = record(value) ? text(value.text) : ''

@@ -1,10 +1,18 @@
 import React from 'react'
-import {estimateBytePlusVideoCost,formatUsdEstimate} from '../../lib/byteplusPricing'
+import {estimateBytePlusVideoCost,formatUsdEstimate,estimateImageParamsCost,describeImageEstimate,formatImageUsd} from '../../lib/byteplusPricing'
 import {effectiveVideoModel,videoRatio,videoParameterError} from '../../lib/videoGenerationRules'
 import useReferenceVideoDurations from './useReferenceVideoDurations'
-export default function CanvasVideoEstimate({node,provider,references=[]}) {
- if(node.type!=='video')return <span className="cv-video-estimate" data-testid="canvas-cost-estimate" title={`暂无${node.type==='image'?'图像':'音频'}接口的价格资料，暂不估价；不代表免费`}>费用待估</span>
+// Generation-node cost estimate (video and image; audio has no price data). Never shows $0 for unknown.
+export default function CanvasVideoEstimate({node,provider,references=[],imageIssue=''}) {
+ if(node.type==='image')return <ImageEstimate node={node} provider={provider} references={references} issue={imageIssue}/>
+ if(node.type!=='video')return <span className="cv-video-estimate" data-testid="canvas-cost-estimate" title="暂无音频接口的价格资料，暂不估价；不代表免费">费用待估</span>
  return <VideoEstimate node={node} provider={provider} references={references}/>
+}
+function ImageEstimate({node,provider,references,issue}) {
+ const result=estimateImageParamsCost({provider,params:node.params||{},references,issue})
+ if(!result.known){const reason=`${result.reason}，暂不估价；不代表免费`;return <span className="cv-video-estimate" data-testid="canvas-cost-estimate" title={reason} aria-label={`费用待估：${reason}`}>费用待估</span>}
+ const detail=describeImageEstimate(result.estimate),amount=formatImageUsd(result.estimate.minimumCost)
+ return <span className="cv-video-estimate" data-testid="canvas-cost-estimate" title={detail} aria-label={`预估费用 ${amount} USD。${detail}`}>预估 {amount} USD</span>
 }
 function VideoEstimate({node,provider,references}) {
  const params=node.params||{},model=effectiveVideoModel(params.model,provider?.models),ratio=videoRatio(model,params.video_mode,references.some(a=>a.kind==='image'),params.ratio||'16:9').value

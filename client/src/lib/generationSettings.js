@@ -10,6 +10,14 @@ export const SEEDANCE_25_MODERATED = 'seedance-2.5-moderated'
 
 export const CUPSY_VIDEO_MODELS = [SEEDANCE_25, SEEDANCE_25_MODERATED]
 
+// FIX-B2B-20261114: one display name per video model id, shared by the canvas and the legacy tool.
+export const VIDEO_MODEL_LABELS = Object.freeze({
+  [SEEDANCE_20]: 'Seedance 2.0',
+  [SEEDANCE_25]: 'Seedance 2.5',
+  [SEEDANCE_25_MODERATED]: 'Seedance 2.5 Enhanced Moderation',
+})
+export const videoModelLabel = id => VIDEO_MODEL_LABELS[id] || String(id || '')
+
 export const CUPSY_AUDIO_MODEL = 'seed-audio-1.0'
 
 export const AUDIO_SAMPLE_RATES = [8000, 16000, 24000, 32000, 44100, 48000]

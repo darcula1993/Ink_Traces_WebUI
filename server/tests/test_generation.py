@@ -1581,3 +1581,33 @@ def test_canvas_keyframe_requires_one_or_two_images(monkeypatch, provider, count
             assert '必须提供首帧' in response.json['error']
     else:
         assert response.status_code == (200 if provider == 'ark' else 202), response.json
+
+
+def test_layer_source_only_project_is_listed_without_task(monkeypatch):
+    # Loading a source creates and lists the project at once; no task or provider call yet.
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'api_key': '', 'endpoint': 'https://provider.invalid', 'model': 'test-model',
+    })
+    client = application.app.test_client()
+    before = task_db.list_task_ids(task_type='layer', deleted=None)
+    created = client.post('/api/layer/projects', data={
+        'image': (io.BytesIO(_rgba_png_bytes((512, 512))), 'source-only.png'),
+        'decompose': '0',
+    })
+    assert created.status_code == 201, created.get_json()
+    body = created.get_json()
+    assert body['task_id'] is None and body['project']['current_task'] is None
+    assert task_db.list_task_ids(task_type='layer', deleted=None) == before
+    listed = client.get('/api/layer/projects').get_json()['projects']
+    assert body['project_id'] in [item['id'] for item in listed]
+    assert client.get(f"/api/layer/projects/{body['project_id']}/source").status_code == 200
+
+    # Decomposition later still requires a configured key and then queues one task.
+    rejected = client.post(f"/api/layer/projects/{body['project_id']}/decompose", json={'size': 'auto'})
+    assert rejected.status_code == 400
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', {
+        'api_key': 'test-key', 'endpoint': 'https://provider.invalid', 'model': 'test-model',
+    })
+    queued = client.post(f"/api/layer/projects/{body['project_id']}/decompose", json={'size': 'auto'})
+    assert queued.status_code == 202
+    assert client.get(f"/api/layer/projects/{body['project_id']}").get_json()['project']['current_task']['id'] == queued.get_json()['task_id']
