@@ -67,7 +67,13 @@ def _ensure_columns(db, table, columns):
     existing = {row['name'] for row in db.execute(f'PRAGMA table_info({table})')}
     for name, definition in columns.items():
         if name not in existing:
-            db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+            try:
+                db.execute(f'ALTER TABLE {table} ADD COLUMN {name} {definition}')
+            except sqlite3.OperationalError as error:
+                # The API and the Worker start together and both migrate; whoever loses
+                # the race sees the column already added. Anything else is a real error.
+                if 'duplicate column name' not in str(error).lower():
+                    raise
 
 
 def init_db():

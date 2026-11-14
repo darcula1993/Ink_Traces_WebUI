@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.1 - 2026-11-15
+
+- Fix: upgrading to 1.9.0 could leave the API down on first start because the API and the Worker added the new task column at the same time ("duplicate column name: stage"). Start-up now tolerates the column already added by the other process; other migration errors still stop start-up.
+
 ## 1.9.0 - 2026-11-15
 
 - Run a whole node group: the group bar gets "运行组内全部". A confirmation lists the nodes in upstream order with per-node estimates (unknown prices listed separately, never zero) and marks nodes that will be re-run. The server then submits independent nodes together and each downstream node only after its upstream succeeds, using the new upstream result, so the run continues with the page closed. A normal failure blocks only its downstream; an unknown result stops the whole group without resubmitting. If a recalculated estimate exceeds the confirmed amount (or becomes unknown) the run pauses for a new confirmation. Cancelling stops only nodes not yet submitted. Manually editing a member node or its upstream during a run blocks that branch; single-node generation and retry of member nodes are refused while the run is active.
