@@ -96,3 +96,53 @@ def capture_user_upload(upload):
     finally:
         staging.unlink(missing_ok=True)
         upload.stream.seek(0)
+
+
+def stage_stream(stream, name):
+    """Stage and content-check bytes for registration (no database lock held).
+
+    Used by sources that register an original or a copy directly as 本地素材
+    (character library upload, copies of non-local selections). Returns a dict for
+    ``publish_staged``; the caller must unlink ``staged['path']`` on failure.
+    """
+    if not isinstance(name,str) or not name or len(name)>240 or any(c in name for c in '/\\') or any(ord(c)<32 for c in name):
+        raise store.CanvasError('无效素材文件名')
+    ident=uuid.uuid4().hex
+    staging=root()/(ident+'.tmp')
+    digest=hashlib.sha256(); size=0
+    try:
+        with staging.open('xb') as output:
+            while True:
+                chunk=stream.read(1024*1024)
+                if not chunk: break
+                size+=len(chunk)
+                if size>store.MAX_ASSET_BYTES: raise store.CanvasError('素材不得超过100MiB',413)
+                digest.update(chunk); output.write(chunk)
+            output.flush(); os.fsync(output.fileno())
+        if not size: raise store.CanvasError('素材不能为空')
+        mime,extension=store._detect_media(staging)
+    except BaseException:
+        staging.unlink(missing_ok=True)
+        raise
+    return {'id':ident,'path':staging,'name':name,'mime_type':mime,'extension':extension,'sha256':digest.hexdigest(),'size_bytes':size}
+
+
+def publish_staged(db, staged):
+    """Register a staged file inside the caller's write transaction (dedup by content)."""
+    existing=db.execute('SELECT * FROM canvas_local_uploads WHERE sha256=?',(staged['sha256'],)).fetchone()
+    if existing:
+        path_for(existing)
+        staged['path'].unlink(missing_ok=True)
+        row=dict(existing)
+    else:
+        target=root()/(staged['id']+staged['extension'])
+        os.replace(staged['path'],target)
+        journal=store._transaction_files.get()
+        if journal is not None and journal[0] is db:
+            journal[1].append(('canvas_local_uploads',staged['id'],target))
+        mime=staged['mime_type']
+        db.execute('INSERT INTO canvas_local_uploads VALUES (?,?,?,?,?,?,?,?)',
+                   (staged['id'],staged['name'],mime,mime.split('/')[0],staged['sha256'],staged['size_bytes'],target.name,tasks.utcnow()))
+        row=dict(db.execute('SELECT * FROM canvas_local_uploads WHERE id=?',(staged['id'],)).fetchone())
+    db.execute('DELETE FROM canvas_catalog_hidden WHERE item_key=?',('local:'+row['id'],))
+    return row

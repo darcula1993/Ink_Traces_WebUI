@@ -125,3 +125,6 @@ register_catalog_routes(canvas_api, body)
 
 from canvas_image_params import register_routes as register_image_param_routes
 register_image_param_routes(canvas_api)
+
+from characters import register_routes as register_character_routes
+register_character_routes(canvas_api, body)

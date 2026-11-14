@@ -29,7 +29,7 @@ import png_metadata
 from http_client import HTTP
 from logging_config import configure_logging
 from response_compression import install_compression
-from request_utils import as_bool
+from request_utils import as_bool, normalize_newlines
 from task_api import task_api
 from canvas_api import canvas_api
 from canvas_store import init_canvas_db
@@ -1324,7 +1324,7 @@ def generate():
         is_form_request = request.mimetype == 'multipart/form-data'
 
         if is_form_request:
-            prompt = request.form.get('prompt')
+            prompt = normalize_newlines(request.form.get('prompt'))
             aspect_ratio = request.form.get('aspect_ratio', '3:4')
             resolution = request.form.get('resolution', '1K')
             custom_width = request.form.get('custom_width')
@@ -1341,7 +1341,7 @@ def generate():
                 return jsonify({'success': False, 'error': 'image_urls 格式错误'}), 400
         else:
             data = request.get_json(silent=True) or {}
-            prompt = data.get('prompt')
+            prompt = normalize_newlines(data.get('prompt'))
             aspect_ratio = data.get('aspect_ratio', '9:16')
             resolution = data.get('resolution', '1K')
             custom_width = data.get('custom_width')
@@ -2137,7 +2137,7 @@ def generate_audio():
 
     has_files = bool(request.files)
     data = request.form if has_files else (request.get_json(silent=True) or {})
-    prompt = str(data.get('prompt') or data.get('text_prompt') or '').strip()
+    prompt = normalize_newlines(str(data.get('prompt') or data.get('text_prompt') or '')).strip()
     if not prompt:
         return jsonify({'success': False, 'error': '请填写音频提示词'}), 400
     if len(prompt) > 3000:
@@ -2599,7 +2599,7 @@ def video_generate():
         data = {}
 
         if has_files:
-            prompt = request.form.get('prompt', '')
+            prompt = normalize_newlines(request.form.get('prompt', ''))
             ratio = request.form.get('ratio', 'adaptive')
             duration = request.form.get('duration', '5')
             duration_provided = 'duration' in request.form
@@ -2613,7 +2613,7 @@ def video_generate():
             output_format = request.form.get('output_format', 'mp4').lower()
         else:
             data = request.get_json(silent=True) or {}
-            prompt = data.get('prompt', '')
+            prompt = normalize_newlines(data.get('prompt', ''))
             ratio = data.get('ratio', 'adaptive')
             duration = data.get('duration', 5)
             duration_provided = 'duration' in data
@@ -3030,7 +3030,7 @@ def api_layer_projects():
         stored_metadata['size_bytes'] = size_bytes
         task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
         project = task_db.get_layer_project(project_id)
-        task_id = _queue_layer_task(project, request.form.get('prompt', ''), requested_size, request.form)
+        task_id = _queue_layer_task(project, normalize_newlines(request.form.get('prompt', '')), requested_size, request.form)
         return jsonify({
             'success': True, 'project_id': project_id, 'task_id': task_id,
             'project': task_db.get_layer_project(project_id),
@@ -3094,7 +3094,7 @@ def api_decompose_layer_project(project_id):
         return jsonify({'success': False, 'error': '当前项目已有分解任务正在执行'}), 409
     data = request.get_json(silent=True) or {}
     try:
-        task_id = _queue_layer_task(project, data.get('prompt', ''), data.get('size', 'auto'), data)
+        task_id = _queue_layer_task(project, normalize_newlines(data.get('prompt', '')), data.get('size', 'auto'), data)
         return jsonify({'success': True, 'task_id': task_id, 'project_id': project_id}), 202
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400

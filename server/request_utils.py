@@ -24,3 +24,10 @@ def as_bool(value, default=False):
     if normalized in ('false', '0', 'no', 'off', ''):
         return False
     return default
+
+
+def normalize_newlines(value):
+    """Unify CRLF / lone CR to LF; multipart form fields arrive as CRLF."""
+    if not isinstance(value, str):
+        return value
+    return value.replace('\r\n', '\n').replace('\r', '\n')

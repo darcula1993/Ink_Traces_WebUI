@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.0 - 2026-11-14
+
+- Character library (Asset library → Characters, shared across all projects): each character has a text description, up to 8 reference images and an optional voice reference (WAV/MP3, up to 30 s). Images and audio are local assets referenced by the character, not copies; uploads made in the character library also appear in Local assets. Right-click an image node and choose "Add to character" to add a result.
+- Choosing a character from the @ menu in a node prompt imports its images (and, for video and audio nodes, its voice reference) as ordinary references and writes a visible, editable 【人物】 block at the top of the prompt, following the Seedance 2.5 prompt guide (one line per character, multiple references declared as one person, voice usage stated, "not interchangeable" note for several characters). The character's name is inserted at the caret. Nothing is expanded or hidden at submit time.
+- Nodes that used a character show when it has been updated (one click to sync) or deleted.
+- Permanently deleting a local asset used by a character lists the affected characters first and then removes it from them.
+- Fixed: prompts submitted with references reached the provider with Windows line endings; line breaks are now normalised for all generation routes.
+
 ## 1.6.0 - 2026-11-14
 
 - Generation results are now written into the canvas by the server when a task finishes. A canvas open in two windows no longer reports "updated in another window" when a result arrives; edits made meanwhile are kept, and genuine edits in both windows still raise a conflict. Downstream "upstream updated" markers and reference ids are saved with the result.

@@ -12,7 +12,7 @@
   English · <a href="./doc/README.md">中文</a>
 </p>
 
-<p align="center">Version 1.6.0 · <a href="./CHANGELOG.md">Changelog</a></p>
+<p align="center">Version 1.7.0 · <a href="./CHANGELOG.md">Changelog</a></p>
 
 <p align="center">
   <img src="./screenshot.png" alt="Ink Traces WebUI Screenshot" width="100%" />

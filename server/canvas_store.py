@@ -1,5 +1,6 @@
 """Canvas workflows and durable media, independent from task/workspace cleanup."""
 from contextlib import contextmanager
+from datetime import datetime
 from contextvars import ContextVar
 
 import hashlib
@@ -60,6 +61,8 @@ def init_canvas_db():
     init_catalog_db()
     from canvas_writeback import init_writeback_db
     init_writeback_db()
+    from characters import init_characters_db
+    init_characters_db()
 
 
 _transaction_files = ContextVar('canvas_transaction_files', default=None)
@@ -191,6 +194,45 @@ def _validate_audio_field(key, value):
         raise CanvasError('字幕开关必须为布尔值')
 
 
+HEX32 = re.compile(r'[0-9a-f]{32}')
+
+
+def _validate_character_refs(node):
+    """CHARACTER-LIBRARY-20261114: {characterId: {name, assetIds, updatedAt?}} on generation nodes.
+
+    Only used for the client's "角色已更新/已删除" hint and one-click sync; it never
+    takes part in request construction. assetIds are canvas asset ids imported for
+    the character (same format rule as referenceMentions values). A deleted character
+    keeps its entry, so the character's existence is not checked.
+    """
+    if 'characterRefs' not in node:
+        return
+    refs = node['characterRefs']
+    if node.get('type') not in ('image', 'video', 'audio'):
+        raise CanvasError('仅图像、视频、音频生成节点可引用角色')
+    if not isinstance(refs, dict) or len(refs) > 50:
+        raise CanvasError('角色引用须为最多50项的对象')
+    for character_id, ref in refs.items():
+        if not isinstance(character_id, str) or not HEX32.fullmatch(character_id):
+            raise CanvasError('角色引用编号无效')
+        if not isinstance(ref, dict) or not {'name', 'assetIds'} <= set(ref) or set(ref) - {'name', 'assetIds', 'updatedAt'}:
+            raise CanvasError('角色引用须包含 name 与 assetIds，可选 updatedAt')
+        if 'updatedAt' in ref:
+            # Snapshot of the character's updated_at when inserted (ISO 8601), for the "角色已更新" hint.
+            stamp = ref['updatedAt']
+            try:
+                valid = isinstance(stamp, str) and 10 <= len(stamp) <= 40 and datetime.fromisoformat(stamp) is not None
+            except ValueError:
+                valid = False
+            if not valid:
+                raise CanvasError('角色引用 updatedAt 须为 ISO 时间字符串')
+        name, ids = ref['name'], ref['assetIds']
+        if not isinstance(name, str) or not 1 <= len(name) <= 24:
+            raise CanvasError('角色引用名称须为1至24个字符')
+        if not isinstance(ids, list) or len(ids) > 9 or len(set(ids)) != len(ids) or any(not isinstance(i, str) or not HEX32.fullmatch(i) for i in ids):
+            raise CanvasError('角色引用素材须为最多9个不重复的素材编号')
+
+
 def validate_document(document, workflow_id):
     if not isinstance(document, dict) or type(document.get('version')) is not int or document['version'] != 1:
         raise CanvasError('不支持的画布文档版本')
@@ -225,7 +267,7 @@ def validate_document(document, workflow_id):
         if not isinstance(node, dict) or not isinstance(node.get('id'), str) or not ID.fullmatch(node['id']) or node['id'] in seen:
             raise CanvasError('节点ID无效或重复')
         seen.add(node['id'])
-        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale'}:
+        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs'}:
             raise CanvasError('未知节点字段')
         if type(node.get('rating', 0)) is not int or not 0 <= node.get('rating', 0) <= 5:
             raise CanvasError('节点评级必须为0至5的整数')
@@ -251,6 +293,7 @@ def validate_document(document, workflow_id):
             raise CanvasError('素材节点不能包含参考素材提及')
         if node['type'] == 'asset' and order:
             raise CanvasError('素材节点不能包含参考素材排序')
+        _validate_character_refs(node)
         from canvas_project_settings import validate_node_selection
         validate_node_selection(node['type'], node.get('providerSelection'))
         if not all(_number(node.get(k)) for k in ('x', 'y')):

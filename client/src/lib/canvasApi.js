@@ -1,7 +1,7 @@
 import {isServerTaskStatus,isTerminalTaskStatus} from './taskStatus.js'
 import axios from 'axios'
 import {normalizeSavedWorkflow} from './canvasTaskPolling.js'
-import {resolveNodeInputs} from './canvasReferences'
+import {resolveNodeInputs} from './canvasReferences.js'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
 import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue } from './generationSettings.js'
 import {nodeProvider,selectionKey,normalizeProviderPreferences} from './canvasProviderSelection.js'
@@ -55,6 +55,19 @@ export const uploadProjectAsset = (id, file) => upload(`${projectUrl(id)}/assets
 export const listProjectAssetGroups = async id => (await data(axios.get(`${projectUrl(id)}/asset-groups`))).groups
 export const createProjectAssetGroup = async (id, title, assetIds) => (await data(axios.post(`${projectUrl(id)}/asset-groups`, { title, asset_ids: assetIds }))).group
 export const resolveCanvasReferences = (id, selection) => data(axios.post(`${workflowUrl(id)}/reference-assets`, selection))
+
+// CHARACTER-LIBRARY-20261114 C: the global character library and the import of a character's
+// reference images / voice into the current canvas (idempotent on the server: same content → same
+// canvas asset). The result is only used to write ordinary references and prompt text; character
+// metadata never goes into a generation request.
+export const listCharacters = async () => (await data(axios.get('/api/characters'))).characters || []
+export async function importCharacterAssets(workflowId, characterId, { imageIds = [], voice = false } = {}) {
+  const result = await data(axios.post(`${workflowUrl(workflowId)}/character-assets`, { character_id: characterId, image_ids: imageIds, ...(voice ? { voice: true } : {}) }))
+  const assets = Array.isArray(result.assets) ? result.assets : imageIds.map(id => result.mapping?.[id])
+  if (assets.length !== imageIds.length || assets.some(asset => !asset?.id || asset.kind !== 'image')) throw new Error('角色参考图导入结果无效，未插入角色')
+  if (voice && (!result.voice?.id || result.voice.kind !== 'audio')) throw new Error('角色参考音频导入结果无效，未插入角色')
+  return { assets, voice: voice ? result.voice : null }
+}
 
 export async function getCanvasCapabilities() {
   const [image, video, audio, saved] = await Promise.all([

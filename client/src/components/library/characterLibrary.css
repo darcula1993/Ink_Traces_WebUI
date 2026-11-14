@@ -1,0 +1,50 @@
+/* CHARACTER-LIBRARY-20261114: global character library inside the asset library shell. */
+.cl-root{flex:1;min-height:0;display:flex;gap:var(--sp-5,20px);padding-bottom:20px}
+.cl-list{width:clamp(220px,18vw,320px);flex-shrink:0;display:flex;flex-direction:column;gap:var(--sp-2,8px);min-height:0}
+.cl-list-head{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--text-2);font-size:var(--fs-caption,12px)}
+.cl-list ul{list-style:none;margin:0;padding:0;overflow:auto;display:flex;flex-direction:column;gap:6px;min-height:0}
+.ul-library .cl-card{width:100%;display:flex;align-items:center;gap:10px;padding:6px;text-align:left}
+.cl-card img,.cl-cover-empty{width:48px;height:48px;flex-shrink:0;border-radius:6px;object-fit:cover;background:var(--surface-2,#ffffff0d);display:flex;align-items:center;justify-content:center;color:var(--text-3)}
+.cl-card-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.cl-card-text strong{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-card-text small{color:var(--text-3);font-size:12px}
+.cl-voice-mark{color:var(--accent);display:flex}
+.cl-detail{flex:1;min-width:0;overflow:auto;display:flex;flex-direction:column;gap:var(--sp-4,16px);padding-right:4px}
+.cl-row{display:flex;align-items:flex-start;gap:8px}
+.cl-row>button:where(:not(.btn)){margin-top:22px;white-space:nowrap}
+.cl-row .cl-delete{margin-top:22px;margin-left:auto}
+.cl-field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0;max-width:640px}
+.cl-field label{display:flex;flex-direction:column;gap:4px;color:var(--text-2);font-size:12px}
+.cl-field input,.cl-field textarea{color:var(--text);background:#e0e3e108;border:1px solid #c6cac829;border-radius:8px;padding:7px 11px;font:14px/1.5 inherit;resize:vertical}
+.cl-field textarea{min-height:84px}
+.cl-field [aria-invalid=true]{border-color:var(--danger,#d07070)}
+.cl-hint{color:var(--text-3);font-size:12px;margin:0}
+.cl-field-error{color:var(--danger,#f0b0a8);font-size:12px}
+.cl-section{display:flex;flex-direction:column;gap:8px;border-top:1px solid #c6cac81f;padding-top:var(--sp-4,16px)}
+.cl-section-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cl-section-head h4{margin:0 auto 0 0;font-size:14px;font-weight:600}
+.cl-section-head h4 small{color:var(--text-3);font-weight:400;margin-left:4px}
+.cl-section-head button:where(:not(.btn)){display:inline-flex;align-items:center;gap:6px}
+.cl-images{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(clamp(120px,9vw,170px),1fr));gap:12px}
+.cl-image{position:relative;border:1px solid #c6cac829;border-radius:8px;overflow:hidden;background:#e0e3e206;cursor:grab}
+.cl-image img{width:100%;aspect-ratio:1;object-fit:cover;display:block;pointer-events:none}
+.cl-image.is-dragging{opacity:.4}
+.cl-image.is-drop{outline:2px solid var(--accent);outline-offset:-2px}
+.cl-image-index{position:absolute;left:6px;top:6px;min-width:20px;height:20px;padding:0 5px;border-radius:10px;background:#000000b0;color:#fff;font-size:12px;display:flex;align-items:center;justify-content:center}
+.cl-image-tools{display:flex;justify-content:flex-end;gap:4px;padding:4px}
+.ul-library .cl-image-tools button:where(:not(.btn)){padding:3px 6px;display:inline-flex}
+.cl-voice{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cl-voice span{color:var(--text-2);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-voice audio{height:36px;min-width:260px}
+.ul-subdialog .cl-field label{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+.ul-subdialog .cl-field textarea{color:inherit;background:#2e3230;border:1px solid #b9bfbb4d;border-radius:8px;padding:8px;font:inherit}
+/* Canvas “加入角色” dialog */
+.cl-pick{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
+.ul-subdialog .cl-pick button:where(:not(.btn)){width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:6px}
+.ul-subdialog .cl-pick button[aria-checked=true]{border-color:var(--accent);background:var(--accent-soft,#45c08822)}
+.ul-subdialog .cl-pick button:disabled{opacity:.5}
+.cl-pick-mode{display:flex;gap:8px}
+.ul-subdialog .cl-pick-mode button[aria-pressed=true]{border-color:var(--accent);background:var(--accent-soft,#45c08822)}
+.cl-pick-preview{display:flex;align-items:center;gap:10px;color:var(--text-2);font-size:13px}
+.cl-pick-preview img{width:56px;height:56px;object-fit:cover;border-radius:6px}
+@media(max-width:1100px){.cl-list{width:200px}}

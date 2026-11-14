@@ -1,6 +1,6 @@
 import React, { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
-import { AudioLines, Film, Image as ImageIcon } from 'lucide-react'
+import { AudioLines, Film, Image as ImageIcon, UserRound } from 'lucide-react'
 import { referenceTokenRanges, referenceDeletionRange } from '../lib/referenceMedia.js'
 import { arrowSelection, snapSelection, referenceAt } from '../lib/referenceCaret.js'
 
@@ -15,7 +15,8 @@ export function findPromptMention(value, cursor) {
 
   const candidate = safeValue.slice(atIndex, safeCursor)
   // V140 #15: Chinese queries (@图 / @图片1 / @视频) as well as the English alias.
-  const match = candidate.match(/^@([a-zA-Z\u4e00-\u9fff]*\d*)$/)
+  // CHARACTER-LIBRARY-20261114 C: character names may also mix digits, _, - and · (e.g. @林2号).
+  const match = candidate.match(/^@([a-zA-Z0-9_\-·\u4e00-\u9fff]*)$/)
   if (!match) return null
   return { start: atIndex, end: safeCursor, query: match[1].toLowerCase() }
 }
@@ -128,7 +129,7 @@ function ReferenceHighlight({ textareaRef, value, tokenState }) {
 }
 
 function MentionThumbnail({ item }) {
-  if (item.type === 'image' && item.preview) {
+  if ((item.type === 'image' || item.type === 'character') && item.preview) {
     return <img src={item.preview} alt="" className="size-full object-cover" />
   }
   if (item.type === 'video' && item.thumbnail) {
@@ -136,6 +137,7 @@ function MentionThumbnail({ item }) {
   }
   if (item.type === 'video') return <Film size={16} />
   if (item.type === 'audio') return <AudioLines size={16} />
+  if (item.type === 'character') return <UserRound size={16} />
   return <ImageIcon size={16} />
 }
 
@@ -152,7 +154,7 @@ export default function PromptMentionTextarea({
   referenceTokenState,
   ...textareaProps
 }) {
-  const textareaRef = useRef(null), dismissedMention = useRef(null), composing = useRef(false)
+  const textareaRef = useRef(null), dismissedMention = useRef(null), composing = useRef(false), inserting = useRef(false)
   const menuId = useId()
   const [mention, setMention] = useState(null)
   const [activeIndex, setActiveIndex] = useState(0)
@@ -183,13 +185,15 @@ export default function PromptMentionTextarea({
   }, [mention?.query, mentionItems])
 
   const updateMention = (nextValue, cursor) => {
+    // While an asynchronous insert is pending (and right after it), selection events must not reopen the menu.
+    if (inserting.current) { setMention(null); return }
     if(dismissedMention.current===`${nextValue}\u0000${cursor}`){setMention(null);return}
     dismissedMention.current=null
     let nextMention = findPromptMention(nextValue, cursor)
     // A complete reference (just inserted or typed out) does not reopen the menu.
-    if (nextMention?.query && mentionItems.some(item => item.label.toLowerCase() === nextMention.query)) nextMention = null
+    if (nextMention?.query && mentionItems.some(item => item.type !== 'character' && item.label.toLowerCase() === nextMention.query)) nextMention = null
     // Ordinary Chinese text after @ (not a reference query) does not open an empty menu.
-    if (nextMention?.query && /[\u4e00-\u9fff]/.test(nextMention.query) && !mentionItems.some(item => [item.label, item.alias, item.name].some(text => String(text || '').toLowerCase().includes(nextMention.query)))) nextMention = null
+    if (nextMention?.query && (/[\u4e00-\u9fff]/.test(nextMention.query) || !/^[a-zA-Z]*\d*$/.test(nextMention.query)) && !mentionItems.some(item => [item.label, item.alias, item.name].some(text => String(text || '').toLowerCase().includes(nextMention.query)))) nextMention = null
     // A repeated select event for the same query keeps the highlighted option.
     if (nextMention && mention && nextMention.start === mention.start && nextMention.query === mention.query) return
     setMention(nextMention)
@@ -223,7 +227,22 @@ export default function PromptMentionTextarea({
   }, [mention, filteredItems.length])
 
   const selectItem = item => {
-    if (!mention || onMentionSelect?.(item)===false) return
+    if (!mention) return
+    const handled = onMentionSelect?.(item, mention)
+    if (handled === false) return
+    // CHARACTER-LIBRARY-20261114 C: an asynchronous handler writes the text itself (one edit with its
+    // references) and resolves to the caret position, or null when nothing was inserted.
+    if (handled && typeof handled.then === 'function') {
+      setMention(null)
+      inserting.current = true
+      const finish = cursor => requestAnimationFrame(() => {
+        textareaRef.current?.focus()
+        if (Number.isInteger(cursor)) textareaRef.current?.setSelectionRange(cursor, cursor)
+        requestAnimationFrame(() => { inserting.current = false; setMention(null) })
+      })
+      handled.then(finish, () => finish(null))
+      return
+    }
     const inserted = insertPromptMention(value, mention, item.token)
     onValueChange(inserted.value)
     setMention(null)
@@ -307,7 +326,7 @@ export default function PromptMentionTextarea({
             <span className="block font-mono text-xs font-semibold text-nexus-text-light">{item.label}</span>
             <span className="block truncate text-xs text-nexus-muted">{item.name || item.label}</span>
           </span>
-          <span className="font-mono text-xs text-nexus-green">{item.token}</span>
+          <span className="font-mono text-xs text-nexus-green">{item.type === 'character' ? '角色' : item.token}</span>
         </button>
       )) : (
         <div className="px-3 py-4 text-center text-xs text-nexus-muted">

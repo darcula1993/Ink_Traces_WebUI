@@ -5,6 +5,8 @@ an unowned local upload (local:), a project library asset (library:) or a direct
 canvas upload (workflow:) -- with its file. Canvas copies derived from it are deleted
 too and every workflow document that referenced the deleted assets is rewritten
 (revision+1). Generated history (task:) and Cupsy remote assets (cupsy:) are refused.
+Characters referencing a deleted local item are listed (``characters``) in the
+preview/result and lose that reference (CHARACTER-LIBRARY-20261114).
 
 Copy provenance is the only relation used: ``canvas_asset_copies`` records (canvas
 asset, source key) only when a copy actually produced the asset (see
@@ -101,7 +103,8 @@ def _derived_copies(db, keys):
             for asset in db.execute('SELECT a.* FROM canvas_assets a JOIN canvas_asset_copies c ON c.asset_id=a.id WHERE c.source_key=?', (key,)):
                 found[asset['id']] = dict(asset)
                 frontier.add('workflow:' + asset['id'])
-    sources = {i: {r[0] for r in db.execute('SELECT source_key FROM canvas_asset_copies WHERE asset_id=?', (i,))} for i in found}
+    # character:<id> records (character-assets imports) are informational: never a source to keep a copy alive.
+    sources = {i: {r[0] for r in db.execute("SELECT source_key FROM canvas_asset_copies WHERE asset_id=? AND source_key NOT LIKE 'character:%'", (i,))} for i in found}
     while True:
         deleting = set(keys) | {'workflow:' + i for i in found}
         kept = [i for i in found if not sources[i] <= deleting]
@@ -145,6 +148,9 @@ def strip_document(document, removed):
             node['referenceOrder'] = [i for i in node['referenceOrder'] if i not in removed]
         if 'referenceMentions' in node:
             node['referenceMentions'] = {k: v for k, v in node['referenceMentions'].items() if v not in removed}
+        if isinstance(node.get('characterRefs'), dict):
+            node['characterRefs'] = {k: {**v, 'assetIds': [i for i in v.get('assetIds', []) if i not in removed]} if isinstance(v, dict) else v
+                                     for k, v in node['characterRefs'].items()}
         if lost_input and node['type'] in GENERATION and node.get('asset'):
             node['upstreamStale'] = True
         if json.dumps(node, sort_keys=True) != original:
@@ -220,7 +226,9 @@ def _plan(db, keys):
         documents[workflow_id] = document
         touched_nodes += touched
         removed_nodes += dropped
-    return {'local_rows': local_rows, 'library_rows': library_rows, 'direct': direct, 'missing': missing, 'rejected': rejected,
+    from characters import usage
+    characters = usage(db, [r['id'] for r in local_rows])
+    return {'characters': characters, 'local_rows': local_rows, 'library_rows': library_rows, 'direct': direct, 'missing': missing, 'rejected': rejected,
             'copies': deletable, 'canvas_assets': canvas_assets, 'archived_copies': len(copies) - len(deletable),
             'documents': documents, 'affected_nodes': touched_nodes, 'removed_nodes': removed_nodes,
             'deleted_keys': [k for k in sources]}
@@ -230,7 +238,7 @@ def _summary(plan):
     return {'items': len(plan['deleted_keys']), 'canvas_copies': len(plan['copies']),
             'workflows': len(plan['documents']), 'workflow_ids': sorted(plan['documents']), 'affected_nodes': plan['affected_nodes'],
             'removed_nodes': plan['removed_nodes'], 'archived_copies_retained': plan['archived_copies'],
-            'missing': plan['missing'], 'rejected': plan['rejected']}
+            'missing': plan['missing'], 'rejected': plan['rejected'], 'characters': plan['characters']}
 
 
 def preview(keys):
@@ -263,6 +271,9 @@ def delete_items(keys):
             removed_keys = plan['deleted_keys'] + ['workflow:' + i for i in plan['copies']]
             for row in plan['local_rows']:
                 db.execute('DELETE FROM canvas_local_uploads WHERE id=?', (row['id'],))
+            # Characters reference 本地素材 items; permanent deletion removes those references.
+            from characters import unlink_local
+            unlink_local(db, [r['id'] for r in plan['local_rows']])
             removed_library = {r['id'] for r in plan['library_rows']}
             for asset_id in removed_library:
                 db.execute('DELETE FROM canvas_library_asset_locations WHERE asset_id=?', (asset_id,))

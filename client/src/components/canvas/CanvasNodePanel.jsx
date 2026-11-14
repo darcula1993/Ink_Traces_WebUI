@@ -10,6 +10,9 @@ import CanvasVideoEstimate from './CanvasVideoEstimate'
 import {isBusyTaskStatus,isFailureTaskStatus} from '../../lib/taskStatus'
 import ReferenceThumbnails from './ReferenceThumbnails'
 import PromptLibraryPicker from './PromptLibraryPicker'
+import useCharacterLibrary from './useCharacterLibrary'
+import {importCharacterAssets} from '../../lib/canvasApi'
+import {characterMentionItems,planCharacterInsert,applyCharacterInsert,applyCharacterSync,characterNotices,characterUsage,hasCharacterInBlock,blockCharacterNames,referenceLimitError} from '../../lib/canvasCharacters'
 import {resolveKeyframeRoles,canvasMentionItems,referenceMentionIssues,referenceTokenState,positionalMentionRebinds} from '../../lib/canvasReferences'
 import {effectiveVideoModel,videoCapabilities,videoDurations,videoRatio,VIDEO_RATIOS} from '../../lib/videoGenerationRules'
 import {selectionOptionId,toSelection} from '../../lib/canvasProviderSelection'
@@ -22,7 +25,46 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
  const [mentionError,setMentionError]=useState(''),[taskNumber,setTaskNumber]=useState(''),[popover,setPopover]=useState(null),outputTrigger=useRef(null),detailTrigger=useRef(null)
  const params=node.params||{},task=node.task,label=labels[node.type],model=effectiveVideoModel(params.model,provider?.models),spec=videoCapabilities(model),ratio=videoRatio(model,params.video_mode,inputImages.length>0,params.ratio||'16:9')
  const unsupported=node.type==='video'&&provider&&params.model&&!provider.models?.some(item=>item.id===params.model),frames=resolveKeyframeRoles(node,inputAssets)
- const mentionItems=canvasMentionItems(node,inputAssets),mentionIssues=[...new Set([...referenceMentionIssues(node,inputAssets),...inputIssues.filter(issue=>issue.startsWith('提及'))])],selection=node.providerSelection,selectionId=selectionOptionId(selection)
+ // CHARACTER-LIBRARY-20261114 C: characters in the @ menu; choosing one writes visible prompt text (see canvasCharacters).
+ const library=useCharacterLibrary(node.type!=='text'),nodeRef=useRef(node),assetsRef=useRef(inputAssets),mounted=useRef(true),[characterBusy,setCharacterBusy]=useState('')
+ nodeRef.current=node;assetsRef.current=inputAssets
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false}},[])
+ const notices=node.type==='text'?[]:characterNotices(node,library.characters),libraryUnknown=node.type!=='text'&&!library.characters&&library.error&&Object.values(node.characterRefs||{}).some(ref=>blockCharacterNames(node.text).includes(ref.name))
+ const failureText=error=>error?.response?.data?.error||error?.message||'请求失败'
+ async function insertCharacter(item,mention){
+  const character=(library.characters||[]).find(entry=>entry.id===item.characterId)
+  const fail=message=>{setMentionError(message);return null}
+  if(!character)return fail('角色已不在角色库中，请重新选择')
+  const before=nodeRef.current,beforeIds=assetsRef.current.map(asset=>asset.id).join(',')
+  if(hasCharacterInBlock(before.text,character.name)){const result=applyCharacterInsert({node:before,assets:assetsRef.current,character,caret:mention});setMentionError('');onChange(result.patch);return result.cursor}
+  if(!workflowId)return fail('画布尚未载入，未插入角色')
+  const plan=planCharacterInsert({node:before,assets:assetsRef.current,provider,character})
+  if(plan.error)return fail(`未插入：${plan.error}`)
+  setCharacterBusy(character.name)
+  try{
+   const imported=plan.imageIds.length||plan.voice?await importCharacterAssets(workflowId,character.id,plan):{assets:[],voice:null}
+   if(!mounted.current)return null
+   if(nodeRef.current.text!==before.text||assetsRef.current.map(asset=>asset.id).join(',')!==beforeIds)return fail(`导入期间提示词或参考已变化，未插入角色“${character.name}”；请重新选择（已导入的素材保留在画布中）`)
+   const result=applyCharacterInsert({node:nodeRef.current,assets:assetsRef.current,character,imported,caret:mention})
+   setMentionError('');onChange(result.patch);return result.cursor
+  }catch(error){return mounted.current?fail(`未插入角色“${character.name}”：${failureText(error)}`):null}finally{if(mounted.current)setCharacterBusy('')}
+ }
+ async function syncCharacter(id){
+  const character=(library.characters||[]).find(entry=>entry.id===id)
+  if(!character||!workflowId)return
+  const usage=characterUsage(node.type,character),before=nodeRef.current
+  setCharacterBusy(character.name);setMentionError('')
+  try{
+   const imported=usage.images.length||usage.voice?await importCharacterAssets(workflowId,id,{imageIds:usage.images.map(image=>image.asset_id),voice:usage.voice}):{assets:[],voice:null}
+   if(!mounted.current)return
+   if(nodeRef.current.text!==before.text)throw new Error('同步期间提示词已变化，请重试')
+   const result=applyCharacterSync({node:nodeRef.current,assets:assetsRef.current,character,imported}),limit=referenceLimitError(node,result.assets,provider)
+   if(limit)throw new Error(`同步后超出参考上限：${limit}`)
+   onChange(result.patch)
+  }catch(error){if(mounted.current)setMentionError(`未同步角色“${character.name}”：${failureText(error)}`)}finally{if(mounted.current)setCharacterBusy('')}
+ }
+ const dismissCharacter=id=>{const {[id]:_,...rest}=node.characterRefs||{};onChange({characterRefs:Object.keys(rest).length?rest:undefined})}
+ const mentionItems=[...canvasMentionItems(node,inputAssets),...(node.type==='text'?[]:characterMentionItems(library.characters||[]))],mentionIssues=[...new Set([...referenceMentionIssues(node,inputAssets),...inputIssues.filter(issue=>issue.startsWith('提及'))])],selection=node.providerSelection,selectionId=selectionOptionId(selection)
  const setParam=(key,value)=>onChange({params:{...params,[key]:value}})
  const imageAdapter=provider?.provider||provider?.id,imageMetadata=useCanvasImageMetadata(workflowId,inputImages,node.type==='image'),imageDimensions=useImageDimensionDraft(params,patch=>onChange({params:{...params,...patch}}),node.id),imageIssues=node.type==='image'&&provider?imageParameterIssues(imageAdapter,params,imageMetadata.references,provider.capability_model||provider.model):[]
  const imageInvalid=node.type==='image'&&(imageIssues.length>0||(['ark','cupsy'].includes(imageAdapter)&&imageDimensions.error))
@@ -69,8 +111,11 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
    {node.upstreamStale&&<div className="cv-stale-notice" role="status"><span>上游已更新：此节点的结果基于旧输入，重新生成成功后标记消失；不会自动生成。</span>{onDismissStale&&<button type="button" onClick={onDismissStale}>忽略标记</button>}</div>}
    {inputAssets.length>0&&<div className="cv-panel-reference-section"><ReferenceThumbnails assets={inputAssets} frames={frames} onReorder={onReorderReferences}/><button className="btn btn-ghost btn-sm" onClick={onClearReferences}>清空所有参考</button>{node.referenceGroups?.map(group=><small key={group.id}>旧素材组：{group.title}</small>)}</div>}
    {node.type==='video'&&params.video_mode==='keyframe'&&frames.issues.length>0&&<div className="cv-panel-frames">{frames.issues.map(issue=><span key={issue} role="status">{issue}</span>)}</div>}
-   <PromptMentionTextarea wrapperClassName="cv-prompt-mention" menuClassName="cv-mention-menu" className="cv-panel-prompt" aria-label={`${node.title}的${node.type==='text'?'文本':'提示词'}`} value={node.text||''} mentionItems={mentionItems} referenceTokenState={referenceTokenState(node,inputAssets)} placeholder="描述希望生成的画面、动作或声音，输入 @ 引用已接入素材（如 @图片1）…" onValueChange={text=>{setMentionError('');onChange({text})}} onMentionSelect={item=>{if(node.referenceMentions?.[item.token]&&node.referenceMentions[item.token]!==item.assetId&&node.text?.includes(item.token)){setMentionError(`请先删除原来的失效提及 ${item.token}，再选择新素材`);return false}}}/>
+   <PromptMentionTextarea wrapperClassName="cv-prompt-mention" menuClassName="cv-mention-menu" className="cv-panel-prompt" aria-label={`${node.title}的${node.type==='text'?'文本':'提示词'}`} value={node.text||''} mentionItems={mentionItems} referenceTokenState={referenceTokenState(node,inputAssets)} placeholder="描述希望生成的画面、动作或声音，输入 @ 引用已接入素材（如 @图片1）或角色…" onValueChange={text=>{setMentionError('');onChange({text})}} onMentionSelect={(item,mention)=>{if(item.type==='character')return characterBusy?Promise.resolve(null):insertCharacter(item,mention);if(node.referenceMentions?.[item.token]&&node.referenceMentions[item.token]!==item.assetId&&node.text?.includes(item.token)){setMentionError(`请先删除原来的失效提及 ${item.token}，再选择新素材`);return false}}}/>
    <PromptLibraryPicker getTextarea={()=>panelRef.current?.querySelector('textarea.cv-panel-prompt')} value={node.text||''} onInsertFallback={text=>{setMentionError('');onChange({text})}}/>
+   {characterBusy&&<div className="cv-reference-note" role="status" data-testid="character-busy">正在导入角色“{characterBusy}”的参考素材…</div>}
+   {notices.map(notice=><div key={notice.id} className="cv-stale-notice" role="status" data-testid="character-notice" data-status={notice.status}><span>{notice.text}</span>{notice.status==='updated'?<button type="button" disabled={!!characterBusy} title="重新导入该角色的参考并替换【人物】块中该角色的内容；不会自动生成" onClick={()=>syncCharacter(notice.id)}>同步角色</button>:<button type="button" onClick={()=>dismissCharacter(notice.id)}>不再提示</button>}</div>)}
+   {libraryUnknown&&<div className="cv-reference-note" role="status">无法读取角色库，暂不能检查角色是否已更新</div>}
    {(mentionError||mentionIssues.length>0)&&<div className="cv-reference-warning" role="alert">{mentionError||mentionIssues.join('；')}</div>}
    {(()=>{const live=positionalMentionRebinds(node,inputAssets).map(item=>`${item.token} 已改为指向 ${item.name}`).join('；'),text=mentionNotice||live;return text&&<div className="cv-reference-note" role="status" data-testid="mention-rebind-note">{text}（按参考顺序解释，可撤销或重新 @ 选择）</div>})()}
    {node.type!=='text'&&!provider&&<div className="cv-reference-warning" role="status">{selection?'节点所选接口已停用或不可用，请重新选择。':'请先为节点选择接口。'}</div>}{unsupported&&<span role="status">当前接口不支持原模型，请选择受支持的模型；原参数已保留。</span>}{audioIssue&&<div className="cv-reference-warning" role="status" data-testid="audio-param-issue">{audioIssue}</div>}{imageInvalid&&<div className="cv-reference-warning" role="status">图片参数不适用于当前接口。<button onClick={()=>setPopover('output')}>处理输出参数</button></div>}
