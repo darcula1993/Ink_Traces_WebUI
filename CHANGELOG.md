@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1 - 2026-11-17
+
+- The 2.0.0 package was missing `scripts/migrate-library-global.py`, which the upgrade from 1.x needs. It is now included. No other changes.
+
 ## 2.0.0 - 2026-11-17
 
 Breaking: the asset library model changes and existing data is migrated (see "Upgrading").
