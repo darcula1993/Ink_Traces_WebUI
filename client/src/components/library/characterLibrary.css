@@ -38,7 +38,7 @@
 .cl-voice audio{height:36px;min-width:260px}
 .ul-subdialog .cl-field label{display:flex;flex-direction:column;align-items:stretch;gap:4px}
 .ul-subdialog .cl-field textarea{color:inherit;background:#2e3230;border:1px solid #b9bfbb4d;border-radius:8px;padding:8px;font:inherit}
-/* Canvas “加入角色” dialog */
+/* Canvas “加入角色卡” dialog */
 .cl-pick{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
 .ul-subdialog .cl-pick button:where(:not(.btn)){width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:6px}
 .ul-subdialog .cl-pick button[aria-checked=true]{border-color:var(--accent);background:var(--accent-soft,#45c08822)}

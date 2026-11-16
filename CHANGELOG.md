@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.9.2 - 2026-11-16
+
+- Add generation results to local assets: from the generation history (single or multi-select), a canvas node's right-click menu or its version list (current or all versions), and task cards, batch selection or task details. The result is kept as an independent copy (a hard link on the same disk, so no extra space) with no project ownership, like uploads; deleting the task, emptying the trash or cleaning a project keeps it, and deleting it keeps the task output and canvas. Adding the same result again does not create a second copy, and identical files share one local asset. Tags already on the result are carried over; the add dialog lets you pick tags and create a new tag on the spot. Tagging directly in the generation history is replaced by this flow.
+- Tag pickers can create a new tag on the spot.
+- The character library is now called "角色卡" everywhere, separate from the "角色" folder category in local assets.
+
 ## 1.9.1 - 2026-11-15
 
 - Fix: upgrading to 1.9.0 could leave the API down on first start because the API and the Worker added the new task column at the same time ("duplicate column name: stage"). Start-up now tolerates the column already added by the other process; other migration errors still stop start-up.

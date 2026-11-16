@@ -1,8 +1,8 @@
 import React from 'react'
 import {CHARACTER_DESCRIPTION_MAX,descriptionLength} from '../../lib/characterRules'
 export const DESCRIPTION_HINT='会写进生成提示词，描述外貌与服装等可见特征'
-// Name + text description inputs shared by the library and the canvas “加入角色” dialog.
-export function CharacterNameInput({value,onChange,error,onEnter,autoFocus=false,label='角色名称'}){
+// Name + text description inputs shared by the library and the canvas “加入角色卡” dialog.
+export function CharacterNameInput({value,onChange,error,onEnter,autoFocus=false,label='角色卡名称'}){
  return <div className="cl-field"><label>{label}<input autoFocus={autoFocus} aria-label={label} aria-invalid={!!error||undefined} aria-describedby={error?'cl-name-error':undefined} value={value} placeholder="例如：林" onChange={e=>onChange(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.nativeEvent.isComposing&&onEnter){e.preventDefault();onEnter()}}}/></label>{error&&<small id="cl-name-error" className="cl-field-error" role="alert">{error}</small>}</div>
 }
 export function CharacterDescriptionInput({value,onChange}){

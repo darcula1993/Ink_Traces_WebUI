@@ -20,13 +20,15 @@ import {AUDIO_SPEAKERS,AUDIO_OUTPUT_FORMATS,AUDIO_SAMPLE_RATES,canvasAudioParams
 import {Upload,Copy,SlidersHorizontal,X,Maximize2,Minimize2,ChevronDown,ArrowUp} from 'lucide-react'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import useTaskEcho from './useTaskEcho'
+import AddToLocalDialog from '../library/AddToLocalDialog'
+import {canvasAssetRef} from '../library/localFromResults'
 import {taskFailure,FAILURE_ACTION_LABELS} from '../../lib/canvasTaskEcho'
 const labels={text:'文本',image:'画面',video:'视频',audio:'音频'}
 // FIX-B2B-20261114: prompt placeholder per node type (wording only; references follow canvasReferences ACCEPTS).
 const PROMPT_PLACEHOLDERS={
- image:'描述要生成的画面：主体、场景、构图与风格；输入 @ 引用已接入图片（如 @图片1）或角色…',
- video:'描述镜头：主体动作、运镜、节奏与声音；输入 @ 引用已接入素材（如 @图片1、@视频1）或角色…',
- audio:'输入要生成的台词、旁白或音效描述；输入 @ 引用已接入素材（如 @音频1）或角色…',
+ image:'描述要生成的画面：主体、场景、构图与风格；输入 @ 引用已接入图片（如 @图片1）或角色卡…',
+ video:'描述镜头：主体动作、运镜、节奏与声音；输入 @ 引用已接入素材（如 @图片1、@视频1）或角色卡…',
+ audio:'输入要生成的台词、旁白或音效描述；输入 @ 引用已接入素材（如 @音频1）或角色卡…',
  text:'输入故事、对白或提示词…',
 }
 const promptPlaceholder=type=>PROMPT_PLACEHOLDERS[type]||PROMPT_PLACEHOLDERS.text
@@ -45,20 +47,20 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
  async function insertCharacter(item,mention){
   const character=(library.characters||[]).find(entry=>entry.id===item.characterId)
   const fail=message=>{setMentionError(message);return null}
-  if(!character)return fail('角色已不在角色库中，请重新选择')
+  if(!character)return fail('角色卡已不在角色卡库中，请重新选择')
   const before=nodeRef.current,beforeIds=assetsRef.current.map(asset=>asset.id).join(',')
   if(hasCharacterInBlock(before.text,character.name)){const result=applyCharacterInsert({node:before,assets:assetsRef.current,character,caret:mention});setMentionError('');onChange(result.patch);return result.cursor}
-  if(!workflowId)return fail('画布尚未载入，未插入角色')
+  if(!workflowId)return fail('画布尚未载入，未插入角色卡')
   const plan=planCharacterInsert({node:before,assets:assetsRef.current,provider,character})
   if(plan.error)return fail(`未插入：${plan.error}`)
   setCharacterBusy(character.name)
   try{
    const imported=plan.imageIds.length||plan.voice?await importCharacterAssets(workflowId,character.id,plan):{assets:[],voice:null}
    if(!mounted.current)return null
-   if(nodeRef.current.text!==before.text||assetsRef.current.map(asset=>asset.id).join(',')!==beforeIds)return fail(`导入期间提示词或参考已变化，未插入角色“${character.name}”；请重新选择（已导入的素材保留在画布中）`)
+   if(nodeRef.current.text!==before.text||assetsRef.current.map(asset=>asset.id).join(',')!==beforeIds)return fail(`导入期间提示词或参考已变化，未插入角色卡“${character.name}”；请重新选择（已导入的素材保留在画布中）`)
    const result=applyCharacterInsert({node:nodeRef.current,assets:assetsRef.current,character,imported,caret:mention})
    setMentionError('');onChange(result.patch);return result.cursor
-  }catch(error){return mounted.current?fail(`未插入角色“${character.name}”：${failureText(error)}`):null}finally{if(mounted.current)setCharacterBusy('')}
+  }catch(error){return mounted.current?fail(`未插入角色卡“${character.name}”：${failureText(error)}`):null}finally{if(mounted.current)setCharacterBusy('')}
  }
  async function syncCharacter(id){
   const character=(library.characters||[]).find(entry=>entry.id===id)
@@ -72,7 +74,7 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
    const result=applyCharacterSync({node:nodeRef.current,assets:assetsRef.current,character,imported}),limit=referenceLimitError(node,result.assets,provider)
    if(limit)throw new Error(`同步后超出参考上限：${limit}`)
    onChange(result.patch)
-  }catch(error){if(mounted.current)setMentionError(`未同步角色“${character.name}”：${failureText(error)}`)}finally{if(mounted.current)setCharacterBusy('')}
+  }catch(error){if(mounted.current)setMentionError(`未同步角色卡“${character.name}”：${failureText(error)}`)}finally{if(mounted.current)setCharacterBusy('')}
  }
  const dismissCharacter=id=>{const {[id]:_,...rest}=node.characterRefs||{};onChange({characterRefs:Object.keys(rest).length?rest:undefined})}
  const mentionItems=[...canvasMentionItems(node,inputAssets),...(node.type==='text'?[]:characterMentionItems(library.characters||[]))],mentionIssues=[...new Set([...referenceMentionIssues(node,inputAssets),...inputIssues.filter(issue=>issue.startsWith('提及'))])],selection=node.providerSelection,selectionId=selectionOptionId(selection)
@@ -83,7 +85,7 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
  const outputSummary=node.type==='audio'?`${AUDIO_SPEAKERS.find(item=>item.value===audioParams.speaker)?.label||audioParams.speaker} · ${AUDIO_OUTPUT_FORMATS.find(item=>item.value===audioParams.output_format)?.label||audioParams.output_format} · ${audioParams.sample_rate/1000}kHz`:node.type==='image'?imageSizeSummary(imageAdapter,params):`${ratio.value} · ${params.resolution||'720p'} · ${(params.duration??5)===-1?'Auto':`${params.duration??5}s`}`
  const recovery=task&&(task.status==='unknown'||task.status==='submitting'&&!task.id)
  const failure=task&&isFailureTaskStatus(task.status)
- const [copied,setCopied]=useState(false),[regenerateConfirm,setRegenerateConfirm]=useState(false)
+ const [copied,setCopied]=useState(false),[regenerateConfirm,setRegenerateConfirm]=useState(false),[localRefs,setLocalRefs]=useState(null)
  // NODE-ECHO-20261115: failure class from the task detail (FAILURE-CLASS contract); absent → nothing extra shown.
  const taskDetail=useTaskEcho(task,failure&&node.type!=='text'),failureClass=failure?taskFailure(task.failure||taskDetail?.failure,{resultUnknown,status:task.status}):null
  // CANVAS-INPUT-20261114 #6: say exactly why "生成" is unavailable (button tooltip + aria-describedby; the panel warnings stay as they are).
@@ -126,9 +128,9 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
    {node.type==='video'&&params.video_mode==='keyframe'&&frames.issues.length>0&&<div className="cv-panel-frames">{frames.issues.map(issue=><span key={issue} role="status">{issue}</span>)}</div>}
    <PromptMentionTextarea wrapperClassName="cv-prompt-mention" menuClassName="cv-mention-menu" className="cv-panel-prompt" aria-label={`${node.title}的${node.type==='text'?'文本':'提示词'}`} value={node.text||''} mentionItems={mentionItems} referenceTokenState={referenceTokenState(node,inputAssets)} placeholder={promptPlaceholder(node.type)} onValueChange={text=>{setMentionError('');onChange({text})}} onMentionSelect={(item,mention)=>{if(item.type==='character')return characterBusy?Promise.resolve(null):insertCharacter(item,mention);if(node.referenceMentions?.[item.token]&&node.referenceMentions[item.token]!==item.assetId&&node.text?.includes(item.token)){setMentionError(`请先删除原来的失效提及 ${item.token}，再选择新素材`);return false}}}/>
    <PromptLibraryPicker getTextarea={()=>panelRef.current?.querySelector('textarea.cv-panel-prompt')} value={node.text||''} onInsertFallback={text=>{setMentionError('');onChange({text})}}/>
-   {characterBusy&&<div className="cv-reference-note" role="status" data-testid="character-busy">正在导入角色“{characterBusy}”的参考素材…</div>}
-   {notices.map(notice=><div key={notice.id} className="cv-stale-notice" role="status" data-testid="character-notice" data-status={notice.status}><span>{notice.text}</span>{notice.status==='updated'?<button type="button" disabled={!!characterBusy} title="重新导入该角色的参考并替换【人物】块中该角色的内容；不会自动生成" onClick={()=>syncCharacter(notice.id)}>同步角色</button>:<button type="button" onClick={()=>dismissCharacter(notice.id)}>不再提示</button>}</div>)}
-   {libraryUnknown&&<div className="cv-reference-note" role="status">无法读取角色库，暂不能检查角色是否已更新</div>}
+   {characterBusy&&<div className="cv-reference-note" role="status" data-testid="character-busy">正在导入角色卡“{characterBusy}”的参考素材…</div>}
+   {notices.map(notice=><div key={notice.id} className="cv-stale-notice" role="status" data-testid="character-notice" data-status={notice.status}><span>{notice.text}</span>{notice.status==='updated'?<button type="button" disabled={!!characterBusy} title="重新导入该角色卡的参考并替换【人物】块中该角色卡的内容；不会自动生成" onClick={()=>syncCharacter(notice.id)}>同步角色卡</button>:<button type="button" onClick={()=>dismissCharacter(notice.id)}>不再提示</button>}</div>)}
+   {libraryUnknown&&<div className="cv-reference-note" role="status">无法读取角色卡库，暂不能检查角色卡是否已更新</div>}
    {(mentionError||mentionIssues.length>0)&&<div className="cv-reference-warning" role="alert">{mentionError||mentionIssues.join('；')}</div>}
    {(()=>{const live=positionalMentionRebinds(node,inputAssets).map(item=>`${item.token} 已改为指向 ${item.name}`).join('；'),text=mentionNotice||live;return text&&<div className="cv-reference-note" role="status" data-testid="mention-rebind-note">{text}（按参考顺序解释，可撤销或重新 @ 选择）</div>})()}
    {node.type!=='text'&&!provider&&<div className="cv-reference-warning" role="status">{selection?'节点所选接口已停用或不可用，请重新选择。':'请先为节点选择接口。'}</div>}{unsupported&&<span role="status">当前接口不支持原模型，请选择受支持的模型；原参数已保留。</span>}{audioIssue&&<div className="cv-reference-warning" role="status" data-testid="audio-param-issue">{audioIssue}</div>}{imageInvalid&&<div className="cv-reference-warning" role="status">图片参数不适用于当前接口。<button onClick={()=>setPopover('output')}>处理输出参数</button></div>}
@@ -143,7 +145,7 @@ export default function CanvasNodePanel({placement,workflowId,node,provider,prov
    {node.type!=='text'&&<div className="cv-generation-actions"><CanvasVideoEstimate node={node} provider={provider} references={node.type==='image'?imageMetadata.references:inputAssets} imageIssue={node.type==='image'?(imageIssues[0]||(['ark','cupsy'].includes(imageAdapter)&&imageDimensions.error)||''):''}/>{disabledReason&&<span id={reasonId} className="cv-sr-only" data-testid="generate-disabled-reason">{disabledReason}</span>}<button className="btn btn-primary btn-icon btn-round btn-lg cv-generate" aria-label={`生成${label}`} title={disabledReason?`无法生成：${disabledReason}`:`生成${label}`} aria-describedby={disabledReason?reasonId:undefined} disabled={!!disabledReason} onClick={()=>{if(expanded)panelRef.current?.focus();onGenerate()}}><ArrowUp size={16} aria-hidden="true"/></button></div>}
   </div>
   {popover==='output'&&<div className={`cv-parameters-popover cv-output-parameters ${node.type==='image'?'cv-image-parameters':''}`} role="group" aria-label="输出参数设置"><header><span>输出参数</span><button className="btn btn-icon btn-sm" aria-label="关闭输出参数" title="关闭输出参数" onClick={closePopover}><X size={13}/></button></header>{node.type==='audio'?<div className="cv-output-fields cv-audio-output"><label>声线<select aria-label="音频预设声线" value={audioParams.speaker} onChange={e=>setParam('speaker',e.target.value)}>{!AUDIO_SPEAKERS.some(item=>item.value===audioParams.speaker)&&<option value={audioParams.speaker}>原声线不支持，请选择</option>}{AUDIO_SPEAKERS.map(item=><option key={item.value||'auto'} value={item.value}>{item.label}</option>)}</select></label><label>格式<select aria-label="音频格式" value={audioParams.output_format} onChange={e=>setParam('output_format',e.target.value)}>{AUDIO_OUTPUT_FORMATS.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label>采样率<select aria-label="音频采样率" value={audioParams.sample_rate} onChange={e=>setParam('sample_rate',Number(e.target.value))}>{AUDIO_SAMPLE_RATES.map(rate=><option key={rate} value={rate}>{rate} Hz</option>)}</select></label><label className="cv-output-audio"><input type="checkbox" aria-label="生成字幕" checked={audioParams.enable_subtitle===true} onChange={e=>setParam('enable_subtitle',e.target.checked)}/>生成字幕</label><small className="cv-audio-note">时长由内容决定，最长 120 秒。预设声线不能与图片参考同时使用。</small></div>:node.type==='image'?<ImageOutputControls provider={imageAdapter} params={params} model={provider?.capability_model||provider?.model} references={imageMetadata.references} dimensions={imageDimensions} issues={imageIssues} metadataError={imageMetadata.error} onChange={patch=>onChange({params:{...params,...patch}})}/>:<div className="cv-output-fields"><label>画幅<select aria-label={node.type==='video'?'视频画幅':'图像画幅'} disabled={node.type==='video'&&ratio.locked} title={ratio.locked?'Seedance 2.5 首尾帧自动保持首帧比例':undefined} value={node.type==='video'?ratio.value:params.ratio||'1:1'} onChange={e=>setParam('ratio',e.target.value)}>{(node.type==='video'?VIDEO_RATIOS:['1:1','9:16','16:9']).map(v=><option key={v} value={v}>{v==='adaptive'?'自动匹配':v}</option>)}</select></label><label>分辨率<select aria-label={node.type==='video'?'视频分辨率':'图像分辨率'} value={params.resolution||(node.type==='image'?'1K':'720p')} onChange={e=>setParam('resolution',e.target.value)}>{(node.type==='image'?['1K','2K']:spec?.resolutions||[params.resolution||'720p']).map(v=><option key={v}>{v}</option>)}</select></label>{node.type==='video'&&<>{provider?.provider==='cupsy'&&<label>任务类型<select aria-label="任务类型" disabled={params.video_mode==='keyframe'} title={params.video_mode==='keyframe'?'仅全能参考模式使用任务类型':'选择生成任务类型'} value={params.omni_reference_task_type||'auto'} onChange={e=>setParam('omni_reference_task_type',e.target.value)}><option value="auto">自动</option><option value="reference">参考生成</option><option value="edit">视频编辑</option><option value="extend">视频延长</option></select></label>}<label>时长<select aria-label="视频时长" value={params.duration??5} onChange={e=>setParam('duration',Number(e.target.value))}>{!videoDurations(model).includes(Number(params.duration??5))&&<option value={params.duration??5}>原时长不支持，请选择</option>}{videoDurations(model).map(v=><option key={v} value={v}>{v===-1?'Auto':`${v}s`}</option>)}</select></label><label className="cv-output-audio"><input type="checkbox" aria-label="输出音频" checked={params.generate_audio===undefined||params.generate_audio===true} onChange={e=>setParam('generate_audio',e.target.checked)}/>输出音频</label>{params.generate_audio!==undefined&&typeof params.generate_audio!=='boolean'&&<span role="alert">输出音频设置无效，请重新勾选或关闭。</span>}</>}</div>}</div>}
-  {popover==='versions'&&<div className="cv-parameters-popover" role="group" aria-label="保留的版本"><header><span>保留的版本</span><button className="btn btn-icon btn-sm" aria-label="关闭版本列表" title="关闭版本列表" onClick={closePopover}><X size={13}/></button></header><div className="cv-candidates">{node.candidates.map((candidate,i)=><button key={candidate.id} aria-pressed={node.selectedCandidateId===candidate.id} onClick={()=>onChange({asset:candidate,selectedCandidateId:candidate.id})}>版本 {i+1}</button>)}</div></div>}
+  {popover==='versions'&&<div className="cv-parameters-popover" role="group" aria-label="保留的版本"><header><span>保留的版本</span><button className="btn btn-icon btn-sm" aria-label="关闭版本列表" title="关闭版本列表" onClick={closePopover}><X size={13}/></button></header><div className="cv-candidates">{node.candidates.map((candidate,i)=><button key={candidate.id} aria-pressed={node.selectedCandidateId===candidate.id} onClick={()=>onChange({asset:candidate,selectedCandidateId:candidate.id})}>版本 {i+1}</button>)}</div>{workflowId&&<div className="cv-candidates" style={{marginTop:8}}>{node.asset?.id&&<button className="btn btn-secondary btn-sm" title="把当前版本复制为本地素材，可同时选择标签" onClick={()=>setLocalRefs([canvasAssetRef(workflowId,node.asset.id)])}>当前版本加入本地素材</button>}{node.candidates.length>1&&<button className="btn btn-secondary btn-sm" title="把全部保留版本复制为本地素材；已加入过的不会重复复制" onClick={()=>setLocalRefs(node.candidates.map(c=>canvasAssetRef(workflowId,c.id)))}>全部 {node.candidates.length} 个版本加入</button>}</div>}</div>}{localRefs&&<AddToLocalDialog refs={localRefs} onClose={()=>setLocalRefs(null)}/>}
  </aside>
  const confirmDialog=regenerateConfirm&&<ConfirmDialog className="canvas-studio-confirm" title="确认重新生成？" danger confirmLabel="确认重新生成（会再次计费）" onClose={()=>setRegenerateConfirm(false)} onConfirm={()=>{setRegenerateConfirm(false);onGenerate()}}><p>{failureClass?.hint||'上次生成失败。'}</p><p>重新生成会按当前提示词与参数<strong>提交新任务并再次计费</strong>；不会自动重试。</p></ConfirmDialog>
  return expanded?createPortal(<div className="canvas-studio cv-expanded-host"><div className="cv-editor-backdrop" onPointerDown={e=>{e.preventDefault();e.stopPropagation()}}/>{panel}{confirmDialog}</div>,document.body):<>{panel}{confirmDialog}</>

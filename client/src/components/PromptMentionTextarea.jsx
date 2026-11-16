@@ -326,7 +326,7 @@ export default function PromptMentionTextarea({
             <span className="block font-mono text-xs font-semibold text-nexus-text-light">{item.label}</span>
             <span className="block truncate text-xs text-nexus-muted">{item.name || item.label}</span>
           </span>
-          <span className="font-mono text-xs text-nexus-green">{item.type === 'character' ? '角色' : item.token}</span>
+          <span className="font-mono text-xs text-nexus-green">{item.type === 'character' ? '角色卡' : item.token}</span>
         </button>
       )) : (
         <div className="px-3 py-4 text-center text-xs text-nexus-muted">

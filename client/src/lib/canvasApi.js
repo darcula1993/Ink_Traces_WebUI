@@ -80,8 +80,8 @@ export const listCharacters = async () => (await data(axios.get('/api/characters
 export async function importCharacterAssets(workflowId, characterId, { imageIds = [], voice = false } = {}) {
   const result = await data(axios.post(`${workflowUrl(workflowId)}/character-assets`, { character_id: characterId, image_ids: imageIds, ...(voice ? { voice: true } : {}) }))
   const assets = Array.isArray(result.assets) ? result.assets : imageIds.map(id => result.mapping?.[id])
-  if (assets.length !== imageIds.length || assets.some(asset => !asset?.id || asset.kind !== 'image')) throw new Error('角色参考图导入结果无效，未插入角色')
-  if (voice && (!result.voice?.id || result.voice.kind !== 'audio')) throw new Error('角色参考音频导入结果无效，未插入角色')
+  if (assets.length !== imageIds.length || assets.some(asset => !asset?.id || asset.kind !== 'image')) throw new Error('角色卡参考图导入结果无效，未插入角色卡')
+  if (voice && (!result.voice?.id || result.voice.kind !== 'audio')) throw new Error('角色卡参考音频导入结果无效，未插入角色卡')
   return { assets, voice: voice ? result.voice : null }
 }
 

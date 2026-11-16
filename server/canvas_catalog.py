@@ -29,6 +29,8 @@ def init_catalog_db():
     init_local_uploads_db()
     from local_delete import init_copy_db
     init_copy_db()
+    from local_from_results import init_db as init_local_sources_db
+    init_local_sources_db()
 
 
 def record_origin(source, asset_id, origin):
@@ -222,6 +224,8 @@ def register_routes(bp, body):
 
     import local_delete
     local_delete.register_routes(bp, body)
+    import local_from_results
+    local_from_results.register_routes(bp, body)
 
     @bp.delete('/api/canvas/library/items/<key>')
     def remove(key):

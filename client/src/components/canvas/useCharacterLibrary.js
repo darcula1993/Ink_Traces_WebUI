@@ -9,7 +9,7 @@ const listeners = new Set()
 let pending = null
 function refresh() {
   if (pending) return pending
-  pending = listCharacters().then(characters => { cache = { characters, error: '' } }, error => { cache = { characters: cache?.characters || null, error: error?.response?.data?.error || '无法读取角色库' } })
+  pending = listCharacters().then(characters => { cache = { characters, error: '' } }, error => { cache = { characters: cache?.characters || null, error: error?.response?.data?.error || '无法读取角色卡库' } })
     .finally(() => { pending = null; listeners.forEach(listener => listener(cache)) })
   return pending
 }

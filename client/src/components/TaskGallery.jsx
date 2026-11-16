@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import { AnimatePresence, motion } from 'framer-motion'
-import { AlertTriangle, ArchiveRestore, Check, CheckCheck, ChevronRight, Columns3, Download, Filter, FolderHeart, FolderPlus, Heart, Image as ImageIcon, LoaderCircle, LayoutGrid, ListChecks, Pencil, RefreshCw, Search, SortDesc, Trash2, X } from 'lucide-react'
+import { FolderInput, AlertTriangle, ArchiveRestore, Check, CheckCheck, ChevronRight, Columns3, Download, Filter, FolderHeart, FolderPlus, Heart, Image as ImageIcon, LoaderCircle, LayoutGrid, ListChecks, Pencil, RefreshCw, Search, SortDesc, Trash2, X } from 'lucide-react'
 import IconButton from './ui/IconButton'
 import { useWorkspaceState } from '../lib/useWorkspaceState'
 import { ACTIVE_STATUSES, TASK_PAGE_SIZE, STATUS_BATCH_SIZE, STATUS_POLL_DELAY, sameValue, mergeTaskStatus, DEFAULT_GALLERY_PREFERENCES, CARD_SIZE_OPTIONS, CARD_DETAIL_OPTIONS, SORT_OPTIONS, DEFAULT_TASK_FILTERS, STATUS_FILTER_OPTIONS, DATE_FILTER_OPTIONS, GROUP_COLORS, EMPTY_NAVIGATION, providerLabel, createdAfterForRange, serverItem, taskTypeLabel, needsRetryConfirmation } from './gallery/taskModel.js'
@@ -11,6 +11,8 @@ import { TaskCompareModal, TaskDetailModal } from './gallery/TaskModals.jsx'
 import ConfirmDialog from './ui/ConfirmDialog'
 import askConfirm from './ui/askConfirm'
 import { takeTaskCenterFocus } from '../lib/taskCenterLink.js'
+import AddToLocalDialog from './library/AddToLocalDialog'
+import { taskRef } from './library/localFromResults'
 
 function useLiveCallback(callback) {
   const ref = useRef(callback)
@@ -39,6 +41,9 @@ function TaskGallery({
   const [selectedOverride, setSelectedOverride] = useState(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState(() => new Set())
+  const [localRefs, setLocalRefs] = useState(null)
+  // Stable for the memoized task cards (gallery-performance: unchanged cards must not re-render).
+  const addTaskToLocal = useCallback(item => setLocalRefs([taskRef(item.taskId)]), [])
   const [selectionUniverse, setSelectionUniverse] = useState(() => new Set())
   const [selectingAll, setSelectingAll] = useState(false)
   const [navigation, setNavigation] = useState(EMPTY_NAVIGATION)
@@ -1283,6 +1288,11 @@ function TaskGallery({
                 </AnimatePresence>
               </div>
             )}
+            {view !== 'trash' && (
+              <IconButton label="已选任务结果加入本地素材" onClick={() => setLocalRefs([...selectedKeys].filter(token => token.startsWith('task-')).map(token => taskRef(token.slice(5))))} disabled={selectedTaskCount === 0}>
+                <FolderInput size={15} />
+              </IconButton>
+            )}
             {view === 'trash' && (
               <IconButton label="恢复已选任务" onClick={restoreSelected} disabled={selectedTaskCount === 0}>
                 <ArchiveRestore size={15} />
@@ -1337,6 +1347,7 @@ function TaskGallery({
           onFavorite={toggleFavorite}
           onCancel={cancelTask}
           onDelete={deleteTask}
+          onAddLocal={addTaskToLocal}
           trash={view === 'trash'}
         />
         {!loading && visibleItems.length === 0 && (
@@ -1377,11 +1388,13 @@ function TaskGallery({
             onRetry={retryTask}
             onRestore={restoreTask}
             onSetGroup={toggleItemGroup}
+            onAddLocal={addTaskToLocal}
             favoriteGroups={favoriteGroups}
             trash={view === 'trash'}
           />
         )}
       </AnimatePresence>
+      {localRefs && <AddToLocalDialog refs={localRefs} overlay onClose={() => setLocalRefs(null)} />}
       {retryConfirm && (
         <ConfirmDialog
           title="重试结果未知的任务？"

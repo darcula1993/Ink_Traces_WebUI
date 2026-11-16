@@ -1,5 +1,5 @@
 import React from 'react'
-import { Ban, Check, Heart, Trash2 } from 'lucide-react'
+import { Ban, Check, FolderInput, Heart, Trash2 } from 'lucide-react'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, formatTime, providerLabel, taskTypeLabel, selectionToken } from './taskModel.js'
 import { TaskPreview } from './TaskPreview.jsx'
 
@@ -14,6 +14,7 @@ export const TaskCard = React.memo(function TaskCard({
   onFavorite,
   onCancel,
   onDelete,
+  onAddLocal,
   trash,
 }) {
   const status = taskStatusInfo(item) || STATUS.pending
@@ -85,6 +86,17 @@ export const TaskCard = React.memo(function TaskCard({
                 className={`task-card-action ${item.favorite ? 'task-card-favorite-active text-[#ff5c7c]' : ''}`}
               >
                 <Heart size={14} fill={item.favorite ? 'currentColor' : 'none'} />
+              </button>
+            )}
+            {item.taskId && item.status === 'succeeded' && !trash && onAddLocal && (
+              <button
+                type="button"
+                aria-label="加入本地素材"
+                title="把任务结果复制为本地素材，可同时选择标签"
+                onClick={event => { event.stopPropagation(); onAddLocal(item) }}
+                className="task-card-action"
+              >
+                <FolderInput size={14} />
               </button>
             )}
             {item.taskId && (

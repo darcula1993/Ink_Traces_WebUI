@@ -25,3 +25,5 @@ function mergeWorkflows(results){const map=new Map();for(const w of results.flat
 export async function previewLocalDelete(keys,projectId=null){const results=[];for(const part of chunks(keys))results.push(await data(axios.post(`${base}/items/delete-preview`,projectId?{keys:part,project_id:projectId}:{keys:part})));return merge(results)}
 // Each chunk is atomic on the server; a failed chunk reports what already succeeded.
 export async function deleteLocalItems(keys){const results=[];for(const part of chunks(keys)){try{results.push(await data(axios.post(`${base}/items/bulk-delete`,{keys:part})))}catch(error){error.partial=merge(results);throw error}}return merge(results)}
+// LOCAL-FROM-RESULT-20261116: copy generation results (task outputs / canvas result assets) into 本地素材.
+export const addResultsToLocal=(items,{tag_ids=[]}={})=>data(axios.post(`${base}/local/from-results`,{items,tag_ids}))

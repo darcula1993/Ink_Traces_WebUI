@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { AnimatePresence, motion, useDragControls } from 'framer-motion'
-import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, Heart, Image as ImageIcon, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, FolderInput, Heart, Image as ImageIcon, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import IconButton from '../ui/IconButton'
 import useModalFocus, { isTopModal } from '../ui/useModalFocus'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, providerLabel, downloadExtension, uniqueDownloadName, taskDownloadUrl } from './taskModel.js'
@@ -211,6 +211,7 @@ export function TaskDetailModal({
   onRetry,
   onRestore,
   onSetGroup,
+  onAddLocal,
   favoriteGroups,
   trash,
 }) {
@@ -459,6 +460,9 @@ export function TaskDetailModal({
             ) : download ? (
               <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="btn btn-icon"><Download size={17} /></a>
             ) : null}
+            {item.taskId && item.status === 'succeeded' && !trash && onAddLocal && (
+              <IconButton label={item.images?.length > 1 ? `全部 ${item.images.length} 个结果加入本地素材` : '结果加入本地素材'} onClick={() => onAddLocal(item)}><FolderInput size={17} /></IconButton>
+            )}
             {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (
               <IconButton label="取消任务" onClick={() => onCancel(item)} className="hover:text-nexus-amber"><Ban size={17} /></IconButton>
