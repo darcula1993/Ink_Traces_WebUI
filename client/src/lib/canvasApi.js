@@ -5,6 +5,8 @@ import {resolveNodeInputs} from './canvasReferences.js'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
 import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue, videoModelLabel } from './generationSettings.js'
 import {nodeProvider,selectionKey,normalizeProviderPreferences} from './canvasProviderSelection.js'
+import {isMediaAsset,deletedReferenceIssue,markDeletedMedia} from './canvasMediaStatus.js'
+import {assertMediaAvailable} from './canvasMedia.js'
 
 import {effectiveVideoModel,videoCapabilities,videoRatio,videoParameterError} from './videoGenerationRules.js'
 
@@ -12,7 +14,8 @@ const base = '/api/canvas'
 const workflowUrl = id => `${base}/workflows/${encodeURIComponent(id)}`
 const projectUrl = id => `${base}/projects/${encodeURIComponent(id)}`
 const data = async promise => (await promise).data
-export const getCanvasImageMetadata=async(workflowId,assetId,signal)=>(await data(axios.get(`${workflowUrl(workflowId)}/assets/${encodeURIComponent(assetId)}/metadata`,{signal}))).metadata
+// LIBRARY-GLOBAL S5 (aligned with S2/S1b): the same route also accepts a library media id.
+export const getCanvasImageMetadata=async(workflowId,asset,signal)=>{const id=typeof asset==='string'?asset:asset?.id;return (await data(axios.get(`${workflowUrl(workflowId)}/assets/${encodeURIComponent(id)}/metadata`,{signal}))).metadata}
 export const listCanvasProjects = async () => (await data(axios.get(`${base}/projects`))).projects
 export const createCanvasProject = async title => (await data(axios.post(`${base}/projects`, { title }))).project
 export const renameCanvasProject = async (id, title) => (await data(axios.patch(projectUrl(id), { title }))).project
@@ -123,11 +126,13 @@ export function canvasInputs(node, nodes, edges) {
 
 async function referenceFiles(workflowId, assets) {
   return Promise.all(assets.map(async asset => {
-    if (!asset.url?.startsWith(`${workflowUrl(workflowId)}/assets/`) || !['image', 'video', 'audio'].includes(asset.kind)) invalid('参考素材必须先保存到当前画布')
+    // LIBRARY-GLOBAL S5: references are library media (/api/canvas/media/<id>); old canvas assets stay readable until migrated.
+    if (!(isMediaAsset(asset) || asset.url?.startsWith(`${workflowUrl(workflowId)}/assets/`)) || !['image', 'video', 'audio'].includes(asset.kind)) invalid('参考素材必须先保存到当前画布')
     try {
       const response = await axios.get(asset.url, { responseType: 'blob' })
       return { asset, blob: response.data }
-    } catch {
+    } catch (error) {
+      if (isMediaAsset(asset) && error?.response?.status === 410) { markDeletedMedia([asset.id]); invalid(deletedReferenceIssue(asset)) }
       invalid(`无法读取参考素材“${asset.name || asset.id}”，尚未提交生成`)
     }
   }))
@@ -155,7 +160,7 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   if (node.type === 'image') {
     if (videos.length || audios.length) invalid('图像生成只接受图片参考；请调整素材或素材组')
     let references=images
-    if(params.background&&params.background!=='default'&&adapter==='ark'&&!isSeedream55(provider.capability_model||provider.model)&&images.length===1){const metadata=await getCanvasImageMetadata(workflowId,images[0].id).catch(()=>invalid('无法读取参考图片 Alpha 信息，尚未提交生成'));references=[{...images[0],...metadata}]}
+    if(params.background&&params.background!=='default'&&adapter==='ark'&&!isSeedream55(provider.capability_model||provider.model)&&images.length===1){const metadata=await getCanvasImageMetadata(workflowId,images[0]).catch(()=>invalid('无法读取参考图片 Alpha 信息，尚未提交生成'));references=[{...images[0],...metadata}]}
     const issues=imageParameterIssues(adapter,params,references,provider.capability_model||provider.model);if(issues.length)invalid(issues.join('；'))
     Object.assign(fields,imageRequestFields(adapter,params,provider.model))
     path = '/api/generate'
@@ -187,6 +192,7 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
     path = '/api/audio/generate'
   } else invalid('该节点不支持生成')
 
+  await assertMediaAvailable(assets, invalid)
   const files = await referenceFiles(workflowId, assets)
   let body = fields
   if (files.length) {

@@ -12,6 +12,8 @@ from task_public import public_task, public_tasks
 from task_media import (
     _task_download_name, _task_png_text_entries, _task_output_asset,
     _task_asset_response, _attach_task_input_references,
+    OUTPUT_KINDS, RESULT_DELETED, ResultDeleted, attach_library_status, deleted_thumbnail,
+    remove_task_files, _library_state, _library_file,
 )
 
 task_api = Blueprint('tasks', __name__)
@@ -124,6 +126,7 @@ def api_list_tasks():
     )
     for t in tasks:
         t['summary'] = True
+    attach_library_status(tasks)
     return jsonify({'success': True, 'tasks': public_tasks(tasks), 'total': total})
 
 
@@ -154,7 +157,7 @@ def api_task_statuses():
             task_ids.append(task_id)
     if len(task_ids) > 100:
         return jsonify({'success': False, 'error': '单次最多查询 100 个任务'}), 400
-    statuses = task_db.get_task_statuses(task_ids)
+    statuses = attach_library_status(task_db.get_task_statuses(task_ids))
     found = {int(task['id']) for task in statuses}
     return jsonify({
         'success': True,
@@ -235,6 +238,7 @@ def api_get_task(task_id):
     if not t:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
     _attach_task_input_references([t])
+    attach_library_status([t])
     return jsonify({'success': True, 'task': public_task(t)})
 
 
@@ -388,7 +392,7 @@ def api_bulk_delete_tasks():
         if task.get('deleted_at') is None or task.get('status') == 'cancel_requested':
             skipped_ids.append(task_id)
             continue
-        storage.remove_task_files(task)
+        remove_task_files(task)
         task_db.delete_task(task_id)
         deleted_ids.append(task_id)
 
@@ -412,7 +416,7 @@ def api_delete_task(task_id):
             return jsonify({'success': False, 'error': '任务需要先移入回收站'}), 409
         if t.get('status') == 'cancel_requested':
             return jsonify({'success': False, 'error': '任务仍在取消中，请稍后再彻底删除'}), 409
-        storage.remove_task_files(t)
+        remove_task_files(t)
         task_db.delete_task(task_id)
         return jsonify({'success': True, 'permanent': True})
     moved = task_db.move_tasks_to_trash([task_id])
@@ -462,7 +466,14 @@ def api_bulk_download_tasks():
     try:
         tasks_by_id = {task['id']: task for task in task_db.get_tasks_by_ids(task_ids)}
         assets_by_task = {}
-        for asset in task_db.list_assets_for_tasks(task_ids, ('output_image', 'output_video', 'output_audio')):
+        for asset in task_db.list_assets_for_tasks(task_ids, OUTPUT_KINDS):
+            # LIBRARY-GLOBAL S3: library outputs are read from the library; deleted ones are skipped.
+            state, row = _library_state(asset.get('media_id'))
+            if state == 'deleted':
+                continue
+            library_path = _library_file(row) if state == 'ok' else None
+            if library_path:
+                asset = {**asset, 'path': library_path, 'source_name': os.path.basename(asset['path'])}
             assets_by_task.setdefault(asset['task_id'], []).append(asset)
         # Generated media is already compressed; deflating it again wastes CPU.
         with zipfile.ZipFile(archive_path, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
@@ -473,7 +484,7 @@ def api_bulk_download_tasks():
                     task = tasks_by_id.get(task_id)
                     if not task:
                         continue
-                    filename = os.path.basename(asset['path'])
+                    filename = asset.get('source_name') or os.path.basename(asset['path'])
                     original = raw and asset.get('kind') == 'output_image'
                     download_name = _task_download_name(task, filename, original=original)
                     archive_name = f'{asset["task_type"]}-task-{task_id}/{download_name}'
@@ -521,9 +532,13 @@ def api_clear_tasks():
     return jsonify({'success': True, 'deleted': len(moved), 'trashed': len(moved)})
 
 
+def _result_deleted_response():
+    return jsonify({'success': False, 'error': RESULT_DELETED, 'code': 'media_deleted'}), 410
+
+
 @task_api.route('/api/tasks/<int:task_id>/file/<path:filename>', methods=['GET'])
 def api_task_file(task_id, filename):
-    """提供任务输出文件的访问"""
+    """提供任务输出文件的访问；已入库的结果从本地素材库读取（LIBRARY-GLOBAL S3）。"""
     t = task_db.get_task(task_id)
     if not t or not t.get('output_dir'):
         return jsonify({'success': False, 'error': '文件不存在'}), 404
@@ -531,11 +546,16 @@ def api_task_file(task_id, filename):
     filepath = os.path.abspath(os.path.join(output_dir, filename))
     if os.path.commonpath([output_dir, filepath]) != output_dir:
         return jsonify({'success': False, 'error': '文件不存在'}), 404
-    if not os.path.isfile(filepath):
-        return jsonify({'success': False, 'error': '文件不存在'}), 404
-    output_asset = _task_output_asset(task_id, filename)
+    try:
+        output_asset = _task_output_asset(task_id, filename)
+    except ResultDeleted:
+        return _result_deleted_response()
     if output_asset:
         return _task_asset_response(t, output_asset, filename, as_attachment=False)
+    if not os.path.isfile(filepath):
+        return jsonify({'success': False, 'error': '文件不存在'}), 404
+    if deleted_thumbnail(t, os.path.basename(filepath)):
+        return _result_deleted_response()
     response = send_file(filepath, conditional=True, max_age=31536000)
     response.cache_control.public = True
     response.cache_control.immutable = True
@@ -545,7 +565,10 @@ def api_task_file(task_id, filename):
 @task_api.route('/api/tasks/<int:task_id>/download/<path:filename>', methods=['GET'])
 def api_download_task_file(task_id, filename):
     task = task_db.get_task(task_id)
-    asset = _task_output_asset(task_id, filename) if task else None
+    try:
+        asset = _task_output_asset(task_id, filename) if task else None
+    except ResultDeleted:
+        return _result_deleted_response()
     if not task or not asset:
         return jsonify({'success': False, 'error': '下载文件不存在'}), 404
     return _task_asset_response(

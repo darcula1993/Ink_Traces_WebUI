@@ -9,7 +9,8 @@ mirrors the client rules in client/src/lib/canvasTaskPolling.js
 * only nodes whose ``task.id`` equals the task and whose stored task status is
   still active (pending/preparing/processing/cancel_requested) are touched;
 * ``task`` becomes ``{id, status, error}`` (error ``or None``);
-* succeeded tasks import their outputs exactly like POST task-results; assets
+* succeeded tasks import their outputs exactly like POST task-results (with
+  media references on: the task's global library items, no copy); assets
   not yet in ``candidates`` are appended, the first one becomes ``asset`` and
   ``selectedCandidateId``, and ``upstreamStale`` is removed;
 * nothing changes (no revision bump) when the task state and candidates
@@ -48,7 +49,15 @@ def init_writeback_db():
 
 
 def import_task_assets(workflow_id, task_id):
-    """Import a succeeded task's local outputs as durable canvas assets (dedup by hash)."""
+    """Node assets for a succeeded task's local outputs.
+
+    LIBRARY-GLOBAL-20261116 S2: once media references are on (canvas_media_refs.enabled),
+    the outputs are referenced from the global library (生成历史) without copying; before
+    that, they are imported as durable canvas assets (dedup by hash) as before.
+    """
+    import canvas_media_refs
+    if canvas_media_refs.enabled():
+        return canvas_media_refs.import_task_media(workflow_id, task_id)
     store.workflow(workflow_id)
     task = task_db.get_task(task_id)
     if not task or task.get('deleted_at'):

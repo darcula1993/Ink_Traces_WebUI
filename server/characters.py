@@ -1,24 +1,25 @@
-"""Local character library (CHARACTER-LIBRARY-20261114 A, 规格修订 2).
+"""Character library (CHARACTER-LIBRARY-20261114 A, 规格修订 2; LIBRARY-GLOBAL-20261116 S6c).
 
 A character is global (not owned by any project): a unique name, a text description,
 up to 8 reference images and an optional reference audio (voice). Images and voice
-are *references* to 本地素材 local registrations (``canvas_local_uploads``,
-``local:<id>``); the character stores only the reference and its order, never a copy.
+are *references* to items of the global media library (``media``; the column
+``character_media.local_id`` holds the media id); the character stores only the
+reference and its order, never a copy and never a registration in the old 本地素材
+table.
 
-Sources: an upload in the character library is registered as 本地素材 first (same
-rules as tool uploads: content check, dedup by content); a selected ``local:`` item is
-referenced directly; any other selection (project library, canvas, generated history,
-Cupsy) and a canvas asset ("加入角色") are first copied into 本地素材 (ownership of the
-source is not transferred), then referenced.
+Sources: an upload is registered in the library root (``media_library.save_upload``,
+origin ``upload``, dedup by content); a media id (``{source:'media', media_id}``, or a
+library selection ``{source:'media', id}``) is referenced directly; an old identity
+(``local:<id>``, ``library:``/``workflow:``/``task:`` keys, old canvas asset ids) is
+resolved through ``media_aliases``. Only a selection that is not in the library (Cupsy,
+items not migrated yet) is copied into the library root first, then referenced.
 
-Deleting a character or removing an image/voice deletes only the reference. Permanently
-deleting a referenced 本地素材 item (local_delete) lists the affected characters in the
-preview and removes the reference from them.
+Deleting a character or removing an image/voice deletes only the reference. Deleting a
+referenced media item (media_library.delete_media) lists the affected characters in the
+preview and removes the reference from them (``usage``/``unlink_local``).
 
-``POST /api/canvas/workflows/<wf>/character-assets`` still copies into durable canvas
-assets: copy provenance is ``local:<id>`` (existing canvas copy rules apply when the
-本地素材 item is deleted) plus an informational ``character:<id>`` record, which is
-never a deletion source and never keeps a copy alive (see local_delete._derived_copies).
+``POST /api/canvas/workflows/<wf>/character-assets`` returns media node assets
+(``canvas_media_refs.node_asset``); nothing is copied into the canvas.
 """
 import io
 import json
@@ -30,7 +31,7 @@ import uuid
 from PIL import Image
 
 import canvas_store as store
-import local_uploads
+import media_library as media
 import tasks
 
 MAX_IMAGES = 8
@@ -119,8 +120,8 @@ def _probe_duration(path):
 
 
 def _media_facts(row, role):
-    """Validate a 本地素材 row for the role; returns (width, height, duration)."""
-    path = local_uploads.path_for(row)
+    """Validate a media row for the role; returns (width, height, duration)."""
+    path = media.media_path(row)
     if role == 'image':
         if row['kind'] != 'image':
             raise store.CanvasError('角色图须为图片素材')
@@ -146,19 +147,19 @@ def _url(character_id, local_id):
 
 def image_public(row):
     url = _url(row['character_id'], row['local_id'])
-    return {'asset_id': row['local_id'], 'asset_ref': 'local:' + row['local_id'], 'url': url,
+    return {'asset_id': row['local_id'], 'asset_ref': row['local_id'], 'media_id': row['local_id'], 'url': url,
             'thumbnail_url': url + '/thumbnail', 'name': row['name'], 'mime_type': row['mime_type'],
             'width': row['width'], 'height': row['height'], 'position': row['position']}
 
 
 def voice_public(row):
-    return {'type': 'audio', 'asset_id': row['local_id'], 'asset_ref': 'local:' + row['local_id'],
+    return {'type': 'audio', 'asset_id': row['local_id'], 'asset_ref': row['local_id'], 'media_id': row['local_id'],
             'url': _url(row['character_id'], row['local_id']), 'name': row['name'],
             'mime_type': row['mime_type'], 'duration': row['duration']}
 
 
-MEDIA_SQL = '''SELECT m.*, u.name, u.mime_type, u.kind, u.filename FROM character_media m
-               JOIN canvas_local_uploads u ON u.id=m.local_id'''
+MEDIA_SQL = '''SELECT m.*, x.name, x.mime_type, x.kind, x.relpath FROM character_media m
+               JOIN media x ON x.id=m.local_id'''
 
 
 def _public(row, media):
@@ -189,13 +190,34 @@ def get_character(character_id):
     return _public(_row(db, character_id), _media(db, character_id))
 
 
+def _media_ref(value):
+    """Media id for a media id, ``media:<id>``, an old ``local:<id>``/``scope:id`` key or URL; None if unknown."""
+    if not isinstance(value, str):
+        return None
+    if value.startswith('media:'):
+        value = value[len('media:'):]
+    found = media.resolve(value)
+    if found is None and HEX_ID.fullmatch(value):
+        found = media.resolve('local:' + value)
+    return found
+
+
+def _canonical(db, character_id, ident):
+    """The stored reference id for ``ident`` (a media id or an old 本地素材 id via its alias)."""
+    if not isinstance(ident, str):
+        return ident
+    if db.execute('SELECT 1 FROM character_media WHERE character_id=? AND local_id=?', (character_id, ident)).fetchone():
+        return ident
+    return _media_ref(ident) or ident
+
+
 def list_characters(asset_ref=None):
-    """All characters; with ``asset_ref`` (``local:<id>``) only those using that item."""
+    """All characters; with ``asset_ref`` (media id, ``media:<id>`` or an old ``local:<id>``) only those using it."""
     db = tasks.get_db()
     only = None
     if asset_ref is not None:
-        source, _, ident = asset_ref.partition(':')
-        if source != 'local' or not HEX_ID.fullmatch(ident):
+        ident = _media_ref(asset_ref)
+        if ident is None:
             return []
         only = {r[0] for r in db.execute('SELECT character_id FROM character_media WHERE local_id=?', (ident,))}
     grouped = {}
@@ -210,6 +232,7 @@ def get_media(character_id, local_id, role=None):
     db = tasks.get_db()
     _row(db, character_id)
     _check_id(local_id, '角色素材')
+    local_id = _canonical(db, character_id, local_id)
     row = db.execute(MEDIA_SQL + ' WHERE m.character_id=? AND m.local_id=?', (character_id, local_id)).fetchone()
     if row is None or (role and row['role'] != role):
         raise store.CanvasError('角色素材不存在', 404)
@@ -227,10 +250,10 @@ def _renumber(db, character_id):
         db.execute('UPDATE character_media SET position=? WHERE character_id=? AND local_id=?', (position, character_id, media[0]))
 
 
-# ---- used by local_delete ---------------------------------------------------------
+# ---- used by media_library / local_delete deletion ---------------------------------------------------------
 
 def usage(db, local_ids):
-    """Characters referencing these 本地素材 ids: [{id, name, asset_ids}]."""
+    """Characters referencing these media ids (or alias old ids): [{id, name, asset_ids}]."""
     found = {}
     for local_id in local_ids:
         for r in db.execute('SELECT c.id, c.name FROM character_media m JOIN characters c ON c.id=m.character_id '
@@ -240,7 +263,7 @@ def usage(db, local_ids):
 
 
 def unlink_local(db, local_ids):
-    """Remove references to deleted 本地素材 ids; renumber image order; bump updated_at."""
+    """Remove references to deleted media ids; renumber image order; bump updated_at."""
     affected = usage(db, local_ids)
     for character in affected:
         for local_id in character['asset_ids']:
@@ -251,67 +274,93 @@ def unlink_local(db, local_ids):
 
 
 # ---- sources ----------------------------------------------------------------------
+# A source is ('media', media_id) or ('upload', stream, name): uploads and copies are
+# registered inside the caller's write transaction (save_upload joins it and journals the
+# new file), so a refused change leaves no library item behind.
 
-def _stage_path(path, name):
+def _copy_source(path, name):
     try:
-        with path.open('rb') as handle:
-            return local_uploads.stage_stream(handle, name)
+        return ('copy', path.open('rb'), name)
     except OSError as error:
         raise store.CanvasError('来源素材文件无法读取', 409) from error
 
 
+def _live(media_id):
+    state, _ = media.status(media_id)
+    if state == 'deleted':
+        raise store.CanvasError('素材已从素材库删除', 410)
+    if state != 'ok':
+        raise store.CanvasError('素材不存在', 404)
+    return ('media', media_id)
+
+
 def _resolve_sources(uploads, data):
-    """Return [('local', local_id) | ('staged', staged)] without holding a database lock."""
+    """Return [('media', id) | ('upload'|'copy', stream, name)] without holding a database lock."""
     if uploads is not None:
-        staged = []
-        try:
-            for upload in uploads:
-                staged.append(('staged', local_uploads.stage_stream(upload.stream, upload.filename)))
-        except BaseException:
-            _discard(staged)
-            raise
-        return staged
+        return [('upload', upload.stream, upload.filename) for upload in uploads]
+    if not isinstance(data, dict):
+        raise store.CanvasError('素材来源须为 multipart 上传、media、library 或 canvas')
     source = data.get('source')
+    if source == 'media':
+        if set(data) - {'source', 'media_id'}:
+            raise store.CanvasError('素材来源字段无效')
+        ident = data.get('media_id')
+        if not isinstance(ident, str) or not HEX_ID.fullmatch(ident):
+            raise store.CanvasError('素材编号无效')
+        return [_live(_media_ref(ident) or ident)]
     if source == 'library':
         if set(data) - {'source', 'asset_ref'}:
             raise store.CanvasError('素材来源字段无效')
-        from canvas_catalog import parse_selection, resolve, selection_from_key
         ref = data.get('asset_ref')
+        if isinstance(ref, dict) and ref.get('source') == 'media':
+            ident = ref.get('id')
+            if set(ref) != {'source', 'id'} or not isinstance(ident, str) or not HEX_ID.fullmatch(ident):
+                raise store.CanvasError('素材选择编号无效')
+            return [_live(_media_ref(ident) or ident)]
+        from canvas_catalog import parse_selection, resolve, selection_from_key
         selection = selection_from_key(ref) if isinstance(ref, str) else ref
-        kind, ident, _ = parse_selection(selection)
-        row, path, _ = resolve(selection)
-        if kind == 'local':
-            return [('local', ident)]
-        return [('staged', _stage_path(path, row.get('name') or path.name))]
+        _, _, key = parse_selection(selection)
+        found = media.resolve(key)  # old identities migrated into the library (aliases)
+        if found is not None:
+            return [_live(found)]
+        row, path, _ = resolve(selection)  # e.g. Cupsy: copy into the library root
+        return [_copy_source(path, row.get('name') or path.name)]
     if source == 'canvas':
         if set(data) - {'source', 'workflow_id', 'asset_id'}:
             raise store.CanvasError('素材来源字段无效')
         workflow_id, asset_id = data.get('workflow_id'), data.get('asset_id')
         if not isinstance(workflow_id, str) or not isinstance(asset_id, str):
             raise store.CanvasError('workflow_id 和 asset_id 必须为字符串')
-        row = store.get_asset(workflow_id, asset_id)
-        return [('staged', _stage_path(store.asset_path(row), row['name']))]
-    raise store.CanvasError('素材来源须为 multipart 上传、library 或 canvas')
+        store.workflow(workflow_id)
+        found = media.resolve('workflow:' + asset_id) if HEX_ID.fullmatch(asset_id) else None
+        if found is None and HEX_ID.fullmatch(asset_id) and media.status(asset_id)[0] != 'missing':
+            found = asset_id
+        if found is not None:
+            return [_live(found)]
+        row = store.get_asset(workflow_id, asset_id)  # old canvas copy not migrated yet
+        return [_copy_source(store.asset_path(row), row['name'])]
+    raise store.CanvasError('素材来源须为 multipart 上传、media、library 或 canvas')
 
 
-def _local_rows(db, sources):
-    """Inside the write transaction: register staged files as 本地素材 and load rows."""
+def _media_rows(db, sources):
+    """Inside the write transaction: register uploads/copies in the library root and load rows."""
     rows = []
-    for kind, value in sources:
-        if kind == 'staged':
-            rows.append(local_uploads.publish_staged(db, value))
+    for source in sources:
+        if source[0] in ('upload', 'copy'):
+            media_id = media.save_upload(source[1], source[2], origin='upload')[0]['id']
         else:
-            row = db.execute('SELECT * FROM canvas_local_uploads WHERE id=?', (value,)).fetchone()
-            if row is None:
-                raise store.CanvasError('本地素材不存在', 404)
-            rows.append(dict(row))
+            media_id = source[1]
+        row = db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()
+        if row is None:
+            raise store.CanvasError('素材不存在或已删除', 404)
+        rows.append(dict(row))
     return rows
 
 
 def _discard(sources):
-    for kind, value in sources:
-        if kind == 'staged':
-            value['path'].unlink(missing_ok=True)
+    for source in sources:
+        if source[0] == 'copy':
+            source[1].close()  # opened by _copy_source; upload streams belong to Flask
 
 
 # ---- mutations --------------------------------------------------------------------
@@ -356,11 +405,13 @@ def update_character(character_id, data):
                         db.execute("DELETE FROM character_media WHERE character_id=? AND role='voice'", (character_id,))
                         changed = True
                 elif not (isinstance(voice, dict) and voice.get('type') == 'audio' and current
-                          and voice.get('asset_id') == current[0]['local_id']):
+                          and _canonical(db, character_id, voice.get('asset_id')) == current[0]['local_id']):
                     raise store.CanvasError('声音只能清除（null）；参考音频请通过 voice-audio 接口设置')
             if 'image_order' in data:
                 order = data['image_order']
                 images = [m['local_id'] for m in _media(db, character_id, 'image')]
+                if isinstance(order, list) and all(isinstance(i, str) for i in order):
+                    order = [_canonical(db, character_id, i) for i in order]
                 if not isinstance(order, list) or any(not isinstance(i, str) for i in order) \
                         or len(order) != len(images) or set(order) != set(images):
                     raise store.CanvasError('image_order 须为该角色全部图片编号的排列')
@@ -377,7 +428,7 @@ def update_character(character_id, data):
 
 
 def delete_character(character_id):
-    """Delete the character and its references only; 本地素材 items are kept."""
+    """Delete the character and its references only; media items are kept."""
     with store.write_transaction() as db:
         _row(db, character_id)
         count = db.execute('DELETE FROM character_media WHERE character_id=?', (character_id,)).rowcount
@@ -395,7 +446,7 @@ def add_images(character_id, uploads=None, data=None):
         added = []
         with store.write_transaction() as db:
             _row(db, character_id)
-            rows = _local_rows(db, sources)
+            rows = _media_rows(db, sources)
             existing = {m['local_id']: m['role'] for m in _media(db, character_id)}
             fresh = list(dict.fromkeys(r['id'] for r in rows if r['id'] not in existing))
             count = len([r for r in existing.values() if r == 'image'])
@@ -421,9 +472,9 @@ def add_images(character_id, uploads=None, data=None):
 
 
 def delete_image(character_id, local_id):
-    """Remove the reference only; the 本地素材 item is kept."""
+    """Remove the reference only; the media item is kept."""
     with store.write_transaction() as db:
-        get_media(character_id, local_id, 'image')
+        local_id = get_media(character_id, local_id, 'image')['local_id']
         db.execute('DELETE FROM character_media WHERE character_id=? AND local_id=?', (character_id, local_id))
         _renumber(db, character_id)
         _touch(db, character_id)
@@ -436,7 +487,7 @@ def set_voice(character_id, upload=None, data=None):
     try:
         with store.write_transaction() as db:
             _row(db, character_id)
-            row = _local_rows(db, sources)[0]
+            row = _media_rows(db, sources)[0]
             current = _media(db, character_id, 'voice')
             if current and current[0]['local_id'] == row['id']:
                 return get_character(character_id)
@@ -454,50 +505,39 @@ def set_voice(character_id, upload=None, data=None):
 
 
 def import_to_workflow(workflow_id, data):
-    """Copy selected character images (and optionally its voice) into durable canvas assets.
+    """Media node assets for selected character images (and optionally its voice).
 
-    Idempotent: canvas assets deduplicate by content per workflow, so repeating the call
-    returns the same canvas asset ids.
+    The canvas references the library items directly (LIBRARY-GLOBAL); nothing is copied,
+    so repeating the call returns the same ids.
     """
+    from canvas_media_refs import node_asset
     if set(data) - {'character_id', 'image_ids', 'voice'}:
         raise store.CanvasError('角色导入字段无效')
     store.workflow(workflow_id)
     character_id = data.get('character_id')
-    _row(tasks.get_db(), character_id)
+    db = tasks.get_db()
+    _row(db, character_id)
     image_ids = data.get('image_ids')
     if image_ids is None:
-        image_ids = [m['local_id'] for m in _media(tasks.get_db(), character_id, 'image')]
+        image_ids = [m['local_id'] for m in _media(db, character_id, 'image')]
     if not isinstance(image_ids, list) or len(image_ids) > MAX_IMAGES or any(not isinstance(i, str) for i in image_ids):
         raise store.CanvasError(f'image_ids 须为最多{MAX_IMAGES}个角色图编号')
     image_ids = list(dict.fromkeys(image_ids))
     include_voice = data.get('voice', False)
     if type(include_voice) is not bool:
         raise store.CanvasError('voice 必须为布尔值')
-    mapping, voice = {}, None
-    with store.write_transaction() as db:
-        store.workflow(workflow_id)
-        _row(db, character_id)
-        rows = [get_media(character_id, i, 'image') for i in image_ids]
-        if include_voice:
-            voices = _media(db, character_id, 'voice')
-            if not voices:
-                raise store.CanvasError('该角色没有参考音频', 404)
-            rows.append(voices[0])
-        for row in rows:
-            try:
-                with local_uploads.path_for(row).open('rb') as handle:
-                    asset = store.save_asset(workflow_id, handle, row['name'], copy_source='local:' + row['local_id'])
-            except OSError as error:
-                raise store.CanvasError('角色素材文件无法读取', 409) from error
-            if db.execute('SELECT 1 FROM canvas_asset_copies WHERE asset_id=?', (asset['id'],)).fetchone():
-                db.execute('INSERT OR IGNORE INTO canvas_asset_copies VALUES (?,?,?)',
-                           (asset['id'], 'character:' + character_id, tasks.utcnow()))
-            if row['role'] == 'voice':
-                voice = asset
-            else:
-                mapping[row['local_id']] = asset
+    rows = {i: get_media(character_id, i, 'image') for i in image_ids}
+    voice = None
+    if include_voice:
+        voices = _media(db, character_id, 'voice')
+        if not voices:
+            raise store.CanvasError('该角色没有参考音频', 404)
+        voice = voices[0]
+    for row in list(rows.values()) + ([voice] if voice else []):
+        media.media_path(row)  # the file must still be readable
+    mapping = {i: node_asset(media.get_media(row['local_id'])) for i, row in rows.items()}
     return {'success': True, 'character_id': character_id, 'assets': [mapping[i] for i in image_ids],
-            'mapping': mapping, 'voice': voice}
+            'mapping': mapping, 'voice': node_asset(media.get_media(voice['local_id'])) if voice else None}
 
 
 # ---- routes -----------------------------------------------------------------------
@@ -551,7 +591,7 @@ def register_routes(bp, body):
     @bp.get('/api/characters/<character_id>/assets/<asset_id>')
     def character_api_read_asset(character_id, asset_id):
         row = get_media(character_id, asset_id)
-        response = send_file(local_uploads.path_for(row), mimetype=row['mime_type'], download_name=row['name'], conditional=True)
+        response = send_file(media.media_path(row), mimetype=row['mime_type'], download_name=row['name'], conditional=True)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Cache-Control'] = 'private, no-cache'
         return response
@@ -562,7 +602,7 @@ def register_routes(bp, body):
         row = get_media(character_id, asset_id, 'image')
         output = io.BytesIO()
         try:
-            with Image.open(local_uploads.path_for(row)) as original:
+            with Image.open(media.media_path(row)) as original:
                 original.draft('RGB', (320, 320))
                 picture = ImageOps.exif_transpose(original)
                 picture.thumbnail((320, 320))

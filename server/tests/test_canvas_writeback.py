@@ -77,6 +77,12 @@ def writeback_rows(wf):
     return [dict(r) for r in task_db.get_db().execute('SELECT revision,node_id,task_id FROM canvas_writebacks WHERE workflow_id=? ORDER BY revision', (wf['id'],))]
 
 
+def library_counts():
+    """(media rows, canvas copies): write-back references library media and never copies into the canvas."""
+    db = task_db.get_db()
+    return db.execute('SELECT COUNT(*) FROM media').fetchone()[0], db.execute('SELECT COUNT(*) FROM canvas_assets').fetchone()[0]
+
+
 def task_snapshot(tid):
     row = task_db.get_db().execute('SELECT status,error,result,attempt_count,updated_at,completed_at,next_run_at FROM tasks WHERE id=?', (tid,)).fetchone()
     return dict(row)
@@ -97,11 +103,13 @@ def test_success_writes_result_once_like_client(env):
     assert 'upstreamStale' not in result
     assert doc_node(wf, 'n2')['text'] == 'keep'
     assert writeback_rows(wf) == [{'revision': saved['revision'] + 1, 'node_id': 'n1', 'task_id': tid}]
+    # results reference the global library (no canvas copy), registered exactly once
+    assert result['asset']['url'] == f"/api/canvas/media/{result['asset']['id']}"
+    assert library_counts() == (2, 0)
     # idempotent: no second import, no revision bump
-    assets_before = task_db.get_db().execute('SELECT COUNT(*) FROM canvas_assets').fetchone()[0]
     assert canvas_writeback.apply_task_result(tid) == {}
     assert store.workflow(wf['id'])['revision'] == saved['revision'] + 1
-    assert task_db.get_db().execute('SELECT COUNT(*) FROM canvas_assets').fetchone()[0] == assets_before == 2
+    assert library_counts() == (2, 0)
 
 
 def test_existing_candidates_are_kept_and_regeneration_appends(env):
@@ -133,7 +141,7 @@ def test_failure_and_cancel_update_task_only(env, status, error):
     assert 'candidates' in result and result['candidates'] == [] and 'asset' not in result
     assert result['upstreamStale'] is True
     assert store.workflow(wf['id'])['revision'] == saved['revision'] + 1
-    assert task_db.get_db().execute('SELECT COUNT(*) FROM canvas_assets').fetchone()[0] == 0
+    assert library_counts() == (0, 0)
 
 
 def test_terminal_node_and_active_task_are_not_touched(env):
@@ -384,8 +392,9 @@ def test_old_canvas_is_completed_by_sync_and_deleted_node_stays_deleted(env):
     assert set(result['nodes']) == {'n1'} and result['nodes']['n1']['task']['status'] == 'succeeded'
     assert [n['id'] for n in store.workflow(wf['id'])['document']['nodes']] == ['n1', 'n2']
     assert canvas_writeback.apply_task_result(gone) == {}
-    names = {r['name'] for r in task_db.get_db().execute('SELECT name FROM canvas_assets')}
+    names = {r['name'] for r in task_db.get_db().execute('SELECT name FROM media')}
     assert names == {f'铁门_{done}.png', f'铁门_{done}_2.png'}  # nothing imported for the deleted node
+    assert library_counts() == (2, 0)
 
 
 def test_table_is_migrated_on_existing_database(env):

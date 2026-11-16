@@ -94,14 +94,16 @@ def _task_after(before_id, run_id, node_id):
 def _request_body(workflow_id, request, open_files):
     """Werkzeug request arguments: the browser's FormData (fields then files in order) or JSON.
 
-    Each file part carries the canvas asset's stored MIME type, like the browser's Blob.
+    Each file part carries the reference's stored MIME type (library item, or a legacy
+    canvas copy), like the browser's Blob.
     """
+    import canvas_media_refs
     import canvas_submit
     from werkzeug.datastructures import MultiDict
     if request['multipart']:
         data = MultiDict(list(canvas_submit.form_fields(request['fields']).items()))
         for item in request['files']:
-            mime = store.get_asset(workflow_id, item['asset_id'], allow_archived=True)['mime_type']
+            mime = canvas_media_refs.reference(workflow_id, item['asset_id'])[1]
             handle = item['file'].open('rb')
             open_files.append(handle)
             data.add(item['field'], (handle, item['filename'], mime))
@@ -328,7 +330,8 @@ def estimate(workflow, node, ctx):
     def resolve_file(asset):
         if asset.get('id') in planned or str(asset.get('id', '')).startswith(PLACEHOLDER_PREFIX):
             return None
-        return store.asset_path(store.get_asset(workflow_id, asset['id'], allow_archived=True))
+        import canvas_media_refs
+        return canvas_media_refs.reference_of(workflow_id, asset)[0]
 
     try:
         capabilities = _capabilities()

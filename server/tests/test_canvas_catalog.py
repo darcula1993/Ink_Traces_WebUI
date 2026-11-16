@@ -115,20 +115,15 @@ def test_hidden_reupload_and_explicit_save_restore_catalog():
     assert client.get(a['url']).status_code==404  # deleted permanently, the save made a new asset
 
 
-def test_tags_crud_assign_filter_and_isolation_from_folders():
+def test_tag_endpoints_are_retired_with_chinese_410():
+    # LIBRARY-GLOBAL-20261116 S3: the library only uses folders; tags are retired.
     client,p,w=setup(); a=upload(client,p)
-    initial=tasks.get_db().execute('SELECT count(*) FROM canvas_library_folders').fetchone()[0]
-    tag=client.post('/api/canvas/library/tags',json={'title':'hero'}).json['tag']
-    path='/api/canvas/library/items/library:'+a['id']+'/tags'
-    assert client.patch(path,json={'tag_ids':[tag['id']]}).status_code==200
-    assert listing(client,p,'uploaded',tag_id=tag['id'])['total']==1
-    assert client.patch('/api/canvas/library/tags/'+tag['id'],json={'title':'renamed'}).status_code==200
-    assert listing(client,p,'uploaded')['items'][0]['tags'][0]['title']=='renamed'
-    assert client.post('/api/canvas/library/tags',json={'title':'renamed'}).status_code==409
-    assert client.patch(path,json={'tag_ids':['missing']}).status_code==404
-    assert client.delete('/api/canvas/library/tags/'+tag['id']).status_code==200
-    assert listing(client,p,'uploaded')['items'][0]['tags']==[]
-    assert tasks.get_db().execute('SELECT count(*) FROM canvas_library_folders').fetchone()[0]==initial
+    for method,path in (('get','/api/canvas/library/tags'),('post','/api/canvas/library/tags'),
+                        ('patch','/api/canvas/library/tags/x'),('delete','/api/canvas/library/tags/x'),
+                        ('patch','/api/canvas/library/items/library:'+a['id']+'/tags')):
+        r=getattr(client,method)(path,json={'title':'hero','tag_ids':[]})
+        assert r.status_code==410 and r.json['code']=='tags_removed' and '标签' in r.json['error']
+    assert tasks.get_db().execute('SELECT count(*) FROM canvas_catalog_tags').fetchone()[0]==0
 
 
 def test_batch_failure_rolls_back_new_files_and_metadata():
@@ -250,7 +245,7 @@ def test_missing_library_asset_can_be_removed_and_thumbnail_is_local():
 def test_folder_root_scope_and_archived_task_filter():
     import canvas_library_folders as folders
     client,p,w=setup(); a=upload(client,p); upload(client,w,'blue',workflow=True)
-    folder=folders.list_folders(p)[0]
+    folder=folders.save_folder(p,{'title':'角色'})
     folders.edit_asset(p,a['id'],{'folder_id':folder['id']})
     assert listing(client,p,'uploaded',folder_id='')['total']==1
     assert listing(client,p,'uploaded',folder_id=folder['id'])['total']==1

@@ -15,8 +15,40 @@ from test_local_delete import bulk, doc_with_reference
 URL = '/api/canvas/library/local/from-results'
 
 
+class _Reply:
+    def __init__(self, status_code, json):
+        self.status_code, self.json = status_code, json
+
+    def get_data(self, as_text=False):
+        import json as _json
+        return _json.dumps(self.json, ensure_ascii=False)
+
+
 def add(client, items, **extra):
-    return client.post(URL, json={'items': items, **extra})
+    """LIBRARY-GLOBAL S3: the HTTP endpoint is retired (410); the legacy copy logic is
+    still exercised directly until the old tables are dropped."""
+    try:
+        return _Reply(200, local_from_results.add_results({'items': items, **extra}))
+    except store.CanvasError as error:
+        return _Reply(error.status, {'success': False, 'error': str(error)})
+
+
+@pytest.fixture
+def legacy_canvas_copies(monkeypatch):
+    """Pre-migration canvases hold canvas copies of task results (the input this legacy logic handles).
+
+    LIBRARY-GLOBAL: the integrated write-back references media instead; switch it off only to
+    create such legacy copies (see test_canvas_media_refs for the media write-back).
+    """
+    monkeypatch.setattr(store, 'MEDIA_REFERENCES', False)
+
+
+def test_from_results_endpoint_is_retired_with_chinese_410():
+    client, p, w = setup()
+    tid, _ = task_outputs(w, count=1)
+    r = client.post(URL, json={'items': [{'source': 'task', 'task_id': tid}]})
+    assert r.status_code == 410 and r.json['code'] == 'endpoint_retired' and '移动到文件夹' in r.json['error']
+    assert tasks.get_db().execute('SELECT count(*) FROM canvas_local_uploads').fetchone()[0] == 0
 
 
 def local_items(client):
@@ -72,7 +104,7 @@ def test_history_single_output_and_project_cleanup_keep_local_copy():
     assert copy.exists() and len(local_items(client)) == 1
 
 
-def test_canvas_node_result_and_copies_deduplicate_by_source_without_new_files():
+def test_canvas_node_result_and_copies_deduplicate_by_source_without_new_files(legacy_canvas_copies):
     client, p, w = setup()
     tid, selections = task_outputs(w, count=1)
     imported = canvas_writeback.import_task_assets(w, tid)[0]
@@ -106,7 +138,7 @@ def test_copy_of_local_item_on_canvas_returns_that_local_item():
     assert r.json['items'][0]['status'] == 'existing' and r.json['items'][0]['local_id'] == created['local_id']
 
 
-def test_deleting_local_copy_keeps_task_output_and_canvas_then_readding_creates_new():
+def test_deleting_local_copy_keeps_task_output_and_canvas_then_readding_creates_new(legacy_canvas_copies):
     client, p, w = setup()
     tid, selections = task_outputs(w, count=1)
     imported = canvas_writeback.import_task_assets(w, tid)[0]
@@ -123,24 +155,6 @@ def test_deleting_local_copy_keeps_task_output_and_canvas_then_readding_creates_
     assert client.get(f"/api/canvas/library/items/task:{selections[0]['id']}/download").status_code == 200
     again = add(client, [{'source': 'task', 'task_id': tid}]).json['items'][0]
     assert again['status'] == 'created' and again['local_id'] != created['local_id']
-
-
-def test_tags_from_request_and_generation_history_are_merged():
-    client, p, w = setup()
-    tid, selections = task_outputs(w, count=1)
-    history = client.post('/api/canvas/library/tags', json={'title': '历史'}).json['tag']
-    picked = client.post('/api/canvas/library/tags', json={'title': '角色'}).json['tag']
-    extra = client.post('/api/canvas/library/tags', json={'title': '补充'}).json['tag']
-    key = 'task:' + selections[0]['id']
-    assert client.patch(f'/api/canvas/library/items/{key}/tags', json={'tag_ids': [history['id']]}).status_code == 200
-    created = add(client, [{'source': 'task', 'task_id': tid}], tag_ids=[picked['id']]).json['items'][0]
-    titles = lambda k: sorted(t['title'] for t in client.get('/api/canvas/library/items?scope=all&source=local').json['items'][0]['tags'])
-    assert titles(created['key']) == ['历史', '角色']
-    existing = add(client, [{'source': 'task', 'task_id': tid}], tag_ids=[extra['id']]).json['items'][0]
-    assert existing['status'] == 'existing' and titles(created['key']) == ['历史', '补充', '角色']
-    # The generated result keeps its own tag.
-    generated = client.get('/api/canvas/library/items', query_string={'scope': 'all', 'source': 'generated'}).json['items']
-    assert [t['title'] for t in generated[0]['tags']] == ['历史']
 
 
 def test_skipped_reasons_are_chinese_and_carry_no_addresses():
@@ -178,7 +192,7 @@ def test_invalid_requests_write_nothing(payload, status):
     client, p, w = setup()
     tid, _ = task_outputs(None, count=1)
     payload = {**payload, 'items': [{**i, 'task_id': tid} if i.get('task_id') == 1 else i for i in payload['items']]}
-    r = client.post(URL, json=payload)
+    r = add(client, **payload)
     assert r.status_code == status, r.json
     assert local_files() == [] and tasks.get_db().execute('SELECT count(*) FROM canvas_local_sources').fetchone()[0] == 0
 

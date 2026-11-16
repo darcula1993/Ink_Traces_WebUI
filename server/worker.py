@@ -199,9 +199,21 @@ class Worker:
         finally:
             if task_db.cancellation_requested(task['id']):
                 task_db.finalize_task_cancel(task['id'])
+            self._register_media(task['id'])
             self._write_back(task['id'])
             self._advance_group_run(task['id'])
             task_db.close_db()
+
+    @staticmethod
+    def _register_media(task_id):
+        # LIBRARY-GLOBAL-20261116 S2: a succeeded task's outputs enter the global library
+        # (生成历史/<kind>) once, before the write-back references them. No provider call,
+        # no retry, no task change; failures only log (the write-back registers again).
+        try:
+            import canvas_media_refs
+            canvas_media_refs.register_task_outputs_safely(task_id)
+        except Exception:
+            LOG.exception('media_register_hook_failed id=%s', task_id)
 
     @staticmethod
     def _write_back(task_id):

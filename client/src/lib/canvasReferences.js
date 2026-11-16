@@ -1,4 +1,5 @@
 import {promptMentionItem,referenceTokenPattern} from './referenceMedia.js'
+import {deletedInputIssues} from './canvasMediaStatus.js'
 export {referenceTokenPattern}
 // One ordering and compatibility contract for cards, controls and submission.
 export const mediaKind = node => node?.type === 'asset' ? node.asset?.kind : node?.type
@@ -21,7 +22,7 @@ export function resolveNodeInputs(node, nodes, edges) {
   const unique=[...new Map(assets.map(asset => [asset.id,asset])).values()],rank=new Map((node.referenceOrder||[]).map((id,index)=>[id,index]))
   unique.sort((a,b)=>(rank.get(a.id)??Infinity)-(rank.get(b.id)??Infinity))
   const frames=resolveKeyframeRoles(node,unique)
-  return {assets:unique,prompt:[...texts,node.text?.trim()].filter(Boolean).join('\n\n'),issues:[...issues,...frames.issues,...referenceMentionIssues(node,unique,texts.join('\n'))],frames}
+  return {assets:unique,prompt:[...texts,node.text?.trim()].filter(Boolean).join('\n\n'),issues:[...issues,...deletedInputIssues(unique),...frames.issues,...referenceMentionIssues(node,unique,texts.join('\n'))],frames}
 }
 
 export function resolveKeyframeRoles(node, assets) {

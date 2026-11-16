@@ -73,7 +73,8 @@ def test_preview_rejects_bad_project_context():
         assert r.status_code == 400
 
 
-def test_character_uploads_show_character_source_in_all_projects_view():
+def test_character_uploads_go_to_media_not_the_old_catalog():
+    """LIBRARY-GLOBAL S6c: character uploads are media items; the old 本地素材 catalog no longer gets them."""
     client, p, _ = setup()
     plain = local_upload(client, 'red', 'plain.png')
     c = client.post('/api/characters', json={'name': '林'}).json['character']
@@ -81,9 +82,8 @@ def test_character_uploads_show_character_source_in_all_projects_view():
                     content_type='multipart/form-data')
     assert r.status_code in (200, 201), r.json
     items = {i['asset']['name']: i for i in client.get('/api/canvas/library/items?scope=all&source=local').json['items']}
-    assert items['role.png']['characters'] == [{'id': c['id'], 'name': '林'}] and items['role.png']['project_id'] is None
-    assert items['plain.png']['characters'] == []
-    # Marker only: deletion of a character upload still follows the existing rules (reference removed, character kept).
-    plan = preview(client, [items['role.png']['key']], p)
+    assert set(items) == {'plain.png'} and items['plain.png']['characters'] == []
+    media_id = r.json['images'][0]['media_id']
+    plan = client.post('/api/canvas/media/delete-preview', json={'ids': [media_id]}).json
     assert [x['name'] for x in plan['characters']] == ['林']
-    assert plain['key'] != items['role.png']['key']
+    assert plain['key'] != 'local:' + media_id

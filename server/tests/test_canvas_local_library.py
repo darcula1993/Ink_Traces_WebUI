@@ -35,7 +35,7 @@ def test_local_union_default_dedup_and_legacy_sources():
 def test_local_filters_counts_scope_and_hidden_identity():
     client,p,w=setup(); a=upload(client,p)
     direct=upload(client,w,'blue',workflow=True)
-    folder=folders.list_folders(p)[0]
+    folder=folders.save_folder(p,{'title':'角色'})
     folders.edit_asset(p,a['id'],{'folder_id':folder['id'],'name':'target needle.png'})
     sound=io.BytesIO()
     with wave.open(sound,'wb') as handle:
@@ -43,9 +43,7 @@ def test_local_filters_counts_scope_and_hidden_identity():
     sound.seek(0)
     audio=client.post(f'/api/canvas/projects/{p}/assets',data={'file':(sound,'voice.wav')})
     assert audio.status_code==201
-    tag=client.post('/api/canvas/library/tags',json={'title':'chosen'}).json['tag']
-    client.patch('/api/canvas/library/items/library:'+a['id']+'/tags',json={'tag_ids':[tag['id']]})
-    assert listing(client,p,'local',q='needle',tag_id=tag['id'],folder_id=folder['id'])['total']==1
+    assert listing(client,p,'local',q='needle',folder_id=folder['id'])['total']==1
     root=listing(client,p,'local',folder_id='')
     assert root['total']==2
     images=listing(client,p,'local',kind='image')

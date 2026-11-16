@@ -15,6 +15,15 @@ asset (direct upload, imported task result) records nothing, and a non-copy save
 deduplicated onto a pure copy drops its copy records. Copies of copies are followed
 transitively. Copies into the project
 library are not canvas copies and are kept unless selected themselves.
+
+LIBRARY-GLOBAL-20261116 S3 (compatibility layer): a key that resolves to a global media
+item (``media_library.resolve``: alias or ``task_assets.media_id``, so ``task:`` results
+in 生成历史 too) is deleted through ``media_library.delete_preview/delete_media``: the
+library row and file go, inputs referencing it are stripped and node results/candidates
+stay as "已删除" placeholders. Keys without a media item keep the legacy behaviour
+above until the migration has run. Old rows of a migrated item (canvas_local_uploads
+etc.) are left for the rollback window; only the media file is the library file.
+New clients call ``/api/canvas/media/delete-preview`` and ``/api/canvas/media/delete``.
 """
 import json
 import os
@@ -267,7 +276,48 @@ def _summary(plan, affected=None):
             'missing': plan['missing'], 'rejected': plan['rejected'], 'characters': plan['characters']}
 
 
+def _split_media(keys):
+    """({key: media_id} for keys backed by the global library, legacy keys)."""
+    import media_library
+    media, legacy = {}, []
+    for key in keys:
+        media_id = None if key.startswith('cupsy:') else media_library.resolve(key)
+        if media_id:
+            media[key] = media_id
+        else:
+            legacy.append(key)
+    return media, legacy
+
+
+def _merge_media(summary, result, media_keys):
+    gone = set(result.get('missing') or [])
+    keys = [k for k, i in media_keys.items() if i not in gone]
+    affected = [{**a, 'source': 'media', 'canvas_copies': 0, 'direct_assets': 0,
+                 'affected_nodes': a['stripped_nodes'] + a['placeholder_nodes'], 'removed_nodes': 0, 'other_project': True}
+                for a in result.get('affected_workflows') or []]
+    known = {c['id'] for c in summary['characters']}
+    return {**summary,
+            'items': summary['items'] + len(keys),
+            'affected_workflows': summary['affected_workflows'] + affected,
+            'workflow_ids': sorted(set(summary['workflow_ids']) | {a['workflow_id'] for a in affected}),
+            'workflows': len(set(summary['workflow_ids']) | {a['workflow_id'] for a in affected}),
+            'affected_nodes': summary['affected_nodes'] + sum(a['affected_nodes'] for a in affected),
+            'placeholder_nodes': sum(a['placeholder_nodes'] for a in affected),
+            'missing': summary['missing'] + [k for k, i in media_keys.items() if i in gone],
+            'characters': summary['characters'] + [c for c in result.get('characters') or [] if c['id'] not in known],
+            'media_keys': {k: media_keys[k] for k in keys}, 'media': result}
+
+
 def preview(keys, context_project_id=None):
+    import media_library
+    media_keys, keys = _split_media(keys)
+    summary = _legacy_preview(keys, context_project_id)
+    if media_keys:
+        summary = _merge_media(summary, media_library.delete_preview(sorted(set(media_keys.values()))), media_keys)
+    return summary
+
+
+def _legacy_preview(keys, context_project_id=None):
     db = tasks.get_db()
     owns = not db.in_transaction
     if owns:
@@ -291,6 +341,20 @@ def _paths_in_use(db):
 
 
 def delete_items(keys):
+    """Delete 本地素材 keys: library-backed keys via media delete, the rest as before."""
+    import media_library
+    media_keys, keys = _split_media(keys)
+    media_result = media_library.delete_media(sorted(set(media_keys.values()))) if media_keys else None
+    result = _legacy_delete(keys)
+    if media_result is None:
+        return result
+    merged = _merge_media(result, media_result, media_keys)
+    deleted = set(media_result['deleted_ids'])
+    return {**merged, 'deleted_keys': result['deleted_keys'] + [k for k, i in media_keys.items() if i in deleted],
+            'files_removed': result['files_removed'] + media_result['files_removed']}
+
+
+def _legacy_delete(keys):
     staged, token = [], uuid.uuid4().hex
     try:
         with store.write_transaction() as db:

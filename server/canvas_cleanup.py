@@ -1,4 +1,8 @@
-"""Explicit archival and retryable, reference-aware local media cleanup."""
+"""Explicit archival and retryable, reference-aware local media cleanup.
+
+LIBRARY-GLOBAL-20261116 S3: project/canvas deletion with cleanup never deletes library
+files (``_library_protected``); such candidates are counted in ``retained_library``.
+"""
 import json
 import hashlib
 from urllib.parse import unquote, urlsplit
@@ -126,6 +130,24 @@ def _aliases(path):
     return result
 
 
+def _library_protected(db, path, digest):
+    """LIBRARY-GLOBAL S3: project/canvas deletion and cleanup never delete library files.
+
+    Protected: anything inside ``<asset_root>/media``, a task output registered in the
+    library (``task_assets.media_id``) and any file whose content is a library item.
+    """
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='media'").fetchone():
+        return False
+    if path.is_relative_to(store.asset_root().absolute() / 'media'):
+        return True
+    # Outputs (and their thumbnails) of a task with a result in the library: the task card stays.
+    if db.execute("""SELECT 1 FROM task_assets a WHERE a.path=? AND (COALESCE(a.media_id,'')!='' OR (a.kind LIKE 'output_%'
+                     AND EXISTS (SELECT 1 FROM task_assets b WHERE b.task_id=a.task_id AND COALESCE(b.media_id,'')!='')))""",
+                  (str(path),)).fetchone():
+        return True
+    return digest is not None and db.execute('SELECT 1 FROM media WHERE sha256=?', (digest,)).fetchone() is not None
+
+
 def _protected(path, digest, protection):
     hashes, paths, texts = protection
     if digest in hashes or str(path) in paths:
@@ -212,6 +234,8 @@ def delete_scope(scope, identifier, cleanup=False):
                 if digest is None and hash_path.is_file():
                     with hash_path.open('rb') as handle: digest=hashlib.file_digest(handle,'sha256').hexdigest()
                 reason=_protected(Path(item.get('source_path',raw)),digest,protection)
+                if not reason and (_library_protected(db,path,None) or _library_protected(db,hash_path,digest)):
+                    reason='library'; plan['retained_library']=plan.get('retained_library',0)+1
                 if reason:
                     plan['retained_shared']+=1
                     if reason=='ambiguous': plan['retained_ambiguous']=plan.get('retained_ambiguous',0)+1
@@ -238,7 +262,7 @@ def delete_scope(scope, identifier, cleanup=False):
                     params=json.loads(row['params'] or '{}');params['canvas_outputs_purged']=True
                     db.execute('UPDATE tasks SET deleted_at=?,params=? WHERE id=?',(tasks.utcnow(),json.dumps(params),tid))
             db.execute('UPDATE canvas_deletions SET completed=1 WHERE scope=? AND id=?',(scope,identifier))
-        return {'deleted':True,'cleanup_assets':cleanup,'removed_files':len(plan['done'])-plan['retained_shared'],'retained_shared':plan['retained_shared'],'retained_ambiguous':plan.get('retained_ambiguous',0)}
+        return {'deleted':True,'cleanup_assets':cleanup,'removed_files':len(plan['done'])-plan['retained_shared'],'retained_shared':plan['retained_shared'],'retained_ambiguous':plan.get('retained_ambiguous',0),'retained_library':plan.get('retained_library',0)}
     except OSError:
         db.rollback()
         raise store.CanvasError('部分文件尚未清理，删除记录已保留，请重试',409)

@@ -22,8 +22,10 @@ import PendingDeletions from './PendingDeletions'
 import AssetImageToolbar from './AssetImageToolbar'
 import CanvasNodeMenu from './CanvasNodeMenu'
 import AddToCharacterDialog from './AddToCharacterDialog'
-import AddToLocalDialog from '../library/AddToLocalDialog'
-import {canvasAssetRef} from '../library/localFromResults'
+import MoveToFolderDialog from './MoveToFolderDialog'
+import useCanvasMediaStatus from './useCanvasMediaStatus'
+import {uploadCanvasLibraryMedia,resolveLibraryMedia,lookupMedia,readUploadFolder,writeUploadFolder} from '../../lib/canvasMedia'
+import {isMediaAsset,isDeletedMedia,markDeletedMedia} from '../../lib/canvasMediaStatus'
 import MediaPreview,{previewItems} from './MediaPreview'
 import DeleteCanvasDialog from './DeleteCanvasDialog'
 import CanvasImageAnnotator from './CanvasImageAnnotator'
@@ -38,7 +40,7 @@ import { NODE_WIDTH, NODE_HEIGHT, nodeGeometry, overlapsNode, generationPanelPla
 import CanvasNodePanel from './CanvasNodePanel'
 import CanvasLibrary from './CanvasLibrary'
 import {resolveLibraryItems} from '../../lib/libraryApi'
-import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, uploadCanvasMedia, getCanvasCapabilities, submitCanvasGeneration, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, resolveCanvasReferences, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject } from '../../lib/canvasApi'
+import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, getCanvasCapabilities, submitCanvasGeneration, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject } from '../../lib/canvasApi'
 import './canvas.css'
 import ResizableSidebar from './ResizableSidebar'
 import ConfirmDialog from '../ui/ConfirmDialog'
@@ -107,7 +109,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const [connection, setConnection] = useState(null)
   const [contextMenu,setContextMenu] = useState(null)
   const [pendingDeletions,setPendingDeletions]=useState(false)
-  const [nodeMenu,setNodeMenu]=useState(null),[preview,setPreview]=useState(null),[historyNode,setHistoryNode]=useState(null),[annotation,setAnnotation]=useState(null),[deletion,setDeletion]=useState(null),[assetRefresh,setAssetRefresh]=useState(0)
+  const [nodeMenu,setNodeMenu]=useState(null),[preview,setPreview]=useState(null),[historyNode,setHistoryNode]=useState(null),[annotation,setAnnotation]=useState(null),[deletion,setDeletion]=useState(null),[assetRefresh,setAssetRefresh]=useState(0),[mediaRefresh,setMediaRefresh]=useState(0)
   const annotationOwner=useRef(null),replacementOwner=useRef(null),replacementInput=useRef(null),historyRef=useRef(null)
   const uploadPoint = useRef(null), lastPointer = useRef(null), pendingKeyPaste = useRef(false)
   // CANVAS-INPUT-20261114 #2: drag-to-connect from an output port (runtime only, never saved).
@@ -117,7 +119,10 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const [historyRevision,setHistoryRevision]=useState(0),[shortcutsOpen,setShortcutsOpen]=useState(false),[moreMenu,setMoreMenu]=useState(null),moreTrigger=useRef(null)
   const refreshHistory=()=>setHistoryRevision(value=>value+1)
   const [saveState, setSaveState] = useState('尚未创建')
-  const [libraryTarget, setLibraryTarget] = useState(null),libraryOwner=useRef(null),[characterTarget,setCharacterTarget]=useState(null),[localRefs,setLocalRefs]=useState(null)
+  const [libraryTarget, setLibraryTarget] = useState(null),libraryOwner=useRef(null),[characterTarget,setCharacterTarget]=useState(null),[movingAssets,setMovingAssets]=useState(null),[revealMedia,setRevealMedia]=useState(null)
+  // LIBRARY-GLOBAL S5: canvas uploads/pastes/frames/save-as go to the library root or this folder (per viewer).
+  const [uploadFolder,setUploadFolderState]=useState(readUploadFolder),uploadFolderRef=useRef(uploadFolder)
+  const setUploadFolder=id=>{uploadFolderRef.current=id||null;setUploadFolderState(id||null);writeUploadFolder(id||null)}
   function openLibrary(target,initialSource='local'){libraryOwner.current={workflowId:workflowRef.current?.id,projectId:projectIdRef.current,targetId:target,initialSource};setLibraryTarget(target)}
   const [error, setError] = useState('')
   const [overlapCount, setOverlapCount] = useState(0)
@@ -132,6 +137,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const providerPreferences = useRef({})
   const rootRef = useRef(null), fileRef = useRef(null), uploadTarget = useRef(null)
   const docRef = useRef(doc), workflowRef = useRef(null), titleRef = useRef(title)
+  const mediaStatus = useCanvasMediaStatus(doc)
   const version = useRef(0), savedVersion = useRef(0), contentVersion = useRef(0), savedContentVersion = useRef(0), queue = useRef(Promise.resolve()), drag = useRef(null), space = useRef(false)
   const creatingWorkflow = useRef(null), staleBaselines = useRef(new Map())
   const conflictRef = useRef(false), mounted = useRef(true), generationLocks = useRef(new Set()), polling = useRef(false)
@@ -475,6 +481,8 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
             const unknown = [...patches.values()].filter(patch => patch.task.resultUnknown).map(patch => patch.task.id)
             if (unknown.length) setUnknownTasks(current => new Set([...current, ...unknown]))
             if (patches.size) edit(current => applyTaskUpdates(current, patches), { history: false, runtime: true, transient: true })
+            // V2-FIX-20261117 F4: written-back results are new library media (生成历史) → refresh the sidebar tree and counts.
+            if ([...patches.values()].some(patch => patch.additions?.length || patch.task.status === 'succeeded')) setMediaRefresh(value => value + 1)
             // TASK-DONE-NOTIFY-20261114: remind from the written-back terminal state only.
             if (patches.size) remindRef.current?.(completionNotices({ patches, document: docRef.current, workflowId: currentWorkflowId, notified: notifiedTasks.current, eligible: watchedTasks.current }))
             if (Number.isInteger(synced.revision) && synced.revision > (workflowRef.current?.revision || 0)) adoptServerRevision(currentWorkflowId, synced.revision)
@@ -616,7 +624,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     edit(current => ({ ...current, nodes: [...current.nodes, node] })); setSelected(node.id); setSelectedEdge(null);requestAnimationFrame(()=>interaction.reveal(node.id))
     return node
   }
-  function addAssetNodes(assets, targetId, point) {
+  function addAssetNodes(assets, targetId, point, titles = null) {
     const current = docRef.current, target = targetId && current.nodes.find(node => node.id === targetId)
     if (targetId && !target) throw new Error('目标节点不存在，请重新选择。')
     const unique = [...new Map(assets.map(asset => [asset.id,asset])).values()]
@@ -630,7 +638,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
         // UI-ITER-R2-FIX L1: stack by each blocking node's real geometry (nodeGeometry), gap 20/30, never overlapping.
         let x=origin.x,y=origin.y
         for(let guard=0;guard<600;guard++){const blocker=nodes.find(node=>overlapsNode({type:'asset',x,y,asset},node,0));if(!blocker)break;if(target)y=blocker.y+nodeGeometry(blocker).height+20;else x=blocker.x+nodeGeometry(blocker).width+30}
-        source = {id:uid(),type:'asset',title:asset.name || '素材',x,y,text:'',params:{},asset,candidates:[asset],selectedCandidateId:asset.id,task:null};nodes.push(source)
+        source = {id:uid(),type:'asset',title:titles?.get(asset.id) || asset.name || '素材',x,y,text:'',params:{},asset,candidates:[asset],selectedCandidateId:asset.id,task:null};nodes.push(source)
       }
       added.push(source)
       if (target && !edges.some(edge => edge.source===source.id && edge.target===target.id)) edges.push({id:uid(),source:source.id,target:target.id})
@@ -640,35 +648,51 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     edit(() => ({...current,nodes,edges}));setSelected(target?.id || added[0]?.id || null);setSelectedEdge(null)
     return {created:nodes.length-current.nodes.length,reused:unique.length-(nodes.length-current.nodes.length)}
   }
-  async function addProjectAssets(assetIds,point=null,targetId=null) {
+  // LIBRARY-GLOBAL S5: library media are referenced directly (media id); nothing is copied into the canvas.
+  // S7: `source` may be an async loader (folder pages). The owner project/canvas is captured and the I/O lock
+  // (which disables project/canvas switching) is taken before reading, so a slow read never writes elsewhere.
+  async function addProjectAssets(source,point=null,targetId=null,check=null) {
     if(ioRef.current||navigationRef.current||generationLocks.current.size)throw new Error('请等待当前操作完成后再添加素材')
-    const ids=[...new Set(assetIds)],projectOwner=projectIdRef.current
-    if(!ids.length)throw new Error('文件夹中没有可添加的素材')
-    if(docRef.current.nodes.length+ids.length>500)throw new Error('所选素材会超过画布500节点上限，请选择更少的素材')
-    if(!workflowRef.current&&!await newWorkflow())throw new Error('无法创建画布，请重试')
-    const owner=workflowRef.current.id
+    let projectOwner=projectIdRef.current,owner=workflowRef.current?.id||null,locked=true
+    const switched=()=>projectIdRef.current!==projectOwner||(workflowRef.current?.id||null)!==owner
+    const unlock=()=>{if(locked){locked=false;ioRef.current--;if(mounted.current)setIoCount(ioRef.current)}}
     ioRef.current++;setIoCount(ioRef.current)
-    const copied=[];let inserted=false
     try {
-      await save()
-      for(let index=0;index<ids.length;index+=100){const result=await resolveCanvasReferences(owner,{asset_ids:ids.slice(index,index+100),group_ids:[]});copied.push(...result.assets)}
-      if(projectIdRef.current!==projectOwner||workflowRef.current?.id!==owner)throw new Error('原画布已切换，未添加到其他画布')
-      if(targetId&&!docRef.current.nodes.some(n=>n.id===targetId))throw new Error('目标节点已不存在，未添加参考');await Promise.race([preloadMediaSizes(copied),new Promise(r=>setTimeout(r,2500))]);if(projectIdRef.current!==projectOwner||workflowRef.current?.id!==owner)throw new Error('原画布已切换，未添加到其他画布');const result=addAssetNodes(copied,targetId,point);inserted=true;await save();notify?.(targetId?`已追加 ${copied.length} 个参考到节点末尾`:`已添加 ${result.created} 个素材节点${result.reused?`，复用 ${result.reused} 个已有节点`:''}`,'success')
-    }catch(failure){if(!inserted)throw new Error(`${messageOf(failure)}；未添加本批节点，已复制的素材保留在原画布，可重试。`);throw failure}finally{ioRef.current--;setIoCount(ioRef.current)}
+      const mediaAssets=typeof source==='function'?await source():source
+      if(switched())throw new Error('原画布已切换，未添加到其他画布')
+      const assets=[...new Map(mediaAssets.filter(isMediaAsset).map(asset=>[asset.id,asset])).values()]
+      if(!assets.length)throw new Error('文件夹中没有可添加的素材')
+      const deleted=assets.find(asset=>isDeletedMedia(asset.id));if(deleted)throw new Error(`素材“${deleted.name}”已在素材库中删除，未添加`)
+      check?.(mediaAssets)
+      if(docRef.current.nodes.length+assets.length>500)throw new Error('所选素材会超过画布500节点上限，请选择更少的素材')
+      if(!workflowRef.current){
+        // newWorkflow refuses while I/O is locked; release and re-take synchronously around it.
+        unlock();if(!await newWorkflow())throw new Error('无法创建画布，请重试')
+        if(ioRef.current||navigationRef.current)throw new Error('请等待当前操作完成后再添加素材')
+        projectOwner=projectIdRef.current;owner=workflowRef.current.id;locked=true;ioRef.current++;setIoCount(ioRef.current)
+      }
+      await Promise.race([preloadMediaSizes(assets),new Promise(r=>setTimeout(r,2500))])
+      if(switched())throw new Error('原画布已切换，未添加到其他画布')
+      if(targetId&&!docRef.current.nodes.some(n=>n.id===targetId))throw new Error('目标节点已不存在，未添加参考')
+      const result=addAssetNodes(assets,targetId,point);await save();notify?.(targetId?`已追加 ${assets.length} 个参考到节点末尾`:`已添加 ${result.created} 个素材节点${result.reused?`，复用 ${result.reused} 个已有节点`:''}`,'success')
+    }finally{unlock()}
   }
   // Drag from the asset tree (or its keyboard menu) onto a generation node:
   // append as references, one undo step; type/count limits refuse with a reason.
-  async function addProjectReferences(assetIds,kinds,targetId){
-    const target=docRef.current.nodes.find(n=>n.id===targetId)
-    const issue=referenceDropError(target,target?resolveNodeInputs(target,docRef.current.nodes,docRef.current.edges).assets:[],kinds,target&&nodeProvider(capabilities,target))
-    if(issue)throw new Error(`${issue}；未添加参考`)
-    await addProjectAssets(assetIds,null,targetId)
+  async function addProjectReferences(source,kinds,targetId){
+    const check=items=>{
+      const target=docRef.current.nodes.find(n=>n.id===targetId)
+      const issue=referenceDropError(target,target?resolveNodeInputs(target,docRef.current.nodes,docRef.current.edges).assets:[],kinds||items.map(asset=>asset.kind),target&&nodeProvider(capabilities,target))
+      if(issue)throw new Error(`${issue}；未添加参考`)
+    }
+    if(typeof source!=='function')check(source)
+    await addProjectAssets(source,null,targetId,check)
   }
   function dropProjectAssets(event){
     let payload;try{payload=JSON.parse(event.dataTransfer.getData(PROJECT_ASSET_DRAG))}catch{return}
-    if(String(payload?.projectId)!==String(projectIdRef.current)||!Array.isArray(payload.ids)){showError('只能拖入当前项目的素材');return}
+    if(!Array.isArray(payload?.media)||!payload.media.length||!payload.media.every(isMediaAsset)){showError('只能拖入素材库中的素材');return}
     const targetElement=event.target.closest?.('[data-node-id]'),target=targetElement&&docRef.current.nodes.find(n=>n.id===targetElement.dataset.nodeId)
-    const run=target&&['image','video','audio'].includes(target.type)?addProjectReferences(payload.ids,payload.kinds||[],target.id):addProjectAssets(payload.ids,worldPoint(event.clientX,event.clientY))
+    const run=target&&['image','video','audio'].includes(target.type)?addProjectReferences(payload.media,payload.media.map(asset=>asset.kind),target.id):addProjectAssets(payload.media,worldPoint(event.clientX,event.clientY))
     run.catch(showError)
   }
   function clearReferences(id) { edit(current => ({...current,nodes:current.nodes.map(node => node.id===id?{...node,referenceAssets:[],referenceGroups:[]}:node),edges:current.edges.filter(edge=>edge.target!==id)})) }
@@ -733,7 +757,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   pasteFiles:files=>{
     if(ioRef.current||navigationRef.current||conflictRef.current){showError('请等待当前操作完成后再粘贴素材');return}
     const pointer=lastPointer.current,point=pointer?worldPoint(pointer.x,pointer.y):null
-    importFiles(files,point).catch?.(showError)
+    importFiles(files,point,null,'paste').catch?.(showError)
   }}
   // Shared by click-then-click and drag-to-connect (#2): same rules and messages.
   function connectNodes(sourceId, id) {
@@ -844,7 +868,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const viewport = fitViewport({ minX, minY, maxX, maxY }, rect)
     edit(current => ({ ...current, viewport }))
   }
-  async function importFiles(files, point, targetId) {
+  async function importFiles(files, point, targetId, origin = 'canvas_upload') {
     if (!files.length) return
     if (!workflowRef.current && !await newWorkflow()) return
     const owner = workflowRef.current.id
@@ -853,7 +877,9 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const batchOrigin = point || (batchTarget ? {x:batchTarget.x-NODE_WIDTH-60,y:batchTarget.y} : worldPoint(rect.left+rect.width/2-145,rect.top+rect.height/2-100))
     ioRef.current += 1; setIoCount(ioRef.current)
     // CANVAS-INPUT-20261114 #1: upload every file first, then add all nodes in one edit (one undo step per drop/paste).
-    const uploaded = [], problems = []
+    // A deduplicated upload returns the existing library media (its stored name); the new node keeps this file's name.
+    const uploaded = [], problems = [], titles = new Map()
+    let folderFallback = false
     try {
     for (const file of [...files]) {
       const kind = (file.type || '').split('/')[0]
@@ -861,14 +887,16 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       const target = targetId && docRef.current.nodes.find(node => node.id === targetId)
       if (target && !canConnect({id:'uploaded-reference',type:'asset',asset:{kind}},target)) { problems.push('所选素材类型不能接入该生成节点。'); continue }
       try {
-        const asset = await uploadCanvasMedia(owner, file)
-        if (workflowRef.current?.id !== owner) { problems.push('素材已上传到原画布；当前画布已切换，请返回原画布导入。'); uploaded.length = 0; break }
-        uploaded.push(asset)
+        const saved = await uploadCanvasLibraryMedia(file, { origin, folderId: uploadFolderRef.current })
+        if (saved.folderFallback) { folderFallback = true; setUploadFolder(null) }
+        if (workflowRef.current?.id !== owner) { problems.push('素材已保存到素材库；当前画布已切换，未添加节点，可从素材库拖入。'); uploaded.length = 0; break }
+        uploaded.push(saved.asset); if (file.name) titles.set(saved.asset.id, String(file.name).slice(0, 240))
       } catch (failure) { const status = failure?.response?.status; problems.push(`${file.name || '文件'}：${status === 413 ? '文件过大，超过服务器上传上限' : messageOf(failure)}`) }
     }
     if (uploaded.length && workflowRef.current?.id === owner) {
-      try { addAssetNodes(uploaded,targetId,{x:batchOrigin.x,y:batchOrigin.y}); await save() } catch (failure) { problems.push(messageOf(failure)) }
+      try { addAssetNodes(uploaded,targetId,{x:batchOrigin.x,y:batchOrigin.y},titles); await save() } catch (failure) { problems.push(messageOf(failure)) }
     }
+    if (folderFallback) problems.push('画布上传文件夹已不存在，素材已存到素材库根目录')
     if (problems.length) showError(problems.join('；'))
     } finally { ioRef.current -= 1; if (mounted.current) setIoCount(ioRef.current) }
   }
@@ -896,7 +924,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     if (!mounted.current || workflowRef.current?.id !== owner) return
     const name = frameFileName(node.title, { tail, time: frame.time }), before = docRef.current.nodes.length
     const source = docRef.current.nodes.find(item => item.id === id) || node
-    await importFiles([new File([frame.blob], name, { type: 'image/png' })], { x: source.x + nodeGeometry(source).width + 60, y: source.y })
+    await importFiles([new File([frame.blob], name, { type: 'image/png' })], { x: source.x + nodeGeometry(source).width + 60, y: source.y }, null, 'frame')
     if (mounted.current && docRef.current.nodes.length > before) notify?.(`已截取 ${name}（${frame.width}×${frame.height}）${note ? `；${note}` : ''}`)
   }
   function pickFile(id = null, point = null) {
@@ -976,7 +1004,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const keyboard=event.type==='keydown',nodeRect=event.currentTarget?.getBoundingClientRect();setSelected(id);setContextMenu(null);setNodeMenu({id,x:(keyboard?nodeRect.left+30:event.clientX)-rect.left,y:(keyboard?nodeRect.top+35:event.clientY)-rect.top})
   }
   function assetOwner(id,action="替换素材") {const node=docRef.current.nodes.find(item=>item.id===id);return {workflowId:workflowRef.current?.id,nodeId:id,assetId:node?.asset?.id,kind:node?.asset?.kind,description:`${action}：节点“${node?.title}”`}}
-  async function saveAssetVersion(owner,file) {
+  async function saveAssetVersion(owner,file,origin='canvas_upload') {
     if(!owner.workflowId || workflowRef.current?.id!==owner.workflowId)throw new Error('原画布已切换，未替换当前素材')
     const node=docRef.current.nodes.find(item=>item.id===owner.nodeId)
     if(!node || node.asset?.id!==owner.assetId)throw new Error('原素材节点已改变，请重新操作')
@@ -984,8 +1012,9 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     if(file.type.split('/')[0]!==owner.kind)throw new Error('替换素材必须保持原媒体类型')
     ioRef.current++;setIoCount(ioRef.current)
     try {
-      const asset=await uploadCanvasMedia(owner.workflowId,file)
-      if(workflowRef.current?.id!==owner.workflowId || docRef.current.nodes.find(item=>item.id===owner.nodeId)?.asset?.id!==owner.assetId)throw new Error('原素材节点已改变，文件已保存在原画布，未替换当前素材')
+      const saved=await uploadCanvasLibraryMedia(file,{origin,folderId:uploadFolderRef.current}),asset=saved.asset
+      if(saved.folderFallback)setUploadFolder(null)
+      if(workflowRef.current?.id!==owner.workflowId || docRef.current.nodes.find(item=>item.id===owner.nodeId)?.asset?.id!==owner.assetId)throw new Error('原素材节点已改变，文件已保存到素材库，未替换当前素材')
       const result=switchAssetVersion(docRef.current,owner.nodeId,asset,true);edit(()=>result.document,{description:owner.description});owner.assetId=asset.id;owner.versionPending=true;await save();owner.versionPending=false;if(result.warnings.length)showError(result.warnings.join('；'))
     } catch(failure) {throw new Error(messageOf(failure))} finally {ioRef.current--;setIoCount(ioRef.current)}
   }
@@ -993,7 +1022,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     if(ioRef.current)return
     const owner=assetOwner(id,"旋转图片"),node=docRef.current.nodes.find(item=>item.id===id)
     ioRef.current++;setIoCount(ioRef.current)
-    try{const file=await rotateImageFile(node.asset);await saveAssetVersion(owner,file)}catch(e){showError(e)}finally{ioRef.current--;setIoCount(ioRef.current)}
+    try{const file=await rotateImageFile(node.asset);await saveAssetVersion(owner,file,'save_as')}catch(e){showError(e)}finally{ioRef.current--;setIoCount(ioRef.current)}
   }
   function annotateNode(id) {if(ioRef.current)return;const owner=assetOwner(id,"标注图片");annotationOwner.current=owner;setAnnotation({owner,asset:docRef.current.nodes.find(n=>n.id===id).asset});ioRef.current++;setIoCount(ioRef.current)}
   function closeAnnotation(){if(annotationOwner.current){annotationOwner.current=null;ioRef.current--;setIoCount(ioRef.current)}setAnnotation(null)}
@@ -1005,11 +1034,37 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   async function flushBeforeLibraryDelete(){if(workflowRef.current&&!conflictRef.current)await save()}
   async function afterLibraryDelete(result){
     setAssetRefresh(value=>value+1)
+    // LIBRARY-GLOBAL S5: deleted media become "已删除" placeholders here at once (the server rewrote affected canvases).
+    if(Array.isArray(result?.deleted_ids))markDeletedMedia(result.deleted_ids)
+    mediaStatus.recheck()
     const current=workflowRef.current
     if(!current||!(result.workflow_ids||[]).includes(current.id))return
     if(version.current!==savedVersion.current||conflictRef.current){conflictRef.current=true;setConflict(true);return}
     try{const fresh=await getCanvasWorkflow(current.id);if(workflowRef.current?.id===current.id&&version.current===savedVersion.current)installWorkflow(fresh);else{conflictRef.current=true;setConflict(true)}}catch(failure){showError(failure)}
   }
+  // Library dialog selection → direct references. Old catalog items the library does not know yet
+  // (before migration) keep the previous import route; deleted media are refused.
+  async function libraryReferences(workflowId,items){
+    const found=await resolveLibraryMedia(items)
+    if(found.deleted.length)throw new Error(`素材“${found.deleted[0]}”已在素材库中删除，未添加`)
+    const legacy=found.legacy.length?(await resolveLibraryItems(workflowId,found.legacy.map(entry=>entry.item.selection))).assets||[]:[]
+    const ordered=[...found.assets,...found.legacy.map((entry,index)=>({index:entry.index,asset:legacy[index]}))].filter(entry=>entry.asset).sort((a,b)=>a.index-b.index).map(entry=>entry.asset)
+    return {assets:ordered}
+  }
+  // "已删除" placeholder actions: an asset node can be replaced or removed; a generation node drops
+  // the deleted result (and its kept version), keeping any other version.
+  function removeDeletedResult(id){
+    const node=docRef.current.nodes.find(item=>item.id===id)
+    if(!node)return
+    if(node.type==='asset'){deleteNode(id);return}
+    const candidates=(node.candidates||[]).filter(candidate=>!(isMediaAsset(candidate)&&isDeletedMedia(candidate.id))),asset=candidates.at(-1)||null
+    edit(current=>({...current,nodes:current.nodes.map(item=>item.id===id?{...item,candidates,asset,selectedCandidateId:asset?.id||null}:item)}),{description:`移除已删除的结果：节点“${node.title}”`})
+  }
+  async function revealInLibrary(asset){
+    setNodeMenu(null)
+    try{const media=isMediaAsset(asset)?{id:asset.id}:await resolveAssetMediaId(asset);if(!media)throw new Error('该结果尚未进入素材库（等待迁移）');setSidebarOpen(true);setRevealMedia({id:media.id,nonce:Date.now()})}catch(e){showError(e)}
+  }
+  async function resolveAssetMediaId(asset){const item=(await lookupMedia([asset.url])).get(asset.url);return item?.status==='ok'?{id:item.media_id}:null}
   function clearWorkflow(){editHistory.current.clear();clipboard.current=null;refreshHistory();workflowRef.current=null;docRef.current=fresh();version.current=0;savedVersion.current=0;contentVersion.current=0;savedContentVersion.current=0;setWorkflow(null);setDoc(docRef.current);setSelected(null);setTitle('');titleRef.current='';setSaveState('尚未创建');setConflict(false);conflictRef.current=false}
   async function refreshNavigation() {
     const remaining=await listCanvasProjects();setProjects(remaining)
@@ -1053,14 +1108,14 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     interaction.reveal(selected)
   }, [selected, selectedHeight])
   const inputMap = new Map(doc.nodes.map(node => [node.id, resolveNodeInputs(node,doc.nodes,doc.edges)]))
-  const contextNode=doc.nodes.find(node=>node.id===nodeMenu?.id)
+  const contextNode=doc.nodes.find(node=>node.id===nodeMenu?.id),contextDeleted=isMediaAsset(contextNode?.asset)&&isDeletedMedia(contextNode.asset.id)
   const contextDeleteBlocked=generationLocks.current.has(nodeMenu?.id)||isBusyTaskStatus(contextNode?.task?.status)
   const SelectedPanel = selectedNode?.type === 'asset' ? AssetNodePanel : CanvasNodePanel
   const undoDescription=editHistory.current.past.at(-1)?.description,redoDescription=editHistory.current.future.at(-1)?.description
   const panelPlacement=selectedNode&&selectedNode.type!=='asset'?generationPanelPlacement(selectedNode,view,surfaceSize,doc.nodes):{style:{},side:null}
   return <section className="canvas-studio" aria-label="创作画布">
     <div className={`cv-layout ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
-    <ResizableSidebar><CanvasSidebar edges={doc.edges} groups={doc.groups||[]} onLocateGroup={locateGroup} onRenameGroup={renameGroup} onUngroup={ungroup} navigationError={error} projects={projects} projectId={projectId} workflows={workflows} workflow={workflow} nodes={doc.nodes} selected={selected} selectedIds={interaction.selectedIds} disabled={loading||busy||ioCount>0||generationCount>0} onProject={chooseProject} onWorkflow={chooseWorkflow} onNewProject={requestNewProject} onNewWorkflow={newWorkflow} onRenameProject={()=>{setError('');setRenameMode('rename');setRenameDraft(projects.find(item=>String(item.id)===String(projectId))?.title || '')}} onRenameProjectDirect={renameSidebarProject} onRenameWorkflow={renameSidebarWorkflow} onLibrary={()=>openLibrary('__browse__')} onCharacters={()=>openLibrary('__browse__','characters')} onLocate={locateNode} onSelect={locateNode} onCopy={copyNode} onDelete={deleteNode} onRating={(id,rating)=>patchNode(id,{rating})} onAddAssets={addProjectAssets} onRenameNode={node=>{setSelected(node.id);setSidebarRename({id:node.id,title:node.title})}} onCollapse={()=>setSidebarOpen(false)} onDeleteProject={()=>setDeletion({kind:'project',id:projectId,title:projects.find(p=>p.id===projectId)?.title || '当前项目'})} onDeleteWorkflow={()=>setDeletion({kind:'workflow',id:workflow.id,title})} onPendingDeletions={()=>save().then(()=>setPendingDeletions(true)).catch(showError)} assetRefresh={assetRefresh} referenceTarget={interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?{id:selectedNode.id,title:selectedNode.title}:null} onAddReference={(ids,kinds)=>{const target=interaction.selectedIds.length===1?interaction.selectedIds[0]:null;if(!target)throw new Error('请先选择一个生成节点');return addProjectReferences(ids,kinds,target)}}/></ResizableSidebar><div className="cv-main">
+    <ResizableSidebar><CanvasSidebar edges={doc.edges} groups={doc.groups||[]} onLocateGroup={locateGroup} onRenameGroup={renameGroup} onUngroup={ungroup} navigationError={error} projects={projects} projectId={projectId} workflows={workflows} workflow={workflow} nodes={doc.nodes} selected={selected} selectedIds={interaction.selectedIds} disabled={loading||busy||ioCount>0||generationCount>0} onProject={chooseProject} onWorkflow={chooseWorkflow} onNewProject={requestNewProject} onNewWorkflow={newWorkflow} onRenameProject={()=>{setError('');setRenameMode('rename');setRenameDraft(projects.find(item=>String(item.id)===String(projectId))?.title || '')}} onRenameProjectDirect={renameSidebarProject} onRenameWorkflow={renameSidebarWorkflow} onLibrary={()=>openLibrary('__browse__')} onCharacters={()=>openLibrary('__browse__','characters')} onLocate={locateNode} onSelect={locateNode} onCopy={copyNode} onDelete={deleteNode} onRating={(id,rating)=>patchNode(id,{rating})} onAddAssets={addProjectAssets} ioBusy={ioCount>0} onRenameNode={node=>{setSelected(node.id);setSidebarRename({id:node.id,title:node.title})}} onCollapse={()=>setSidebarOpen(false)} onDeleteProject={()=>setDeletion({kind:'project',id:projectId,title:projects.find(p=>p.id===projectId)?.title || '当前项目'})} onDeleteWorkflow={()=>setDeletion({kind:'workflow',id:workflow.id,title})} onPendingDeletions={()=>save().then(()=>setPendingDeletions(true)).catch(showError)} assetRefresh={assetRefresh} mediaRefresh={mediaRefresh} referenceTarget={interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?{id:selectedNode.id,title:selectedNode.title}:null} onAddReference={(assets,kinds)=>{const target=interaction.selectedIds.length===1?interaction.selectedIds[0]:null;if(!target)throw new Error('请先选择一个生成节点');return addProjectReferences(assets,kinds,target)}} revealMedia={revealMedia} uploadFolder={uploadFolder} onUploadFolder={setUploadFolder}/></ResizableSidebar><div className="cv-main">
     <header className="cv-topbar">{!sidebarOpen && <button className="btn btn-icon" aria-label="展开项目导航" title="展开项目导航" onClick={() => setSidebarOpen(true)}><PanelLeftOpen size={16}/></button>}{workflow && <input className="cv-project-name" aria-label="画布名称" title={title} value={title} onChange={e => { titleRef.current = e.target.value; setTitle(e.target.value); version.current += 1; contentVersion.current += 1; setSaveState('未保存') }} />}<span className="cv-spacer" /><div className="cv-edit-tools" role="group" aria-label="画布编辑">
       <span id="cv-undo-description" className="cv-sr-only">{undoDescription ? `可撤销：${undoDescription}` : '可撤销：无'}</span><span id="cv-redo-description" className="cv-sr-only">{redoDescription ? `可重做：${redoDescription}` : '可重做：无'}</span>
       <button className="btn btn-icon" aria-label="撤销画布编辑" aria-describedby="cv-undo-description" title={`${undoDescription ? "撤销："+undoDescription : "暂无可撤销操作"} (${canvasModifier()}+Z)`} disabled={!editHistory.current.past.length||ioCount>0||busy||conflict} onClick={()=>{travelHistory();rootRef.current?.focus()}}><Undo2 size={16}/></button><button className="btn btn-icon" aria-label="重做画布编辑" aria-describedby="cv-redo-description" title={`${redoDescription ? "重做："+redoDescription : "暂无可重做操作"} (${canvasModifier()}+Shift+Z)`} disabled={!editHistory.current.future.length||ioCount>0||busy||conflict} onClick={()=>{travelHistory(true);rootRef.current?.focus()}}><Redo2 size={16}/></button>
@@ -1070,16 +1125,16 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     <div ref={rootRef} className={`cv-surface ${tool === 'pan' ? 'is-pan' : ''}`} tabIndex={0} aria-label="无限画布工作区" style={{ backgroundSize: `${24 * view.zoom}px ${24 * view.zoom}px`, backgroundPosition: `${view.x}px ${view.y}px` }} onContextMenu={e=>e.preventDefault()} onKeyDown={e=>{if(e.target===e.currentTarget && (e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')))openContextMenu(e)}} onPointerDown={startSurface} onPointerMove={event=>{lastPointer.current={x:event.clientX,y:event.clientY};movePointer(event)}} onPointerLeave={()=>{lastPointer.current=null}} onPointerUp={interaction.end} onPointerCancel={interaction.cancel} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if ([...e.dataTransfer.types].includes(PROJECT_ASSET_DRAG)) { dropProjectAssets(e); return } const type = e.dataTransfer.getData('application/x-ink-node'); if (['image','video','audio'].includes(type)) addNode(type, worldPoint(e.clientX, e.clientY)); else importFiles(e.dataTransfer.files, worldPoint(e.clientX, e.clientY)) }}>
       <div className={`cv-world ${view.zoom < LOD_ZOOM ? 'is-lod-low' : ''}`} style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.zoom})`, '--cv-zoom': view.zoom }}>
         <CanvasGroups groups={doc.groups} nodes={doc.nodes} edges={doc.edges} onLocateSource={locateNode} onUpload={id=>pickFile(id)} onLibrary={id=>{setSelected(id);openLibrary(id)}} disabled={busy||ioCount>0} onLocate={locateGroup} onRename={renameGroup} onColor={(group,color,label)=>edit(current=>({...current,groups:current.groups.map(item=>item.id===group.id?{...item,color}:item)}),{description:`节点组底色改为${label}`})} onUngroup={ungroup} onCopy={copyGroup} runFor={groupRun.runFor} onRun={group=>groupRun.start(group)} onCancelRun={groupRun.requestCancel} onDismissRun={groupRun.dismiss} onDrag={(event,group)=>{if(event.button===0){setFocusedGroup(group.id);interaction.choose(group.nodeIds);}const node=docRef.current.nodes.find(n=>group.nodeIds.includes(n.id));if(node)interaction.startNode(event,node)}}/><svg className="cv-connections">{doc.edges.map(edge => { const source = doc.nodes.find(n => n.id === edge.source), target = doc.nodes.find(n => n.id === edge.target); if (!source || !target) return null; const x1 = source.x + nodeGeometry(source).width, y1 = source.y + nodeGeometry(source).portY, x2 = target.x, y2 = target.y + nodeGeometry(target).portY, bend = Math.max(80, Math.abs(x2 - x1) / 2), path = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`; return <g key={edge.id}><path className={`cv-edge ${selectedEdge === edge.id ? 'selected' : ''}`} d={path} /><path className="cv-edge-flow" d={path} pathLength="100" aria-hidden="true"/><path className="cv-edge-hit" d={path} onPointerDown={e => {if(e.button===2){interaction.startSurface(e);return} e.stopPropagation(); setSelectedEdge(edge.id); setSelected(null) }} /></g> })}{portDrag && (() => { const source = doc.nodes.find(n => n.id === portDrag.source); if (!source) return null; const x1 = source.x + nodeGeometry(source).width, y1 = source.y + nodeGeometry(source).portY, {x:x2,y:y2} = portDrag.point, bend = Math.max(60, Math.abs(x2 - x1) / 2); return <path className="cv-edge cv-edge-preview" data-testid="connection-preview" d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} aria-hidden="true"/> })()}</svg>
-        {doc.nodes.map(node => <CanvasNode key={node.id} node={node} provider={nodeProvider(capabilities,node)} references={inputMap.get(node.id)?.assets || []} frames={inputMap.get(node.id)?.frames} selected={interaction.selectedIds.includes(node.id)} pendingConnection={connection} onSelect={event => { if(!ioRef.current)setSelected(node.id,event?.shiftKey); setSelectedEdge(null) }} resultUnknown={isUnknownResult(node)} statusAnomaly={statusAnomalies?.workflowId===workflow?.id?statusAnomalies.nodes.get(node.id):undefined} onSelectComplete={()=>{if(workflowRef.current?.id===workflow?.id)interaction.reveal(node.id)}} onDrag={(e,options) => startDrag(e, node,options)} onChange={patch => patchNode(node.id, patch)} onPort={kind => port(node.id, kind)} onPortDrag={event => startPortDrag(event, node.id)} dropTarget={portDrag?.target === node.id} onRightDrag={event=>{stopViewAnimation();interaction.startSurface(event,node.id)}} onFocusZoom={()=>focusZoom(node.id)} onMenu={event=>openNodeMenu(node.id,event)} onPreview={()=>openPreview(node.id)} onHistory={()=>{setSelected(node.id);setHistoryNode(node.id)}} onLocate={()=>locateNode(node.id)} onOpenTask={task=>openTaskCenter(task,node.type)} runMark={groupRun.marks.get(node.id)} />)}
+        {doc.nodes.map(node => <CanvasNode key={node.id} node={node} provider={nodeProvider(capabilities,node)} references={inputMap.get(node.id)?.assets || []} frames={inputMap.get(node.id)?.frames} selected={interaction.selectedIds.includes(node.id)} pendingConnection={connection} onSelect={event => { if(!ioRef.current)setSelected(node.id,event?.shiftKey); setSelectedEdge(null) }} resultUnknown={isUnknownResult(node)} statusAnomaly={statusAnomalies?.workflowId===workflow?.id?statusAnomalies.nodes.get(node.id):undefined} onSelectComplete={()=>{if(workflowRef.current?.id===workflow?.id)interaction.reveal(node.id)}} onDrag={(e,options) => startDrag(e, node,options)} onChange={patch => patchNode(node.id, patch)} onPort={kind => port(node.id, kind)} onPortDrag={event => startPortDrag(event, node.id)} dropTarget={portDrag?.target === node.id} onRightDrag={event=>{stopViewAnimation();interaction.startSurface(event,node.id)}} onFocusZoom={()=>focusZoom(node.id)} onMenu={event=>openNodeMenu(node.id,event)} onPreview={()=>openPreview(node.id)} onHistory={()=>{setSelected(node.id);setHistoryNode(node.id)}} onLocate={()=>locateNode(node.id)} onOpenTask={task=>openTaskCenter(task,node.type)} runMark={groupRun.marks.get(node.id)} assetDeleted={isMediaAsset(node.asset)&&isDeletedMedia(node.asset.id)} onMediaError={()=>{if(isMediaAsset(node.asset))mediaStatus.recheck([node.asset.id])}} onReplaceDeleted={node.type==='asset'&&!ioCount?()=>replaceNodeAsset(node.id):null} onRemoveDeleted={()=>removeDeletedResult(node.id)} />)}
       </div>
       {groupRun.element}
-      {selectedNode && !doc.groups?.some(group=>group.id===focusedGroup) && <SelectedPanel workflowId={workflow?.id} blockedReason={groupRun.owningRun(selectedNode.id)?groupRunBlock:''} onOrganizeGroup={selectedNode.type==='video'&&selectedNode.params?.video_mode==='keyframe'&&!doc.groups?.some(group=>group.keyframeNodeId===selectedNode.id)?()=>organizeKeyframes(selectedNode.id):null} errorMessage={error} key={selectedNode.id} node={selectedNode} inputAssets={inputMap.get(selectedNode.id)?.assets || []} inputIssues={inputMap.get(selectedNode.id)?.issues||[]} inputImages={(inputMap.get(selectedNode.id)?.assets || []).filter(asset=>asset.kind==='image')} onClearReferences={()=>clearReferences(selectedNode.id)} onReorderReferences={order=>{try{const before=docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text;edit(current=>reorderNodeReferences(current,selectedNode.id,order),{description:'调整参考素材顺序并同步提及'});if(docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text!==before)notify?.(`已同步更新提示词中的引用（${canvasModifier()}+Z 可撤销）`,'success')}catch(error){showError(error)}}} provider={nodeProvider(capabilities, selectedNode)} providerOptions={capabilities[selectedNode.type]||[]} style={selectedNode.type==='asset'?assetPanelPlacement(selectedNode,view,surfaceSize):panelPlacement.style} placement={panelPlacement.side} onClose={() => {setSelected(null);rootRef.current?.focus()}} onChange={patch => {patchNode(selectedNode.id, patch);if(patch.providerSelection)rememberProvider(selectedNode.type,patch.providerSelection)}} onSave={()=>save().catch(showError)} resultUnknown={isUnknownResult(selectedNode)} onGenerate={() => requestGenerate(selectedNode.id)} onDismissStale={()=>edit(current=>clearStale(current,selectedNode.id),{description:'清除“上游已更新”标记'})} onUpload={() => pickFile(selectedNode.id)} onCopy={() => copyNode(selectedNode)} onLibrary={() => openLibrary(selectedNode.id)} onLinkTask={taskId => linkTask(selectedNode.id, taskId)} onOpenTask={task=>openTaskCenter(task,selectedNode.type)} mentionNotice={mentionNotice?.nodeId===selectedNode.id&&mentionNotice.key===JSON.stringify(selectedNode.referenceMentions||{})?mentionNotice.text:''} />}
+      {selectedNode && !doc.groups?.some(group=>group.id===focusedGroup) && <SelectedPanel workflowId={workflow?.id} blockedReason={groupRun.owningRun(selectedNode.id)?groupRunBlock:''} onOrganizeGroup={selectedNode.type==='video'&&selectedNode.params?.video_mode==='keyframe'&&!doc.groups?.some(group=>group.keyframeNodeId===selectedNode.id)?()=>organizeKeyframes(selectedNode.id):null} errorMessage={error} key={selectedNode.id} node={selectedNode} inputAssets={inputMap.get(selectedNode.id)?.assets || []} inputIssues={inputMap.get(selectedNode.id)?.issues||[]} inputImages={(inputMap.get(selectedNode.id)?.assets || []).filter(asset=>asset.kind==='image')} onClearReferences={()=>clearReferences(selectedNode.id)} onReorderReferences={order=>{try{const before=docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text;edit(current=>reorderNodeReferences(current,selectedNode.id,order),{description:'调整参考素材顺序并同步提及'});if(docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text!==before)notify?.(`已同步更新提示词中的引用（${canvasModifier()}+Z 可撤销）`,'success')}catch(error){showError(error)}}} provider={nodeProvider(capabilities, selectedNode)} providerOptions={capabilities[selectedNode.type]||[]} style={selectedNode.type==='asset'?assetPanelPlacement(selectedNode,view,surfaceSize):panelPlacement.style} placement={panelPlacement.side} onClose={() => {setSelected(null);rootRef.current?.focus()}} onChange={patch => {patchNode(selectedNode.id, patch);if(patch.providerSelection)rememberProvider(selectedNode.type,patch.providerSelection)}} onSave={()=>save().catch(showError)} resultUnknown={isUnknownResult(selectedNode)} onGenerate={() => requestGenerate(selectedNode.id)} onDismissStale={()=>edit(current=>clearStale(current,selectedNode.id),{description:'清除“上游已更新”标记'})} onUpload={() => pickFile(selectedNode.id)} onCopy={() => copyNode(selectedNode)} onLibrary={() => openLibrary(selectedNode.id)} onLinkTask={taskId => linkTask(selectedNode.id, taskId)} onOpenTask={task=>openTaskCenter(task,selectedNode.type)} onRevealInLibrary={revealInLibrary} onNotice={text=>{notify?.(text,'success');setAssetRefresh(value=>value+1)}} mentionNotice={mentionNotice?.nodeId===selectedNode.id&&mentionNotice.key===JSON.stringify(selectedNode.referenceMentions||{})?mentionNotice.text:''} />}
       {interaction.marquee && <div className="cv-selection-box" style={interaction.marquee}/>}
       {interaction.selectedIds.length>1 && <div className="cv-multi-selection">已选 {interaction.selectedIds.length} 个节点 · 拖动任一标题一起移动<button disabled={busy||ioCount>0} onPointerDown={e=>e.stopPropagation()} onClick={makeGroup}>创建节点组</button><button className="cv-run-selected" disabled={busy||ioCount>0||conflict||!interaction.selectedIds.some(id=>['image','video','audio'].includes(doc.nodes.find(n=>n.id===id)?.type))} title="一次提交所选节点中输入已就绪的生成节点，每个节点独立任务，不连锁下游" onPointerDown={e=>e.stopPropagation()} onClick={()=>setBatchPlan(planSelection())}><Play size={13}/>运行所选节点</button></div>}
-      {selectedNode?.type==='asset' && selectedNode.asset.kind==='image' && !annotation && <AssetImageToolbar style={{left:Math.max(8,Math.min(surfaceSize.width-290,selectedNode.x*view.zoom+view.x)),top:Math.max(8,selectedNode.y*view.zoom+view.y-44)}} busy={ioCount>0} onRotate={()=>rotateNode(selectedNode.id)} onAnnotate={()=>annotateNode(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)}/>}
-      {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} {...(contextNode?.asset?.url&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&contextNode.type!=='asset'&&['image','video','audio'].includes(mediaKind(contextNode))&&workflow?.id?{onAddToLocal:()=>{setLocalRefs([canvasAssetRef(workflow.id,contextNode.asset.id)]);setNodeMenu(null)}}:{})} {...(contextNode?.asset?.url&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
-      {historyNode && <div ref={historyRef} className="cv-history-popover" role="dialog" aria-label="图片历史版本" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape')setHistoryNode(null)}} onPointerDown={e=>e.stopPropagation()}><header>保留的版本<button aria-label="关闭历史版本" onClick={()=>setHistoryNode(null)}>关闭</button></header>{doc.nodes.find(n=>n.id===historyNode)?.candidates?.map((asset,index)=><button key={asset.id} disabled={ioCount>0} aria-pressed={doc.nodes.find(n=>n.id===historyNode)?.asset.id===asset.id} onClick={()=>chooseVersion(historyNode,asset)}><img src={asset.url} alt=""/>版本 {index+1}</button>)}</div>}
-      {annotation && <CanvasImageAnnotator key={annotation.asset.id} asset={annotation.asset} style={{zIndex:50}} onSave={file=>saveAssetVersion(annotation.owner,file)} onClose={closeAnnotation}/>}
+      {selectedNode?.type==='asset' && selectedNode.asset.kind==='image' && !annotation && !(isMediaAsset(selectedNode.asset)&&isDeletedMedia(selectedNode.asset.id)) && <AssetImageToolbar style={{left:Math.max(8,Math.min(surfaceSize.width-290,selectedNode.x*view.zoom+view.x)),top:Math.max(8,selectedNode.y*view.zoom+view.y-44)}} busy={ioCount>0} onRotate={()=>rotateNode(selectedNode.id)} onAnnotate={()=>annotateNode(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)}/>}
+      {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&!contextDeleted&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':contextDeleted?'素材已在素材库中删除':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} {...(contextNode?.asset?.url&&!contextDeleted&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&['image','video','audio'].includes(mediaKind(contextNode))&&!(isMediaAsset(contextNode.asset)&&isDeletedMedia(contextNode.asset.id))?{onRevealInLibrary:()=>revealInLibrary(contextNode.asset),onMoveToFolder:()=>{setMovingAssets([contextNode.asset]);setNodeMenu(null)}}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
+      {historyNode && <div ref={historyRef} className="cv-history-popover" role="dialog" aria-label="图片历史版本" onKeyDown={e=>{e.stopPropagation();if(e.key==='Escape')setHistoryNode(null)}} onPointerDown={e=>e.stopPropagation()}><header>保留的版本<button aria-label="关闭历史版本" onClick={()=>setHistoryNode(null)}>关闭</button></header>{doc.nodes.find(n=>n.id===historyNode)?.candidates?.map((asset,index)=>{const gone=isMediaAsset(asset)&&isDeletedMedia(asset.id);return <button key={asset.id} disabled={ioCount>0||gone} title={gone?'该版本已在素材库中删除':undefined} aria-pressed={doc.nodes.find(n=>n.id===historyNode)?.asset.id===asset.id} onClick={()=>chooseVersion(historyNode,asset)}>{gone?<span className="cv-history-deleted">已删除</span>:<img src={asset.url} alt=""/>}版本 {index+1}{gone?'（已删除）':''}</button>})}</div>}
+      {annotation && <CanvasImageAnnotator key={annotation.asset.id} asset={annotation.asset} style={{zIndex:50}} onSave={file=>saveAssetVersion(annotation.owner,file,'save_as')} onClose={closeAnnotation}/>}
       {contextMenu && <CanvasContextMenu position={contextMenu} bounds={surfaceSize} onClose={closeContextMenu} onDismiss={()=>setContextMenu(null)} onUpload={()=>{const point=contextMenu.point;closeContextMenu();pickFile(null,point)}} onCreate={type=>{const point=contextMenu.point;closeContextMenu();addNode(type,point)}}/>}
       <div className="cv-tools" onPointerDown={e => e.stopPropagation()}><button title="选择节点" aria-label="选择工具" aria-pressed={tool === 'select'} onClick={() => setTool('select')}><MousePointer2 size={18} /></button><button title="平移画布（空格拖动）" aria-label="平移工具" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}><Hand size={18} /></button><hr />{[['image',Image],['video',Film],['audio',Music]].map(([type, Icon]) => <button key={type} draggable onDragStart={event => { event.dataTransfer.setData("application/x-ink-node", type); event.dataTransfer.effectAllowed = "copy" }} title={`添加${labels[type]}节点（可拖入画布）`} aria-label={`添加${labels[type]}节点`} onClick={() => addNode(type)}><Icon size={18} /></button>)}<hr /><button title="导入素材" aria-label="导入素材" onClick={() => pickFile()}><Upload size={18} /></button></div>
       {loading ? <div className="cv-empty">正在载入画布…</div> : !doc.nodes.length && <div className="cv-empty" onPointerDown={e => e.stopPropagation()}><h2>把想法放上画布</h2><p>拖入素材，连接参考，逐个制作你的镜头。</p><div className="cv-empty-actions"><button className="btn btn-primary" onClick={() => addNode('image')}><Image size={16} />图像生成</button><button onClick={() => addNode('video')}><Film size={16} />视频生成</button><button onClick={() => addNode('audio')}><Music size={16} />音频生成</button></div><small>节点自由摆放 · 连线选择参考 · 点击生成才运行任务</small></div>}
@@ -1112,7 +1167,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       return <div className="cv-studio-overlay"><div role="dialog" aria-modal="true" aria-label={creating ? '新建项目' : '命名项目'} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }}><h3>{creating ? '新建项目' : '项目名称'}</h3><input ref={renameInputRef} autoFocus aria-label="项目名称" value={renameDraft} maxLength={100} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); commit() } }} />{error && <p role="alert">{error}</p>}<p /><button onClick={close}>取消</button><button className="btn btn-primary" disabled={!renameDraft.trim() || busy} onClick={commit}>{creating ? '创建项目' : '保存名称'}</button></div></div>
     })()}
     {busy && <div className="cv-studio-overlay" role="status"><div>正在打开画布…</div></div>}
-    {localRefs && <AddToLocalDialog refs={localRefs} onClose={()=>setLocalRefs(null)}/>}
+    {movingAssets && <MoveToFolderDialog assets={movingAssets} onClose={()=>setMovingAssets(null)} onDone={text=>{setMovingAssets(null);notify?.(text,'success');setAssetRefresh(value=>value+1)}}/>}
     {characterTarget && <AddToCharacterDialog workflowId={characterTarget.workflowId} asset={characterTarget.asset} onClose={()=>setCharacterTarget(null)}/>}
     {libraryTarget && <CanvasLibrary initialSource={libraryOwner.current?.initialSource||'local'} projectId={libraryOwner.current?.projectId} onBeforeDelete={flushBeforeLibraryDelete} onDeleted={afterLibraryDelete} onClose={() => {setLibraryTarget(null);setAssetRefresh(value=>value+1)}} browseOnly={libraryTarget === '__browse__'} canAddToCanvas={!!libraryOwner.current?.workflowId} allowedKinds={doc.nodes.find(n=>n.id===libraryTarget)?.type==='image'?['image']:doc.nodes.find(n=>n.id===libraryTarget)?.type==='audio'?['image','audio']:['image','video','audio']} validateSelection={items=>{const node=docRef.current.nodes.find(n=>n.id===libraryTarget);if(node?.type==='video'&&node.params?.video_mode==='keyframe'){return items.some(item=>item.asset.kind!=='image')?'首尾帧仅支持图片':items.length>2?'首尾帧一次最多选择两张图片':null}return null}} onApply={async items => {
       const owner=libraryOwner.current
@@ -1121,7 +1176,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       if(workflowRef.current?.id!==owner.workflowId||target&&!docRef.current.nodes.some(n=>n.id===target))throw new Error('原画布或节点已切换，请重新打开素材库')
       if(ioRef.current||navigationRef.current)throw new Error('请等待当前操作完成')
       ioRef.current++;setIoCount(ioRef.current)
-      try{const resolved=await resolveLibraryItems(owner.workflowId,items.map(item=>item.selection));if(workflowRef.current?.id!==owner.workflowId||projectIdRef.current!==owner.projectId||target&&!docRef.current.nodes.some(n=>n.id===target))throw new Error('原画布已切换，未添加到其他画布');const currentNode=docRef.current.nodes.find(n=>n.id===target);if(currentNode?.type==='video'&&currentNode.params?.video_mode==='keyframe'){const current=resolveNodeInputs(currentNode,docRef.current.nodes,docRef.current.edges).assets,merged=[...new Map([...current,...resolved.assets].map(asset=>[asset.id,asset])).values()];if(merged.some(asset=>asset.kind!=='image')||merged.length>2)throw new Error('首尾帧最多两个图片参考，请先移除已有参考；本次未添加节点或连线')}addAssetNodes(resolved.assets||[],target);await save();setLibraryTarget(null);setAssetRefresh(value=>value+1)}finally{ioRef.current--;setIoCount(ioRef.current)}
+      try{const resolved=await libraryReferences(owner.workflowId,items);if(workflowRef.current?.id!==owner.workflowId||projectIdRef.current!==owner.projectId||target&&!docRef.current.nodes.some(n=>n.id===target))throw new Error('原画布已切换，未添加到其他画布');const currentNode=docRef.current.nodes.find(n=>n.id===target);if(currentNode?.type==='video'&&currentNode.params?.video_mode==='keyframe'){const current=resolveNodeInputs(currentNode,docRef.current.nodes,docRef.current.edges).assets,merged=[...new Map([...current,...resolved.assets].map(asset=>[asset.id,asset])).values()];if(merged.some(asset=>asset.kind!=='image')||merged.length>2)throw new Error('首尾帧最多两个图片参考，请先移除已有参考；本次未添加节点或连线')}addAssetNodes(resolved.assets||[],target);await save();setLibraryTarget(null);setAssetRefresh(value=>value+1)}finally{ioRef.current--;setIoCount(ioRef.current)}
     }} />}
     {batchPlan && <ConfirmDialog className="canvas-studio-confirm" title={batchPlan.ready.length?`运行 ${batchPlan.ready.length} 个所选节点？`:'没有可运行的节点'} confirmLabel={batchPlan.ready.length?`提交 ${batchPlan.ready.length} 个任务`:'关闭'} onClose={()=>setBatchPlan(null)} onConfirm={async()=>{const ids=batchPlan.ready.map(item=>item.node.id);setBatchPlan(null);if(ids.length)await runBatch(ids)}}><div data-testid="batch-run-summary"><p>将提交 <strong>{batchPlan.ready.length}</strong> 个节点，每个节点创建一个独立任务；不会自动运行下游节点。</p><p>合计预估：<strong>{batchPlan.ready.length?batchPlan.total.text:'—'}</strong>（按现有费率估算，非实际扣费）</p>{batchPlan.ready.length>0&&<ul>{batchPlan.ready.map(({node,cost})=><li key={node.id}>{node.title}：{cost.known?formatCostRange(cost.min,cost.max):`费用待估（${cost.reason}）`}</li>)}</ul>}{batchPlan.skipped.length>0&&<><p>以下 {batchPlan.skipped.length} 个节点不会提交：</p><ul>{batchPlan.skipped.map(({node,reason})=><li key={node.id}>{node.title}：{reason}</li>)}</ul></>}</div></ConfirmDialog>}
     {generateConfirm && <ConfirmDialog className="canvas-studio-confirm" title="上次结果未知，仍要重新生成？" danger confirmLabel="确认重新生成（可能重复计费）" onClose={()=>setGenerateConfirm(null)} onConfirm={async()=>{const id=generateConfirm;setGenerateConfirm(null);await generate(id)}}><p>该节点上一次任务的请求已发出但未确认结果，<strong>供应商可能已经计费</strong>。</p><p>重新生成会提交新的任务，<strong>可能重复计费</strong>。建议先到任务中心或供应商控制台核查原任务。</p></ConfirmDialog>}

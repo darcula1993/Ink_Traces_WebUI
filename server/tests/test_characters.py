@@ -87,8 +87,24 @@ def local_count():
     return tasks.get_db().execute('SELECT count(*) FROM canvas_local_uploads').fetchone()[0]
 
 
-def local_row(local_id):
-    return tasks.get_db().execute('SELECT * FROM canvas_local_uploads WHERE id=?', (local_id,)).fetchone()
+def media_count():
+    return tasks.get_db().execute('SELECT count(*) FROM media').fetchone()[0]
+
+
+def media_row(media_id):
+    return tasks.get_db().execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()
+
+
+def media_upload(client, raw, name, **form):
+    r = client.post('/api/canvas/media', data={'file': (io.BytesIO(raw), name), **form})
+    assert r.status_code == 201, r.json
+    return r.json['media']
+
+
+def media_delete(client, ids):
+    r = client.post('/api/canvas/media/delete', json={'ids': ids})
+    assert r.status_code == 200, r.json
+    return r.json
 
 
 def test_images_limit_order_dedup_and_delete(client):
@@ -98,21 +114,25 @@ def test_images_limit_order_dedup_and_delete(client):
     images = r.json['character']['images']
     assert [i['position'] for i in images] == list(range(6))
     assert images[0]['width'] == 20 and images[0]['height'] == 20 and images[0]['mime_type'] == 'image/png'
-    assert set(images[0]) >= {'asset_id', 'asset_ref', 'url', 'name', 'mime_type', 'width', 'height', 'position'}
-    # uploads are registered as 本地素材 and referenced (no character copy directory)
-    assert images[0]['asset_ref'] == 'local:' + images[0]['asset_id'] and local_row(images[0]['asset_id']) is not None
-    assert local_count() == 6 and not (store.asset_root() / 'characters').exists()
-    keys = {i['key'] for i in client.get('/api/canvas/library/items', query_string={'scope': 'all', 'source': 'local'}).json['items']}
-    assert {'local:' + i['asset_id'] for i in images} <= keys
+    assert set(images[0]) >= {'asset_id', 'asset_ref', 'media_id', 'url', 'name', 'mime_type', 'width', 'height', 'position'}
+    # S6c: uploads are registered in the global media library root and referenced by media id
+    first = media_row(images[0]['asset_id'])
+    assert images[0]['asset_ref'] == images[0]['media_id'] == images[0]['asset_id'] and first is not None
+    assert first['folder_id'] is None and first['origin'] == 'upload' and first['name'] == 'red.png'
+    assert media_count() == 6 and local_count() == 0 and not (store.asset_root() / 'characters').exists()
+    listed = {m['id'] for m in client.get('/api/canvas/media', query_string={'folder_id': 'root'}).json['items']}
+    assert {i['asset_id'] for i in images} <= listed
     assert client.get(images[0]['url']).data == png('red')
+    assert client.get('/api/canvas/media/' + images[0]['asset_id']).data == png('red')
     assert client.get(images[0]['thumbnail_url']).mimetype == 'image/webp'
     # duplicates are idempotent and do not count
     again = upload_images(client, c['id'], 'red')
-    assert again.status_code == 201 and again.json['images'][0]['asset_id'] == images[0]['asset_id'] and local_count() == 6
-    # 6 + 3 new > 8 -> rejected, nothing written (neither reference nor 本地素材)
+    assert again.status_code == 201 and again.json['images'][0]['asset_id'] == images[0]['asset_id'] and media_count() == 6
+    # 6 + 3 new > 8 -> rejected, nothing written (neither reference nor library item nor file)
+    files = sorted(p.name for p in (store.asset_root() / 'media').iterdir())
     assert upload_images(client, c['id'], *COLORS[6:9]).status_code == 400
-    assert len(client.get(f"/api/characters/{c['id']}").json['character']['images']) == 6 and local_count() == 6
-    assert not list((store.asset_root() / 'local_uploads').glob('*.tmp'))
+    assert len(client.get(f"/api/characters/{c['id']}").json['character']['images']) == 6 and media_count() == 6
+    assert sorted(p.name for p in (store.asset_root() / 'media').iterdir()) == files
     assert upload_images(client, c['id'], *COLORS[6:8]).status_code == 201
     assert upload_images(client, c['id'], 'pink').status_code == 400
     images = client.get(f"/api/characters/{c['id']}").json['character']['images']
@@ -127,10 +147,10 @@ def test_images_limit_order_dedup_and_delete(client):
     assert [i['asset_id'] for i in left] == order[1:] and [i['position'] for i in left] == list(range(7))
     # removing from the character deletes only the reference
     assert client.get(images[-1]['url']).status_code == 404
-    assert local_row(order[0]) is not None
-    assert client.get('/api/canvas/library/items/local:' + order[0] + '/download').status_code == 200
+    assert media_row(order[0]) is not None and client.get('/api/canvas/media/' + order[0]).status_code == 200
     r = client.post(f"/api/characters/{c['id']}/images", data={'file': (io.BytesIO(wav()), 'a.wav')})
     assert r.status_code == 400
+    assert media_count() == 8  # the refused audio was not left in the library
 
 
 def test_voice_audio_only_type_duration_and_clear(client):
@@ -139,19 +159,20 @@ def test_voice_audio_only_type_duration_and_clear(client):
     assert r.status_code == 201, r.json
     voice = r.json['voice']
     assert voice['type'] == 'audio' and voice['name'] == 'voice.wav' and abs(voice['duration'] - 2) < 0.05
-    assert set(voice) >= {'type', 'asset_id', 'asset_ref', 'url', 'name', 'duration'}
-    assert local_row(voice['asset_id'])['kind'] == 'audio'
+    assert set(voice) >= {'type', 'asset_id', 'asset_ref', 'media_id', 'url', 'name', 'duration'}
+    assert media_row(voice['asset_id'])['kind'] == 'audio' and local_count() == 0
     assert client.get(voice['url']).data == wav(2)
     assert client.post(f"/api/characters/{c['id']}/voice-audio", data={'file': (io.BytesIO(wav(31)), 'long.wav')}).status_code == 400
+    assert media_count() == 1  # the over-long upload was rolled back
     assert client.get(f"/api/characters/{c['id']}").json['character']['voice'] == voice
     assert client.post(f"/api/characters/{c['id']}/voice-audio", data={'file': (io.BytesIO(png()), 'x.png')}).status_code == 400
     second = client.post(f"/api/characters/{c['id']}/voice-audio", data={'file': (io.BytesIO(wav(30)), 'v2.wav')}).json['voice']
     assert second['asset_id'] != voice['asset_id'] and client.get(voice['url']).status_code == 404
-    assert local_row(voice['asset_id']) is not None  # replaced reference only
+    assert media_row(voice['asset_id']) is not None  # replaced reference only
     assert client.patch(f"/api/characters/{c['id']}", json={'voice': {'type': 'speaker', 'speaker': 'vivi'}}).status_code == 400
     assert client.patch(f"/api/characters/{c['id']}", json={'voice': second}).status_code == 200
     cleared = client.patch(f"/api/characters/{c['id']}", json={'voice': None}).json['character']
-    assert cleared['voice'] is None and client.get(second['url']).status_code == 404 and local_row(second['asset_id']) is not None
+    assert cleared['voice'] is None and client.get(second['url']).status_code == 404 and media_row(second['asset_id']) is not None
 
 
 def test_mp3_voice_accepted(client, tmp_path):
@@ -163,7 +184,7 @@ def test_mp3_voice_accepted(client, tmp_path):
     assert r.status_code == 201 and r.json['voice']['type'] == 'audio'
 
 
-def test_delete_character_keeps_local_items_and_imported_canvas_assets(client):
+def test_delete_character_keeps_media_and_imported_references(client):
     p, w = workflow()
     c = create(client)
     images = upload_images(client, c['id'], 'red', 'blue').json['character']['images']
@@ -172,7 +193,7 @@ def test_delete_character_keeps_local_items_and_imported_canvas_assets(client):
     deleted = client.delete(f"/api/characters/{c['id']}")
     assert deleted.status_code == 200 and deleted.json['references_removed'] == 3
     assert client.get(images[0]['url']).status_code == 404
-    assert local_count() == 3
+    assert media_count() == 3
     assert client.get(imported['assets'][0]['url']).data == png('blue')
     assert client.get(imported['voice']['url']).data == wav()
     assert client.delete(f"/api/characters/{c['id']}").status_code == 404
@@ -180,75 +201,116 @@ def test_delete_character_keeps_local_items_and_imported_canvas_assets(client):
     assert client.delete(f"/api/characters/{other['id']}", headers={'Sec-Fetch-Site': 'cross-site'}).status_code == 403
 
 
-# ---- 验收2：三种来源（修订2：先登记为本地素材再引用） ----------------------------------------
+# ---- 验收2：来源（S6c：media id 直接引用；旧身份走别名；库外来源先入库根目录） -----------------
 
-def test_three_sources_register_local_then_reference(client):
+def test_media_sources_reference_without_copies(client):
+    p, w = workflow()
+    c, fresh = create(client), create(client, '新角色')
+    item = media_upload(client, png('green'), 'g.png')
+    files = sorted(x.name for x in (store.asset_root() / 'media').iterdir())
+    # direct media id and the library selection shape {source:'media', id}
+    r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'media', 'media_id': item['id']})
+    assert r.status_code == 201, r.json
+    assert r.json['images'][0]['asset_id'] == item['id']
+    r = client.post(f"/api/characters/{fresh['id']}/images", json={'source': 'library', 'asset_ref': {'source': 'media', 'id': item['id']}})
+    assert r.status_code == 201 and r.json['images'][0]['asset_id'] == item['id']
+    # canvas "加入角色": canvas nodes reference media ids
+    r = client.post(f"/api/characters/{fresh['id']}/voice-audio", json={'source': 'canvas', 'workflow_id': w, 'asset_id': media_upload(client, wav(), 'a.wav')['id']})
+    assert r.status_code == 201, r.json
+    assert media_count() == 2 and local_count() == 0 and not tasks.get_db().execute('SELECT count(*) FROM canvas_assets').fetchone()[0]
+    assert sorted(x.name for x in (store.asset_root() / 'media').iterdir()) == sorted(files + [media_row(r.json['voice']['asset_id'])['relpath']])
+    # wrong kinds / unknown / deleted
+    audio_id = r.json['voice']['asset_id']
+    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'media', 'media_id': audio_id}).status_code == 400
+    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'media', 'media_id': 'f' * 32}).status_code == 404
+    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'media', 'media_id': 'bad'}).status_code == 400
+    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'media', 'media_id': item['id'], 'x': 1}).status_code == 400
+    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'url', 'url': 'https://x'}).status_code == 400
+    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'canvas', 'workflow_id': w, 'asset_id': 'f' * 32}).status_code == 404
+    other = media_upload(client, png('white'), 'w.png')
+    media_delete(client, [other['id']])
+    r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'media', 'media_id': other['id']})
+    assert r.status_code == 410 and r.json['success'] is False
+
+
+def test_old_identities_resolve_through_aliases(client):
+    import media_library
+    c = create(client)
+    item = media_upload(client, png('green'), 'g.png')
+    old = 'a' * 32
+    media_library.add_alias('local', old, item['id']); tasks.get_db().commit()
+    r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'library', 'asset_ref': 'local:' + old})
+    assert r.status_code == 201, r.json
+    assert r.json['images'][0]['asset_id'] == item['id'] and media_count() == 1
+    r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'library', 'asset_ref': {'source': 'local', 'id': old}})
+    assert r.status_code == 201 and len(r.json['character']['images']) == 1
+    assert [x['id'] for x in client.get('/api/characters', query_string={'asset_ref': 'local:' + old}).json['characters']] == [c['id']]
+    assert [x['id'] for x in client.get('/api/characters', query_string={'asset_ref': item['id']}).json['characters']] == [c['id']]
+    assert client.get('/api/characters', query_string={'asset_ref': 'library:' + 'b' * 32}).json['characters'] == []
+    # old reference ids still address the image (read, reorder, remove)
+    assert client.get(f"/api/characters/{c['id']}/assets/{old}").data == png('green')
+    assert client.patch(f"/api/characters/{c['id']}", json={'image_order': [old]}).status_code == 200
+    assert client.delete(f"/api/characters/{c['id']}/images/{old}").json['character']['images'] == []
+    # a migrated old canvas asset id (workflow alias)
+    p, w = workflow()
+    canvas_old = 'c' * 32
+    media_library.add_alias('workflow', canvas_old, item['id']); tasks.get_db().commit()
+    r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'canvas', 'workflow_id': w, 'asset_id': canvas_old})
+    assert r.status_code == 201 and r.json['images'][0]['asset_id'] == item['id'] and media_count() == 1
+
+
+def test_sources_outside_library_are_registered_in_root(client):
+    """Old project-library / canvas copies not migrated yet are copied into the library root (no 本地素材)."""
     p, w = workflow()
     c = create(client)
-    # non-local selection (project library) -> copied into 本地素材, original ownership untouched
     lib = client.post(f'/api/canvas/projects/{p}/assets', data={'file': (io.BytesIO(png('green')), 'g.png')}).json['asset']
     r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'library', 'asset_ref': {'source': 'library', 'id': lib['id']}})
     assert r.status_code == 201, r.json
-    from_library = r.json['images'][0]
-    assert local_row(from_library['asset_id'])['name'] == 'g.png' and store.get_asset(p, lib['id'], library=True)
-    # canvas "加入角色" (also for a freshly created character) -> registered as 本地素材
+    row = media_row(r.json['images'][0]['asset_id'])
+    assert row['name'] == 'g.png' and row['folder_id'] is None and row['origin'] == 'upload'
+    assert store.get_asset(p, lib['id'], library=True)  # ownership of the source untouched
     canvas = client.post(f'/api/canvas/workflows/{w}/assets', data={'file': (io.BytesIO(png('blue')), 'b.png')}).json['asset']
-    fresh = create(client, '新角色')
-    r = client.post(f"/api/characters/{fresh['id']}/images", json={'source': 'canvas', 'workflow_id': w, 'asset_id': canvas['id']})
-    assert r.status_code == 201, r.json
-    from_canvas = r.json['images'][0]
-    assert local_row(from_canvas['asset_id']) is not None
-    # upload source
-    uploaded = upload_images(client, c['id'], 'red').json['images'][0]
-    # same local item referenced directly by another character (no new registration)
-    before = local_count()
-    r = client.post(f"/api/characters/{fresh['id']}/images", json={'source': 'library', 'asset_ref': uploaded['asset_ref']})
-    assert r.status_code == 201 and r.json['images'][0]['asset_id'] == uploaded['asset_id'] and local_count() == before
-    # wrong kinds / unknown sources
-    audio = client.post(f'/api/canvas/workflows/{w}/assets', data={'file': (io.BytesIO(wav()), 'a.wav')}).json['asset']
-    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'canvas', 'workflow_id': w, 'asset_id': audio['id']}).status_code == 400
-    assert client.post(f"/api/characters/{c['id']}/voice-audio", json={'source': 'canvas', 'workflow_id': w, 'asset_id': audio['id']}).status_code == 201
-    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'url', 'url': 'https://x'}).status_code == 400
-    assert client.post(f"/api/characters/{c['id']}/images", json={'source': 'canvas', 'workflow_id': w, 'asset_id': 'f' * 32}).status_code == 404
-    # deleting the copied-from originals does not affect the characters
-    for key in ('library:' + lib['id'], 'workflow:' + canvas['id'], 'workflow:' + audio['id']):
+    r = client.post(f"/api/characters/{c['id']}/images", json={'source': 'canvas', 'workflow_id': w, 'asset_id': canvas['id']})
+    assert r.status_code == 201 and media_row(r.json['images'][0]['asset_id']) is not None
+    # same content again (from another source) dedups to the same media item
+    r = client.post(f"/api/characters/{c['id']}/images", data={'file': (io.BytesIO(png('blue')), 'again.png')})
+    assert r.status_code == 201 and len(r.json['character']['images']) == 2
+    assert media_count() == 2 and local_count() == 0
+    # deleting the copied-from originals does not affect the character
+    for key in ('library:' + lib['id'], 'workflow:' + canvas['id']):
         assert client.delete('/api/canvas/library/items/' + key).status_code == 200
-    assert client.get(from_library['url']).data == png('green')
-    assert client.get(from_canvas['url']).data == png('blue')
-    voice = client.get(f"/api/characters/{c['id']}").json['character']['voice']
-    assert client.get(voice['url']).data == wav()
+    images = client.get(f"/api/characters/{c['id']}").json['character']['images']
+    assert [client.get(i['url']).data for i in images] == [png('green'), png('blue')]
 
 
-def test_deleting_referenced_local_item_lists_and_unlinks_characters(client):
+def test_deleting_referenced_media_lists_and_unlinks_characters(client):
     p, w = workflow()
     a, b = create(client, '林'), create(client, '月')
     shared = upload_images(client, a['id'], 'red', 'blue').json['images']
-    client.post(f"/api/characters/{b['id']}/images", json={'source': 'library', 'asset_ref': shared[0]['asset_ref']})
+    client.post(f"/api/characters/{b['id']}/images", json={'source': 'media', 'media_id': shared[0]['media_id']})
     imported = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': a['id']}).json['assets']
-    key = shared[0]['asset_ref']
-    users = client.get('/api/characters', query_string={'asset_ref': key}).json['characters']
+    users = client.get('/api/characters', query_string={'asset_ref': shared[0]['asset_ref']}).json['characters']
     assert {u['name'] for u in users} == {'林', '月'}
-    assert client.get('/api/characters', query_string={'asset_ref': 'library:' + 'a' * 32}).json['characters'] == []
-    preview = client.post('/api/canvas/library/items/delete-preview', json={'keys': [key]}).json
+    preview = client.post('/api/canvas/media/delete-preview', json={'ids': [shared[0]['media_id']]}).json
     assert [(x['name'], x['asset_ids']) for x in preview['characters']] == [('月', [shared[0]['asset_id']]), ('林', [shared[0]['asset_id']])]
-    assert preview['canvas_copies'] == 1  # the canvas import is an existing-rule copy of the local item
     before = client.get(f"/api/characters/{a['id']}").json['character']['updated_at']
-    result = client.post('/api/canvas/library/items/bulk-delete', json={'keys': [key]}).json
-    assert result['success'] and len(result['characters']) == 2
+    result = media_delete(client, [shared[0]['media_id']])
+    assert len(result['characters']) == 2
     after = client.get(f"/api/characters/{a['id']}").json['character']
     assert [i['asset_id'] for i in after['images']] == [shared[1]['asset_id']] and after['images'][0]['position'] == 0
     assert after['updated_at'] > before
     assert client.get(f"/api/characters/{b['id']}").json['character']['images'] == []
-    assert client.get(imported[0]['url']).status_code == 404 and client.get(imported[1]['url']).status_code == 200
+    # the canvas referenced the media directly: deleted -> 410, the other stays
+    assert client.get(imported[0]['url']).status_code == 410 and client.get(imported[1]['url']).status_code == 200
     # voice reference is unlinked the same way
     voice = client.post(f"/api/characters/{a['id']}/voice-audio", data={'file': (io.BytesIO(wav()), 'v.wav')}).json['voice']
-    client.delete('/api/canvas/library/items/' + voice['asset_ref'])
+    media_delete(client, [voice['media_id']])
     assert client.get(f"/api/characters/{a['id']}").json['character']['voice'] is None
 
 
-# ---- character-assets：幂等导入（含参考音频），仍复制；无自动生成 ----------------------------
+# ---- character-assets：S6c 返回 media 引用，不复制；幂等；无自动生成 -----------------------------
 
-def test_character_assets_import_idempotent_with_voice(client, monkeypatch):
+def test_character_assets_import_references_media(client, monkeypatch):
     monkeypatch.setattr(application.HTTP, 'post', lambda *a, **k: pytest.fail('network'))
     monkeypatch.setattr(application.HTTP, 'get', lambda *a, **k: pytest.fail('network'))
     p, w = workflow()
@@ -258,12 +320,13 @@ def test_character_assets_import_idempotent_with_voice(client, monkeypatch):
     first = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id'], 'image_ids': ids})
     assert first.status_code == 200, first.json
     assert [a['name'] for a in first.json['assets']] == ['green.png', 'red.png'] and first.json['voice'] is None
-    assert set(first.json['mapping']) == set(ids)
-    sources = {r[0] for r in tasks.get_db().execute('SELECT source_key FROM canvas_asset_copies WHERE asset_id=?', (first.json['assets'][0]['id'],))}
-    assert sources == {'local:' + ids[0], 'character:' + c['id']}
+    assert [a['id'] for a in first.json['assets']] == ids and set(first.json['mapping']) == set(ids)
+    assert first.json['assets'][0] == {'id': ids[0], 'name': 'green.png', 'mime_type': 'image/png', 'kind': 'image',
+                                       'size_bytes': len(png('green')), 'url': '/api/canvas/media/' + ids[0]}
     second = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id'], 'image_ids': ids})
     assert second.json['assets'] == first.json['assets']
-    assert tasks.get_db().execute('SELECT count(*) FROM canvas_assets WHERE workflow_id=?', (w,)).fetchone()[0] == 2
+    assert tasks.get_db().execute('SELECT count(*) FROM canvas_assets').fetchone()[0] == 0
+    assert tasks.get_db().execute('SELECT count(*) FROM canvas_asset_copies').fetchone()[0] == 0
     assert client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id'], 'image_ids': [], 'voice': True}).status_code == 404
     client.post(f"/api/characters/{c['id']}/voice-audio", data={'file': (io.BytesIO(wav()), 'v.wav')})
     v1 = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id'], 'image_ids': [], 'voice': True}).json
@@ -283,15 +346,16 @@ def test_character_assets_import_idempotent_with_voice(client, monkeypatch):
     assert tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0] == 0
 
 
-def test_canvas_copy_rule_after_character_deleted(client):
-    """Deleting the character keeps the canvas copy; deleting the 本地素材 item later still applies the copy rule."""
+def test_media_kept_after_character_deleted_then_library_delete_placeholders(client):
+    """Deleting the character keeps the media; deleting the media later leaves node placeholders / strips inputs."""
     p, w = workflow()
     c = create(client)
-    image = upload_images(client, c['id'], 'red').json['images'][0]
-    copy = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id']}).json['assets'][0]
+    upload_images(client, c['id'], 'red')
+    ref = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id']}).json['assets'][0]
     client.delete(f"/api/characters/{c['id']}")
-    assert client.get(copy['url']).status_code == 200
-    assert client.post('/api/canvas/library/items/bulk-delete', json={'keys': [image['asset_ref']]}).json['deleted_copy_ids'] == [copy['id']]
+    assert client.get(ref['url']).status_code == 200
+    result = media_delete(client, [ref['id']])
+    assert result['deleted_ids'] == [ref['id']] and result['characters'] == []
 
 
 def test_character_change_does_not_touch_canvas(client):
@@ -376,16 +440,17 @@ def test_character_refs_only_on_generation_nodes(kind):
         _save(w, {'id': 'n', 'type': kind, 'x': 0, 'y': 0, 'characterRefs': {}})
 
 
-def test_local_delete_strips_character_ref_asset_ids(client):
+def test_media_delete_strips_character_ref_asset_ids(client):
     p, w = workflow()
     c = create(client)
     upload_images(client, c['id'], 'red', 'blue')
     imported = client.post(f'/api/canvas/workflows/{w}/character-assets', json={'character_id': c['id']}).json['assets']
     _save(w, {'id': 'n', 'type': 'image', 'x': 0, 'y': 0, 'referenceAssets': imported,
               'characterRefs': {c['id']: {'name': '林', 'assetIds': [a['id'] for a in imported]}}})
-    assert client.delete('/api/canvas/library/items/workflow:' + imported[0]['id']).status_code == 200
+    media_delete(client, [imported[0]['id']])
     node = store.workflow(w)['document']['nodes'][0]
     assert node['characterRefs'][c['id']]['assetIds'] == [imported[1]['id']]
+    assert [a['id'] for a in node['referenceAssets']] == [imported[1]['id']]
 
 
 # ---- 迁移 -----------------------------------------------------------------------------

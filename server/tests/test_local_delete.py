@@ -12,8 +12,11 @@ from test_canvas_library_folders import image_bytes
 
 
 def local_upload(client, color='red', name='raw.png'):
-    r = client.post('/api/workspace/assets/img_tabs', data={'file': (io.BytesIO(image_bytes(color)), name)})
-    assert r.status_code == 201, r.json
+    """A legacy 本地素材 row (pre-migration data). Since LIBRARY-GLOBAL S6c tool uploads register
+    in the global media library instead, so the old table is seeded directly here."""
+    staged = local_uploads.stage_stream(io.BytesIO(image_bytes(color)), name)
+    with store.write_transaction() as db:
+        local_uploads.publish_staged(db, staged)
     items = client.get('/api/canvas/library/items?scope=all&source=local').json['items']
     return next(i for i in items if i['asset']['name'] == name)
 
@@ -241,14 +244,27 @@ def test_copy_deduplicated_onto_direct_upload_keeps_it():
     assert after['document'] == saved['document']
 
 
+def assert_library_result(client, generated):
+    """LIBRARY-GLOBAL: an imported task result is a global library reference, never a canvas copy."""
+    import media_library
+    assert generated['url'] == f"/api/canvas/media/{generated['id']}"
+    assert media_library.status(generated['id'])[0] == 'ok'
+    assert client.get(generated['url']).status_code == 200
+
+
 def test_copy_deduplicated_onto_imported_generation_result_keeps_it():
-    """QA D1/A: imported task result first, then same-bytes local copy."""
+    """QA D1/A: imported task result first, then same-bytes local copy.
+
+    LIBRARY-GLOBAL: the result references library media, so the legacy local copy can no longer
+    deduplicate onto it; deleting the local item removes only its own copy, never the result.
+    """
     client, p, w = setup()
     generated = import_task(client, w)
     item = local_upload(client, 'red', 'reupload.png')
-    assert copy_to(client, w, item)['id'] == generated['id']
-    assert bulk(client, [item['key']]).json['deleted_copy_ids'] == []
-    assert client.get(generated['url']).status_code == 200
+    copy = copy_to(client, w, item)
+    assert copy['id'] != generated['id']
+    assert bulk(client, [item['key']]).json['deleted_copy_ids'] == [copy['id']]
+    assert_library_result(client, generated)
 
 
 def test_independent_save_onto_existing_copy_detaches_it():
@@ -257,9 +273,9 @@ def test_independent_save_onto_existing_copy_detaches_it():
     item = local_upload(client, 'red', 'first.png')
     copy = copy_to(client, w, item)
     generated = import_task(client, w)
-    assert generated['id'] == copy['id']
-    assert bulk(client, [item['key']]).json['deleted_copy_ids'] == []
-    assert client.get(generated['url']).status_code == 200
+    assert generated['id'] != copy['id']  # LIBRARY-GLOBAL: task import references media, no canvas copy
+    assert bulk(client, [item['key']]).json['deleted_copy_ids'] == [copy['id']]
+    assert_library_result(client, generated)
     # Same for a direct upload deduplicated onto a pure copy.
     w2 = store.create_workflow(p, 'w2')['id']
     item2 = local_upload(client, 'blue', 'second.png')

@@ -47,6 +47,8 @@ app.json.ensure_ascii = False
 install_compression(app)
 app.register_blueprint(task_api)
 app.register_blueprint(canvas_api)
+from media_api import media_api  # LIBRARY-GLOBAL-20261116 S1a global library
+app.register_blueprint(media_api)
 init_canvas_db()
 init_profiles_db()
 app.register_blueprint(provider_api)
@@ -3294,7 +3296,7 @@ def api_upload_workspace_asset(key):
         return jsonify({'success': False, 'error': '缺少工作区素材文件'}), 400
     try:
         from local_uploads import capture_user_upload
-        with capture_user_upload(upload):
+        with capture_user_upload(upload, normalize_image=key == 'img_tabs'):
             asset = storage.persist_workspace_upload(key, upload, normalize_image=key == 'img_tabs')
         return jsonify({'success': True, 'asset': asset}), 201
     except (OSError, ValueError) as error:

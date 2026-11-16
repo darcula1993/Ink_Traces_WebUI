@@ -281,6 +281,11 @@ def add_results(data):
 def register_routes(bp, body):
     from flask import jsonify
 
+    # LIBRARY-GLOBAL-20261116 (user decision 2026-11-16): generated results are library
+    # items in 生成历史 by themselves; "加入本地素材" became "移动到文件夹"
+    # (POST /api/canvas/media/move). The copy endpoint is retired; add_results stays for
+    # reference until the old tables are dropped.
     @bp.post('/api/canvas/library/local/from-results')
     def local_from_results():
-        return jsonify(add_results(body()))
+        return jsonify(success=False, code='endpoint_retired',
+                       error='“加入本地素材”已停用：生成结果已自动进入素材库“生成历史”，请使用“移动到文件夹”整理'), 410

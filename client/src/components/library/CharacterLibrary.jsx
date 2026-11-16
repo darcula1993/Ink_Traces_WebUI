@@ -6,6 +6,9 @@ import {listCharacters,getCharacter,createCharacter,updateCharacter,deleteCharac
 import {CHARACTER_IMAGE_LIMIT,CHARACTER_DESCRIPTION_MAX,CHARACTER_VOICE_MAX_SECONDS,characterNameError,characterErrorMessage,descriptionLength,voiceIsAudio} from '../../lib/characterRules'
 import './characterLibrary.css'
 
+// LIBRARY-GLOBAL-20261116 S6c: a picked library item is referenced by its media id (selection
+// {source:'media',id}); nothing is re-uploaded. Other selections (e.g. Cupsy) go as their catalog ref.
+const attachPicked=(item,reference)=>reference(item.selection?.source==='media'?{source:'media',id:item.selection.id}:item.selection)
 const sortImages=c=>[...(c?.images||[])].sort((a,b)=>(a.position??0)-(b.position??0))
 const AUDIO_TYPES=/^audio\/(wav|x-wav|wave|vnd\.wave|mpeg|mp3)$/
 const audioAllowed=file=>AUDIO_TYPES.test(file.type)||/\.(wav|mp3)$/i.test(file.name)
@@ -39,12 +42,12 @@ export default function CharacterLibrary({openPicker,onBusy}){
   let done=0;await run(async()=>{try{for(const file of images){await uploadCharacterImage(character.id,file);done++}}finally{await reload()}},`已上传 ${images.length} 张角色卡图`)
   if(done<images.length&&alive.current)setNotice(`已上传 ${done} 张，未处理 ${images.length-done} 张；请核对后再决定是否重新上传`)}
  function pickImages(){const left=remaining();if(left<=0){setError(`每个角色卡最多 ${CHARACTER_IMAGE_LIMIT} 张图`);return}
-  openPicker({title:`为“${character.name}”选择角色卡图`,applyLabel:'加入角色卡图',kinds:['image'],limit:left,onApply:async items=>{const id=character.id;let done=0;try{for(const item of items){await addLibraryImage(id,item.selection);done++}}finally{if(alive.current)await reload(id).catch(()=>{})}if(alive.current)setNotice(`已从素材库加入 ${done} 张角色卡图（引用本地素材）`)}})}
+  openPicker({title:`为“${character.name}”选择角色卡图`,applyLabel:'加入角色卡图',kinds:['image'],limit:left,onApply:async items=>{const id=character.id;let done=0;try{for(const item of items){await attachPicked(item,selection=>addLibraryImage(id,selection));done++}}finally{if(alive.current)await reload(id).catch(()=>{})}if(alive.current)setNotice(`已从素材库加入 ${done} 张角色卡图`)}})}
  function removeImage(image){run(async()=>{await deleteCharacterImage(character.id,image.asset_id);await reload()},'已删除角色卡图')}
  function move(from,to){if(to<0||to>=images.length||from===to)return;const order=images.map(i=>i.asset_id),[item]=order.splice(from,1);order.splice(to,0,item);const optimistic=order.map((asset_id,position)=>({...images.find(i=>i.asset_id===asset_id),position}));setDetail(d=>({...d,images:optimistic}));run(async()=>{await reorderCharacterImages(character.id,order);await reload()}).then(ok=>{if(!ok&&alive.current)reload().catch(()=>{})})}
  async function checkDuration(src){let seconds;try{seconds=await audioDuration(src)}catch(e){throw e}if(!Number.isFinite(seconds))throw new Error('无法确认音频时长，请换用 wav 或 mp3 文件');if(seconds>CHARACTER_VOICE_MAX_SECONDS+0.05)throw new Error(`参考音频最长 ${CHARACTER_VOICE_MAX_SECONDS} 秒（当前约 ${seconds.toFixed(1)} 秒）`);return seconds}
  function uploadAudio(file){if(!audioAllowed(file)){setError('参考音频仅支持 wav 或 mp3');return}run(async()=>{await checkDuration(file);await uploadVoiceAudio(character.id,file);await reload()},'已设置参考音频')}
- function pickAudio(){openPicker({title:`为“${character.name}”选择参考音频`,applyLabel:'设为参考音频',kinds:['audio'],limit:1,onApply:async([item])=>{const id=character.id,known=Number(item.asset.duration);if(Number.isFinite(known)&&known>0){if(known>CHARACTER_VOICE_MAX_SECONDS+0.05)throw new Error(`参考音频最长 ${CHARACTER_VOICE_MAX_SECONDS} 秒（所选约 ${known.toFixed(1)} 秒）`)}else await checkDuration(item.asset.url);await addLibraryVoiceAudio(id,item.selection);if(alive.current){await reload(id);setNotice('已设置参考音频（引用本地素材）')}}})}
+ function pickAudio(){openPicker({title:`为“${character.name}”选择参考音频`,applyLabel:'设为参考音频',kinds:['audio'],limit:1,onApply:async([item])=>{const id=character.id,known=Number(item.asset.duration);if(Number.isFinite(known)&&known>0){if(known>CHARACTER_VOICE_MAX_SECONDS+0.05)throw new Error(`参考音频最长 ${CHARACTER_VOICE_MAX_SECONDS} 秒（所选约 ${known.toFixed(1)} 秒）`)}else await checkDuration(item.asset.url);await attachPicked(item,selection=>addLibraryVoiceAudio(id,selection));if(alive.current){await reload(id);setNotice('已设置参考音频')}}})}
  function removeVoice(){run(async()=>{await clearVoice(character.id);await reload()},'已移除参考音频')}
 
  return <div className="cl-root">

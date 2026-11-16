@@ -339,6 +339,9 @@ def init_db():
     if not search_exists:
         db.execute("INSERT INTO task_search(task_search) VALUES ('rebuild')")
     db.commit()
+    # LIBRARY-GLOBAL-20261116: global media library; Worker and API both create it.
+    import media_schema
+    media_schema.create(db, _ensure_columns)
 
 
 def _layer_project(row, include_document=True):
@@ -1338,7 +1341,8 @@ def list_assets(task_id=None, expired_before=None):
         query += ' AND task_id = ?'
         params.append(task_id)
     if expired_before is not None:
-        query += ' AND expires_at IS NOT NULL AND expires_at <= ?'
+        # LIBRARY-GLOBAL S3: expiry never removes an output registered in the media library.
+        query += " AND expires_at IS NOT NULL AND expires_at <= ? AND COALESCE(media_id, '') = ''"
         params.append(expired_before)
     return [dict(row) for row in get_db().execute(query, params).fetchall()]
 

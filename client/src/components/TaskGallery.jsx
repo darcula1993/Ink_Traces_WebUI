@@ -4,15 +4,16 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { FolderInput, AlertTriangle, ArchiveRestore, Check, CheckCheck, ChevronRight, Columns3, Download, Filter, FolderHeart, FolderPlus, Heart, Image as ImageIcon, LoaderCircle, LayoutGrid, ListChecks, Pencil, RefreshCw, Search, SortDesc, Trash2, X } from 'lucide-react'
 import IconButton from './ui/IconButton'
 import { useWorkspaceState } from '../lib/useWorkspaceState'
-import { ACTIVE_STATUSES, TASK_PAGE_SIZE, STATUS_BATCH_SIZE, STATUS_POLL_DELAY, sameValue, mergeTaskStatus, DEFAULT_GALLERY_PREFERENCES, CARD_SIZE_OPTIONS, CARD_DETAIL_OPTIONS, SORT_OPTIONS, DEFAULT_TASK_FILTERS, STATUS_FILTER_OPTIONS, DATE_FILTER_OPTIONS, GROUP_COLORS, EMPTY_NAVIGATION, providerLabel, createdAfterForRange, serverItem, taskTypeLabel, needsRetryConfirmation } from './gallery/taskModel.js'
+import { ACTIVE_STATUSES, TASK_PAGE_SIZE, STATUS_BATCH_SIZE, STATUS_POLL_DELAY, sameValue, mergeTaskStatus, DEFAULT_GALLERY_PREFERENCES, CARD_SIZE_OPTIONS, CARD_DETAIL_OPTIONS, SORT_OPTIONS, DEFAULT_TASK_FILTERS, STATUS_FILTER_OPTIONS, DATE_FILTER_OPTIONS, GROUP_COLORS, EMPTY_NAVIGATION, providerLabel, createdAfterForRange, serverItem, revealTarget, taskTypeLabel, needsRetryConfirmation } from './gallery/taskModel.js'
 import { TaskTypeIcon } from './gallery/TaskPreview.jsx'
 import { TaskCardList } from './gallery/TaskCards.jsx'
 import { TaskCompareModal, TaskDetailModal } from './gallery/TaskModals.jsx'
 import ConfirmDialog from './ui/ConfirmDialog'
 import askConfirm from './ui/askConfirm'
 import { takeTaskCenterFocus } from '../lib/taskCenterLink.js'
-import AddToLocalDialog from './library/AddToLocalDialog'
-import { taskRef } from './library/localFromResults'
+import ToolAssetLibrary from './library/ToolAssetLibrary'
+import MoveToFolderDialog from './gallery/MoveToFolderDialog.jsx'
+import { collectMedia, listMediaFolders, systemFolderId } from './gallery/taskLibrary.js'
 
 function useLiveCallback(callback) {
   const ref = useRef(callback)
@@ -41,9 +42,36 @@ function TaskGallery({
   const [selectedOverride, setSelectedOverride] = useState(null)
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedKeys, setSelectedKeys] = useState(() => new Set())
-  const [localRefs, setLocalRefs] = useState(null)
+  // LIBRARY-GLOBAL-20261116 S4b: results live in the global media library; the task center can
+  // reveal them there (生成历史 or the folder they were moved to) or move them to a folder.
+  const [moveMedia, setMoveMedia] = useState(null)
+  const [reveal, setReveal] = useState(null)
+  const [libraryNotice, setLibraryNotice] = useState('')
+  const [collectingMedia, setCollectingMedia] = useState(false)
+  const pendingRevealRef = useRef(null)
   // Stable for the memoized task cards (gallery-performance: unchanged cards must not re-render).
-  const addTaskToLocal = useCallback(item => setLocalRefs([taskRef(item.taskId)]), [])
+  const moveTaskResults = useCallback(item => setMoveMedia(item.libraryMedia || []), [])
+  const revealTaskResults = useLiveCallback(async item => {
+    const target = revealTarget(item)
+    if (!target) return
+    let folderId = target.folderId
+    if (folderId === undefined) {
+      try {
+        folderId = systemFolderId(await listMediaFolders(), target.kind) || undefined
+      } catch (requestError) {
+        setError(requestError.response?.data?.error || '素材库文件夹加载失败')
+        return
+      }
+    }
+    const next = { folderId, mediaIds: target.mediaIds }
+    if (selectedItemRef.current) {
+      pendingRevealRef.current = next
+      setSelectedKey(null)
+      setSelectedOverride(null)
+    } else {
+      setReveal(next)
+    }
+  })
   const [selectionUniverse, setSelectionUniverse] = useState(() => new Set())
   const [selectingAll, setSelectingAll] = useState(false)
   const [navigation, setNavigation] = useState(EMPTY_NAVIGATION)
@@ -785,6 +813,37 @@ function TaskGallery({
     }
   }, [allCategorySelected, buildSelectionParams])
 
+  // Bulk move: loaded tasks give their library results directly; unloaded selected tasks (server-side
+  // select all) are read one by one, capped so a huge selection does not flood the server.
+  const moveSelectedResults = useLiveCallback(async () => {
+    const taskIds = [...selectedKeys].filter(token => token.startsWith('task-')).map(token => Number(token.slice(5))).filter(Number.isInteger)
+    const loaded = new Map(items.map(item => [Number(item.taskId), item]))
+    const missing = taskIds.filter(taskId => !loaded.has(taskId))
+    if (missing.length > 200) {
+      setError('一次最多移动 200 个未加载任务的结果，请先加载更多或减少选择')
+      return
+    }
+    setCollectingMedia(true)
+    try {
+      const fetched = []
+      for (let offset = 0; offset < missing.length; offset += 10) {
+        const responses = await Promise.all(missing.slice(offset, offset + 10).map(taskId => axios.get(`/api/tasks/${taskId}`)))
+        fetched.push(...responses.filter(response => response.data.success).map(response => serverItem(response.data.task)))
+      }
+      const media = collectMedia([...taskIds.map(taskId => loaded.get(taskId)).filter(Boolean), ...fetched])
+      if (!media.length) {
+        setError('所选任务没有素材库中的结果（可能未成功或结果已删除）')
+        return
+      }
+      setError('')
+      setMoveMedia(media)
+    } catch (requestError) {
+      setError(requestError.response?.data?.error || '读取任务结果失败')
+    } finally {
+      setCollectingMedia(false)
+    }
+  })
+
   const openSelectedComparison = useCallback(async () => {
     const taskIds = [...selectedKeys]
       .filter(token => token.startsWith('task-'))
@@ -1289,7 +1348,7 @@ function TaskGallery({
               </div>
             )}
             {view !== 'trash' && (
-              <IconButton label="已选任务结果加入本地素材" onClick={() => setLocalRefs([...selectedKeys].filter(token => token.startsWith('task-')).map(token => taskRef(token.slice(5))))} disabled={selectedTaskCount === 0}>
+              <IconButton label="已选任务结果移动到文件夹" onClick={moveSelectedResults} disabled={selectedTaskCount === 0 || collectingMedia}>
                 <FolderInput size={15} />
               </IconButton>
             )}
@@ -1336,6 +1395,12 @@ function TaskGallery({
             <AlertTriangle size={13} /> {error}
           </div>
         )}
+        {libraryNotice && (
+          <div role="status" className="mb-3 flex min-h-9 items-center gap-2 rounded border border-white/10 bg-white/5 px-3 text-xs text-nexus-text-light" data-testid="task-library-notice">
+            {libraryNotice}
+            <button type="button" aria-label="关闭提示" title="关闭提示" onClick={() => setLibraryNotice('')} className="ml-auto text-nexus-muted hover:text-nexus-text-light"><X size={12} /></button>
+          </div>
+        )}
         <TaskCardList
           items={visibleItems}
           loading={loading}
@@ -1347,7 +1412,8 @@ function TaskGallery({
           onFavorite={toggleFavorite}
           onCancel={cancelTask}
           onDelete={deleteTask}
-          onAddLocal={addTaskToLocal}
+          onReveal={revealTaskResults}
+          onMove={moveTaskResults}
           trash={view === 'trash'}
         />
         {!loading && visibleItems.length === 0 && (
@@ -1372,7 +1438,10 @@ function TaskGallery({
         )}
       </div>
 
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={() => {
+        // Open the library only after the detail has gone and returned focus, so focus lands in the library.
+        if (pendingRevealRef.current) { setReveal(pendingRevealRef.current); pendingRevealRef.current = null }
+      }}>
         {selectedItem && (
           <TaskDetailModal
             item={selectedItem}
@@ -1388,13 +1457,35 @@ function TaskGallery({
             onRetry={retryTask}
             onRestore={restoreTask}
             onSetGroup={toggleItemGroup}
-            onAddLocal={addTaskToLocal}
+            onReveal={revealTaskResults}
+            onMove={moveTaskResults}
             favoriteGroups={favoriteGroups}
             trash={view === 'trash'}
           />
         )}
       </AnimatePresence>
-      {localRefs && <AddToLocalDialog refs={localRefs} overlay onClose={() => setLocalRefs(null)} />}
+      {moveMedia && (
+        <MoveToFolderDialog
+          media={moveMedia}
+          onClose={() => setMoveMedia(null)}
+          onDone={summary => {
+            setLibraryNotice(summary.text)
+            fetchTasks({ preserveLoaded: true })
+            if (selectedItemRef.current?.taskId) openItem(selectedItemRef.current, false)
+          }}
+        />
+      )}
+      {reveal && (
+        <ToolAssetLibrary
+          browseOnly
+          remote={false}
+          title="素材库"
+          initialSource="local"
+          initialFolderId={reveal.folderId}
+          focusMediaIds={reveal.mediaIds}
+          onClose={() => setReveal(null)}
+        />
+      )}
       {retryConfirm && (
         <ConfirmDialog
           title="重试结果未知的任务？"

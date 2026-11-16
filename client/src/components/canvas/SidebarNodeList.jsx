@@ -1,6 +1,7 @@
 import React,{useRef,useState} from 'react'
 import {Search,ArrowDownAZ,FilterX,MoreHorizontal,Navigation,X,Star,ChevronDown,ChevronRight,Image as ImageIcon,Film,Music,FileText} from 'lucide-react'
 import {mediaKind} from '../../lib/canvasReferences'
+import {isMediaAsset,isDeletedMedia} from '../../lib/canvasMediaStatus'
 import {isGeneratingTaskStatus,isFailureTaskStatus,taskStatusLabel} from '../../lib/taskStatus'
 import SidebarMenu,{menuPosition} from './SidebarMenu'
 import SidebarPortalMenu from './SidebarNavigationMenu'
@@ -10,7 +11,7 @@ import {protectedTask} from '../../lib/canvasEditHistory'
 const KIND_ICONS={image:ImageIcon,video:Film,audio:Music,text:FileText}
 // UI-ITER-R1 #9: 28px thumbnail (image result) or type icon, plus a status dot for result/failure/in-progress.
 function nodeState(n){const status=n.task?.status;if(status&&isFailureTaskStatus(status))return ['is-failed',status==='unknown'?'提交结果未知':'生成失败'];if(status&&isGeneratingTaskStatus(status))return ['is-busy',taskStatusLabel(status)];if(n.asset?.url)return ['is-done',n.type==='asset'?'素材':'已有结果'];return ['','尚未生成']}
-function NodeThumb({node}){const kind=mediaKind(node),Icon=KIND_ICONS[kind]||FileText,[state,label]=nodeState(node);return <span className="cv-node-list-thumb-wrap" aria-hidden="true" title={label}>{kind==='image'&&node.asset?.url?<img className="cv-node-list-thumb" src={node.asset.thumbnail_url||node.asset.thumbnail||node.asset.url} alt="" loading="lazy" draggable={false}/>:<span className="cv-node-list-thumb is-icon"><Icon size={14}/></span>}{state&&<span className={`cv-node-list-status ${state}`}/>}</span>}
+function NodeThumb({node}){const kind=mediaKind(node),Icon=KIND_ICONS[kind]||FileText,[state,label]=nodeState(node);return <span className="cv-node-list-thumb-wrap" aria-hidden="true" title={label}>{kind==='image'&&node.asset?.url&&!(isMediaAsset(node.asset)&&isDeletedMedia(node.asset.id))?<img className="cv-node-list-thumb" src={node.asset.thumbnail_url||node.asset.thumbnail||node.asset.url} alt="" loading="lazy" draggable={false}/>:<span className="cv-node-list-thumb is-icon"><Icon size={14}/></span>}{state&&<span className={`cv-node-list-status ${state}`}/>}</span>}
 export default function SidebarNodeList({edges=[],groups=[],onLocateGroup,onRenameGroup,onUngroup,nodes,selected,selectedIds=[selected],disabled,onLocate,onSelect,onCopy,onDelete,onRename,onRating}) {
  const [search,setSearch]=useState(false),[query,setQuery]=useState(''),[sort,setSort]=useState(false),[rating,setRating]=useState('all'),[ratingMenu,setRatingMenu]=useState(null),[menu,setMenu]=useState(null)
  const [collapsed,setCollapsed]=useState({}),[groupMenu,setGroupMenu]=useState(null),menuJustClosed=useRef(null)

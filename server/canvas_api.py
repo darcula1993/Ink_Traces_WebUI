@@ -13,7 +13,21 @@ PREFIX = '/api/canvas/workflows'
 
 @canvas_api.errorhandler(store.CanvasError)
 def canvas_error(error):
-    return jsonify(success=False, error=str(error)), error.status
+    payload = {'success': False, 'error': str(error)}
+    if getattr(error, 'code', None):
+        payload['code'] = error.code  # media_library.MediaError (e.g. 410 media_deleted on old routes)
+    if getattr(error, 'media', None):
+        payload['media'] = error.media
+    return jsonify(payload), error.status
+
+
+def send_legacy_media(row):
+    """S9 (QA D1): an old asset URL whose item entered the library is read from the media file."""
+    import media_library
+    response = send_file(media_library.media_path(row), mimetype=row['mime_type'], download_name=row['name'], conditional=True)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Cache-Control'] = 'private, no-cache'
+    return response
 
 
 @canvas_api.errorhandler(BadRequest)
@@ -92,6 +106,10 @@ def upload_asset(workflow_id):
 @canvas_api.route(PREFIX + '/<workflow_id>/assets/<asset_id>', methods=['GET'])
 def read_asset(workflow_id, asset_id):
     asset = store.get_asset(workflow_id, asset_id, allow_archived=True)
+    from media_library import legacy_media
+    row = legacy_media('workflow', asset_id)  # deleted in the library -> 410
+    if row is not None:
+        return send_legacy_media(row)
     response = send_file(store.asset_path(asset), mimetype=asset['mime_type'],
                          download_name=asset['name'], conditional=True)
     response.headers['X-Content-Type-Options'] = 'nosniff'

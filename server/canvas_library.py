@@ -97,7 +97,10 @@ def register_library_routes(blueprint, read_body):
         if request.method == 'GET':
             rows = task_db.get_db().execute('SELECT * FROM canvas_library_assets WHERE project_id=? ORDER BY created_at DESC,id', (project_id,))
             hidden = {r['item_key'] for r in task_db.get_db().execute('SELECT item_key FROM canvas_catalog_hidden')}
-            assets = [store.asset_public(dict(row)) for row in rows if not is_library_asset_deleted(row['id']) and 'library:'+row['id'] not in hidden]
+            # S9 (QA D1): items that entered the global library (or were deleted there) are listed by media only.
+            ingested = {r[0] for r in task_db.get_db().execute("SELECT old_id FROM media_aliases WHERE scope='library'")}
+            assets = [store.asset_public(dict(row)) for row in rows if not is_library_asset_deleted(row['id'])
+                      and 'library:'+row['id'] not in hidden and row['id'] not in ingested]
             placement = {asset['id']: None for asset in assets}
             placement.update(folders.placements(project_id))
             if 'folder_id' in request.args:
@@ -125,6 +128,11 @@ def register_library_routes(blueprint, read_body):
             asset = folders.edit_asset(project_id, asset_id, read_body())
             return jsonify(success=True, asset=asset, folder_id=folders.placements(project_id).get(asset_id))
         asset = store.get_asset(project_id, asset_id, library=True, allow_archived=True)
+        from media_library import legacy_media
+        media_row = legacy_media('library', asset_id)  # deleted in the library -> 410
+        if media_row is not None:
+            from canvas_api import send_legacy_media
+            return send_legacy_media(media_row)
         response = send_file(store.asset_path(asset), mimetype=asset['mime_type'], download_name=asset['name'], conditional=True)
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Cache-Control'] = 'private, no-cache'
@@ -156,8 +164,14 @@ def register_library_routes(blueprint, read_body):
         if len(asset_ids) > 100:
             raise store.CanvasError('单次引用最多100个素材')
         sources = [store.get_asset(workflow['project_id'], asset_id, library=True) for asset_id in asset_ids]
+        # S9 (QA D1): an item already in the global library is referenced directly (no canvas copy);
+        # one deleted there is refused with 410 before anything is copied.
+        from media_library import legacy_media
+        from canvas_media_refs import node_asset
+        in_library = {source['id']: legacy_media('library', source['id']) for source in sources}
         # Copy provenance (library:<id>) is recorded by save_asset; see local_delete.
-        copied = {source['id']: copy_asset(source, workflow_id, copy_source='library:' + source['id']) for source in sources}
+        copied = {source['id']: node_asset(in_library[source['id']]) if in_library[source['id']] is not None
+                  else copy_asset(source, workflow_id, copy_source='library:' + source['id']) for source in sources}
         snapshots = [{'id': group['id'], 'title': group['title'],
                       'asset_ids': [copied[asset_id]['id'] for asset_id in group['asset_ids']]} for group in groups]
         return jsonify(success=True, assets=list(copied.values()), groups=snapshots)
@@ -173,6 +187,11 @@ def register_library_routes(blueprint, read_body):
         if workflow['project_id'] != project_id:
             raise store.CanvasError('不能引用其他项目的画布', 404)
         source = store.get_asset(workflow_id, asset_id)
+        from media_library import legacy_media
+        from canvas_media_refs import node_asset
+        media_row = legacy_media('workflow', asset_id)  # S9: deleted -> 410; in the library -> no new copy
+        if media_row is not None:
+            return jsonify(success=True, asset=node_asset(media_row), media_id=media_row['id']), 200
         from canvas_catalog import record_origin
         with store.write_transaction():
             asset = copy_asset(source, project_id, library=True)

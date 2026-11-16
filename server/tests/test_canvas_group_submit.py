@@ -181,7 +181,11 @@ def test_group_submission_matches_single_node_submission(env, monkeypatch):
     # b received a's new result as its reference, as multipart like the browser's FormData.
     a_result = env.node(env.doc(), 'a')['asset']
     assert group_calls[1]['multipart'] and [f[0] for f in group_calls[1]['files']] == ['images']
-    a_bytes = store.asset_path(store.get_asset(env.wid, a_result['id'])).read_bytes()
+    # a's result is a library media reference (no canvas copy); b got exactly its bytes.
+    import media_library
+    assert a_result['url'] == f"/api/canvas/media/{a_result['id']}"
+    assert task_db.get_db().execute('SELECT COUNT(*) FROM canvas_assets WHERE id=?', (a_result['id'],)).fetchone()[0] == 0
+    a_bytes = media_library.media_path(media_library.get_media(a_result['id'])).read_bytes()
     assert group_calls[1]['files'][0][1:] == (a_result['name'], 'image/png', hashlib.sha256(a_bytes).hexdigest())
 
     # Replay each node exactly as the browser would (assembled request over HTTP) and compare.

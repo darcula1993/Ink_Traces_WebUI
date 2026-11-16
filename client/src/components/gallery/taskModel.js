@@ -176,9 +176,61 @@ export function remoteResultHost(url) {
   }
 }
 
+// LIBRARY-GLOBAL-20261116 S4b: generation results live in the global media library (生成历史).
+// Provisional S3 contract (task log “S4b 实现”): task.result.media = [{output_url, media_id,
+// status:'ok'|'deleted', kind, url?, thumbnail_url?, folder_id?, name?}], one entry per output that
+// entered the library. Outputs without an entry are not in the library (legacy) and keep their
+// output URL. A deleted entry hides that output (“结果已删除”); task records stay viewable.
+const outputKey = url => String(url || '').split('?', 1)[0]
+
+export function taskMediaEntries(result) {
+  const list = Array.isArray(result?.media) ? result.media : []
+  return list.filter(entry => entry && typeof entry === 'object' && typeof entry.media_id === 'string' && entry.media_id)
+    .map(entry => ({
+      outputUrl: entry.output_url || '',
+      id: entry.media_id,
+      deleted: entry.status === 'deleted',
+      kind: entry.kind || '',
+      url: entry.url || '',
+      thumbnailUrl: entry.thumbnail_url || '',
+      folderId: entry.folder_id === undefined ? undefined : (entry.folder_id || null),
+      name: entry.name || '',
+    }))
+}
+
+// Pair output URLs with library entries; library-only entries (no output URL left) are appended.
+export function taskOutputs(urls, entries) {
+  const byOutput = new Map(entries.filter(entry => entry.outputUrl).map(entry => [outputKey(entry.outputUrl), entry]))
+  const used = new Set()
+  const outputs = urls.filter(Boolean).map(url => {
+    const media = byOutput.get(outputKey(url)) || null
+    if (media) used.add(media)
+    return { url, media, deleted: Boolean(media?.deleted) }
+  })
+  for (const media of entries) {
+    if (used.has(media)) continue
+    if (!media.deleted && !media.url) continue
+    outputs.push({ url: media.deleted ? '' : media.url, media, deleted: media.deleted })
+  }
+  return outputs
+}
+
 export function serverItem(task) {
   const result = task.result || {}
   const params = task.params || {}
+  const entries = taskMediaEntries(result)
+  const imageOutputs = task.type === 'image' || !task.type
+    ? taskOutputs((result.local_images || []).map(url => taskDisplayUrl(task.id, url)), entries.filter(entry => !entry.kind || entry.kind === 'image'))
+    : []
+  const mainUrl = task.type === 'video' ? taskDisplayUrl(task.id, result.local_video) : task.type === 'audio' ? result.local_audio : null
+  const mainOutputs = task.type === 'video' || task.type === 'audio'
+    ? taskOutputs([mainUrl], entries.filter(entry => !entry.kind || entry.kind === task.type))
+    : []
+  const outputs = task.type === 'video' || task.type === 'audio' ? mainOutputs : imageOutputs
+  const libraryMedia = outputs.filter(output => output.media && !output.deleted).map(output => output.media)
+  const deletedCount = outputs.filter(output => output.deleted).length
+  const resultDeleted = outputs.length > 0 && deletedCount === outputs.length
+  const liveMain = mainOutputs.find(output => !output.deleted)
   return {
     key: `task-${task.id}`,
     kind: 'history',
@@ -197,12 +249,16 @@ export function serverItem(task) {
     resultUnknown: task.status === 'failed' && isResultUnknown(task),
     resultUnknownReason: task.status === 'failed' && isResultUnknown(task) ? resultUnknownReason(task) : '',
     params,
-    images: (result.local_images || []).map(url => taskDisplayUrl(task.id, url)),
+    images: imageOutputs.filter(output => !output.deleted).map(output => output.url),
+    outputs,
+    libraryMedia,
+    deletedCount,
+    resultDeleted,
     remoteHosts: Array.isArray(result.source_urls) ? result.source_urls.map(remoteResultHost) : [],
-    thumbnail: result.local_thumbnail || result.local_thumbnails?.[0] || null,
-    video: taskDisplayUrl(task.id, result.local_video) || null,
-    audio: result.local_audio || null,
-    poster: taskDisplayUrl(task.id, result.local_last_frame) || null,
+    thumbnail: resultDeleted ? null : (imageOutputs.length && imageOutputs[0].deleted ? null : (result.local_thumbnail || result.local_thumbnails?.[0] || null)),
+    video: task.type === 'video' ? (liveMain?.url || null) : (taskDisplayUrl(task.id, result.local_video) || null),
+    audio: task.type === 'audio' ? (liveMain?.url || null) : (result.local_audio || null),
+    poster: task.type === 'video' && resultDeleted ? null : (taskDisplayUrl(task.id, result.local_last_frame) || null),
     refs: result.local_refs || [],
     refTypes: result.local_ref_types || [],
     source: task,
@@ -215,4 +271,16 @@ export function taskTypeLabel(type) {
 
 export function selectionToken(item) {
   return `task-${item.taskId}`
+}
+
+// 在素材库中显示: the folder holding the first library result (root = 'root'); undefined → 生成历史 by kind.
+export function revealTarget(item) {
+  const media = item?.libraryMedia || []
+  if (!media.length) return null
+  const first = media[0]
+  return {
+    mediaIds: media.map(entry => entry.id),
+    folderId: first.folderId === undefined ? undefined : (first.folderId || 'root'),
+    kind: first.kind || item.type || 'image',
+  }
 }

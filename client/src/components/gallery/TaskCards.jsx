@@ -1,5 +1,5 @@
 import React from 'react'
-import { Ban, Check, FolderInput, Heart, Trash2 } from 'lucide-react'
+import { Ban, Check, FolderInput, FolderSearch, Heart, Trash2 } from 'lucide-react'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, formatTime, providerLabel, taskTypeLabel, selectionToken } from './taskModel.js'
 import { TaskPreview } from './TaskPreview.jsx'
 
@@ -14,7 +14,8 @@ export const TaskCard = React.memo(function TaskCard({
   onFavorite,
   onCancel,
   onDelete,
-  onAddLocal,
+  onReveal,
+  onMove,
   trash,
 }) {
   const status = taskStatusInfo(item) || STATUS.pending
@@ -88,12 +89,23 @@ export const TaskCard = React.memo(function TaskCard({
                 <Heart size={14} fill={item.favorite ? 'currentColor' : 'none'} />
               </button>
             )}
-            {item.taskId && item.status === 'succeeded' && !trash && onAddLocal && (
+            {item.libraryMedia?.length > 0 && onReveal && (
               <button
                 type="button"
-                aria-label="加入本地素材"
-                title="把任务结果复制为本地素材，可同时选择标签"
-                onClick={event => { event.stopPropagation(); onAddLocal(item) }}
+                aria-label="在素材库中显示"
+                title="在素材库中定位这项任务的结果"
+                onClick={event => { event.stopPropagation(); onReveal(item) }}
+                className="task-card-action"
+              >
+                <FolderSearch size={14} />
+              </button>
+            )}
+            {item.libraryMedia?.length > 0 && onMove && (
+              <button
+                type="button"
+                aria-label="移动到文件夹"
+                title="把任务结果移动到素材库中的文件夹（不复制文件）"
+                onClick={event => { event.stopPropagation(); onMove(item) }}
                 className="task-card-action"
               >
                 <FolderInput size={14} />

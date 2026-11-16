@@ -529,6 +529,10 @@ def _task_output_hashes(task_id):
     for asset in task_db.list_assets(task_id):
         if asset['kind'] not in OUTPUT_KINDS:
             continue
+        if asset.get('media_id'):
+            # LIBRARY-GLOBAL-20261116 S2: the library item's hash, even after the output file is gone.
+            import canvas_media_refs
+            hashes.update(canvas_media_refs.media_hashes([asset['media_id']]).values())
         digest = hashlib.sha256()
         try:
             with open(asset['path'], 'rb') as handle:
@@ -556,6 +560,9 @@ def _node_task_asset(workflow_id, node_id, task_id, hashes):
         marks = ','.join('?' * len(ids))
         found = {row['id']: row['sha256'] for row in task_db.get_db().execute(
             f'SELECT id, sha256 FROM canvas_assets WHERE workflow_id=? AND id IN ({marks})', [workflow_id] + ids)}
+        # LIBRARY-GLOBAL-20261116 S2: written-back results reference library media items.
+        import canvas_media_refs
+        found.update(canvas_media_refs.media_hashes(ids))
         for asset_id in ids:   # the selected one first; else a candidate from this task (user switched)
             if found.get(asset_id) in hashes:
                 return asset_id, False

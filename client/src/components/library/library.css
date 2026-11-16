@@ -84,3 +84,54 @@
 .ul-tag-new{display:flex;gap:8px;align-items:center}.ul-tag-new input{flex:1;min-width:0}
 .ul-subdialog .ul-tag-new button:where(:not(.btn)){display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .ul-local-outcome p{margin:0 0 6px}.ul-local-outcome ul{margin:0 0 8px;padding-left:18px;max-height:160px;overflow:auto;overflow-wrap:anywhere}
+
+/* LIBRARY-GLOBAL-20261116 S4a: global library navigation — folder tree, locked system folder, groups. */
+.ul-nav{gap:var(--sp-2);overflow:hidden;width:clamp(200px,15vw,260px)}
+.ul-nav h2{margin:0 0 var(--sp-2) var(--sp-1)}
+.ul-tree{display:flex;flex-direction:column;gap:2px;flex:1 1 auto;min-height:0;overflow:auto;margin:0 -4px;padding:0 4px}
+.ul-tree ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.ul-tree-row{display:flex;align-items:center;gap:2px;padding-left:calc(var(--depth,0) * 14px);border-radius:var(--r-md)}
+.ul-tree-row:hover{background:rgba(255,255,255,.03)}
+.ul-tree-row.is-current{background:var(--accent-soft)}
+.ul-nav .ul-tree-toggle{flex-shrink:0;width:20px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--text-2)}
+.ul-nav button:where(:not(.btn)).ul-tree-item,.ul-nav button:where(:not(.btn)).ul-tree-top,.ul-nav-extra button:where(:not(.btn)){flex:1;min-width:0;display:flex;align-items:center;justify-content:flex-start;gap:var(--sp-2);padding:5px var(--sp-2);min-height:30px;border:1px solid transparent;background:transparent;font-size:var(--fs-control);text-align:left}
+.ul-nav button:where(:not(.btn)).ul-tree-item:hover,.ul-nav button:where(:not(.btn)).ul-tree-top:hover,.ul-nav-extra button:where(:not(.btn)):hover{background:rgba(255,255,255,.04);border-color:transparent}
+.ul-tree-item span,.ul-tree-top span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ul-tree-item small,.ul-tree-top small{color:var(--text-3);font-size:var(--fs-caption);font-variant-numeric:tabular-nums}
+.ul-tree-item svg,.ul-tree-top svg,.ul-nav-extra svg{flex-shrink:0;color:var(--text-2)}
+.ul-tree-row.is-current .ul-tree-item,.ul-nav .ul-tree-top.is-current,.ul-nav-extra .is-current{color:var(--text)}
+.ul-tree-row.is-current .ul-tree-item svg,.ul-nav .ul-tree-top.is-current svg,.ul-nav-extra .is-current svg{color:var(--accent)}
+.ul-nav .ul-tree-top.is-current,.ul-nav-extra button.is-current{background:var(--accent-soft)}
+.ul-nav .ul-tree-item .ul-tree-lock{color:var(--text-3);width:12px;height:12px}
+.ul-tree-row .ul-more{margin-left:0;flex-shrink:0;opacity:0;transition:opacity .12s}
+.ul-tree-row:hover .ul-more,.ul-tree-row:focus-within .ul-more{opacity:1}
+.ul-nav .ul-tree-row .ul-more>button:where(:not(.btn)){padding:2px 4px;border-color:transparent;background:transparent}
+.ul-nav button:where(:not(.btn)).ul-tree-new{display:inline-flex;align-items:center;gap:6px;justify-content:flex-start;padding:5px var(--sp-2);margin-top:var(--sp-1);font-size:var(--fs-caption);color:var(--text-2);border-style:dashed;background:transparent}
+.ul-nav-extra{display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--border);padding-top:var(--sp-2);flex-shrink:0}
+.ul-nav-extra .ul-remote-link{justify-content:space-between}
+.ul-system-hint{font-size:var(--fs-caption);color:var(--text-3);white-space:nowrap}
+.ul-title>button:where(:not(.btn)){display:inline-flex;align-items:center;padding:4px 6px}
+.ul-folder-select{display:flex;flex-direction:column;gap:var(--sp-2)}
+.ul-folder-select>label{display:flex;align-items:center;gap:var(--sp-2);white-space:nowrap}
+.ul-folder-select .ui-select{min-width:180px}
+.ul-folder-new{display:flex;gap:6px;align-items:center}
+.ul-folder-new input{flex:1;min-width:120px}
+.ul-library button:where(:not(.btn)).ul-folder-add,.ul-subdialog button:where(:not(.btn)).ul-folder-add{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;font-size:var(--fs-caption)}
+.ul-segment{display:flex;gap:var(--sp-4)}
+.ul-segment label{display:inline-flex;align-items:center;gap:6px}
+.ul-deleted .ul-deleted-card{display:flex;flex-direction:column;border:1px dashed var(--border-strong);border-radius:var(--r-md);overflow:hidden;opacity:.75}
+.ul-deleted-mark{height:160px;display:flex;align-items:center;justify-content:center;color:var(--text-3);background:rgba(255,255,255,.02)}
+.ul-deleted .ul-deleted-card strong{display:block;font-size:13px;font-weight:500;padding:8px 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+.ul-deleted .ul-info{color:var(--danger)}
+@media(min-width:1921px){.ul-deleted-mark{height:clamp(150px,min(11vw,calc(9vh + 60px)),260px)}}
+.ul-item.is-focus .ul-card{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+/* S10 O1: must outrank `.ul-nav button:where(:not(.btn)).ul-tree-top{flex:1}` or tall dialogs (1440/2560) stretch 全部素材. */
+.ul-nav .ul-tree>button.ul-tree-top,.ul-nav .ul-tree>button.ul-tree-new,.ul-nav .ul-nav-extra>button{flex:0 0 auto}
+.ul-tree>.ul-tree-list{flex:0 0 auto}
+/* LIBRARY-GLOBAL S7: duplicate upload — where the existing item is, 「定位」 / 「移到当前文件夹」. */
+.ul-duplicate{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;padding:6px 10px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:rgba(255,255,255,.03)}
+.ul-duplicate p{margin:0;flex:1;min-width:200px;overflow-wrap:anywhere}
+.ul-library .ul-duplicate button:where(:not(.btn)){padding:4px 10px;white-space:nowrap}
+.ul-duplicate .btn-icon{padding:4px;display:inline-flex;align-items:center}
+/* LIBRARY-GLOBAL S8: dialog confirm (.btn primary/danger) uses the same type size as 取消. */
+.ul-subdialog footer .btn{font-size:inherit;font-family:inherit}

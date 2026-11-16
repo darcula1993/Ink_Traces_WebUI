@@ -9,6 +9,7 @@ import pytest
 
 import canvas_store as store
 from canvas_api import canvas_api
+from media_api import media_api
 import storage
 import tasks as task_db
 
@@ -20,6 +21,7 @@ def client(isolated_backend, monkeypatch):
     app = Flask(__name__)
     app.config.update(TESTING=True)
     app.register_blueprint(canvas_api)
+    app.register_blueprint(media_api)  # task results are served from the global library
     return app.test_client()
 
 
@@ -79,6 +81,10 @@ def test_import_survives_source_deletion_and_is_idempotent(client):
     first = client.post(url, json={'task_id': task_id})
     assert first.status_code == 200
     assert client.post(url, json={'task_id': task_id}).json['assets'] == first.json['assets']
+    [asset] = first.json['assets']
+    assert asset['url'] == f"/api/canvas/media/{asset['id']}"   # library reference, no canvas copy
+    assert task_db.get_db().execute('SELECT COUNT(*) FROM media').fetchone()[0] == 1
+    assert task_db.get_db().execute('SELECT COUNT(*) FROM canvas_assets').fetchone()[0] == 0
     path.unlink()
     db = task_db.get_db()
     db.execute('DELETE FROM task_assets WHERE task_id=?', (task_id,))

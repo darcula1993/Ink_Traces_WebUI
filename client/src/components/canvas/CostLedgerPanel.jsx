@@ -38,7 +38,7 @@ export default function CostLedgerPanel({projectId,projectTitle,workflowId,workf
  const data=state.data,totals=data?.totals
  const main=describeBucket(totals?.billable),places=placeIndex(data)
  return createPortal(<div className="cv-ledger-backdrop"><section className="cv-ledger" role="dialog" aria-modal="true" aria-labelledby="cv-ledger-title" aria-describedby="cv-ledger-note" ref={ref} tabIndex={-1} onKeyDown={keys}>
-  <header className="cv-ledger-header"><div><h1 id="cv-ledger-title">费用账本</h1><p id="cv-ledger-note" className="cv-ledger-note" data-testid="cost-ledger-disclaimer"><strong>{LEDGER_DISCLAIMER}</strong>。视频按 BytePlus 费率估算（Cupsy 同价）；图像、音频暂无价格资料记为未知，未知不计入合计。</p></div><button className="btn btn-icon btn-outlined btn-lg" aria-label="关闭费用账本" title="关闭" onClick={onClose}><X size={18}/></button></header>
+  <header className="cv-ledger-header"><div><h1 id="cv-ledger-title">费用账本</h1><p id="cv-ledger-note" className="cv-ledger-note" data-testid="cost-ledger-disclaimer"><strong>{LEDGER_DISCLAIMER}</strong>。图像、图层、视频按 BytePlus 价格表估算（Cupsy 同价）；音频暂无价格资料，记为“未知”（不当作零），未知不计入合计。</p></div><button className="btn btn-icon btn-outlined btn-lg" aria-label="关闭费用账本" title="关闭" onClick={onClose}><X size={18}/></button></header>
   <div className="cv-ledger-filters">
    <label>范围<select aria-label="统计范围" value={scope} onChange={e=>setScope(e.target.value)}>{projectId&&<option value="project">本项目{projectTitle?`：${projectTitle}`:''}</option>}{workflowId&&<option value="workflow">当前画布{workflowTitle?`：${workflowTitle}`:''}</option>}<option value="unassigned">未归属项目（旧工具任务）</option><option value="all">全部任务</option></select></label>
    <label>开始日期<input type="date" aria-label="开始日期" value={from} max={to||undefined} onChange={e=>setFrom(e.target.value)}/></label>

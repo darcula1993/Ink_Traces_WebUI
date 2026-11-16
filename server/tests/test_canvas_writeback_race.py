@@ -49,7 +49,13 @@ def _assert_single_outcome(wf, tid, revision):
     result = doc_node(wf, 'n1')
     assert result['task'] == {'id': tid, 'status': 'succeeded', 'error': None}
     assert len(result['candidates']) == 2 and result['selectedCandidateId'] == result['candidates'][0]['id']
-    assert task_db.get_db().execute('SELECT COUNT(*) FROM canvas_assets WHERE workflow_id=?', (wf['id'],)).fetchone()[0] == 2
+    # imported exactly once: two library media (no canvas copies), each output linked to its media
+    db = task_db.get_db()
+    assert db.execute('SELECT COUNT(*) FROM canvas_assets WHERE workflow_id=?', (wf['id'],)).fetchone()[0] == 0
+    media_ids = [a['media_id'] for a in task_db.list_assets(tid) if a['kind'] == 'output_image']
+    assert db.execute('SELECT COUNT(*) FROM media').fetchone()[0] == 2 and len(set(media_ids)) == 2
+    assert [c['id'] for c in result['candidates']] == media_ids
+    assert all(c['url'] == f"/api/canvas/media/{c['id']}" for c in result['candidates'])
     assert writeback_rows(wf) == [{'revision': revision + 1, 'node_id': 'n1', 'task_id': tid}]
     assert task_db.get_task(tid)['status'] == 'succeeded'
 

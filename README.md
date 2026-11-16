@@ -12,7 +12,7 @@
   English · <a href="./doc/README.md">中文</a>
 </p>
 
-<p align="center">Version 1.9.2 · <a href="./CHANGELOG.md">Changelog</a></p>
+<p align="center">Version 2.0.0 · <a href="./CHANGELOG.md">Changelog</a></p>
 
 <p align="center">
   <img src="./screenshot.png" alt="Ink Traces WebUI Screenshot" width="100%" />
@@ -21,7 +21,7 @@
 ## Features
 
 - **Canvas workflow**: projects contain multiple canvases; image, video and audio generation nodes can be dragged, edited and wired together. Upstream results and library assets act as explicit references (including video to video). Generation only runs when you trigger it.
-- **Asset library**: project assets, asset groups and local assets (your uploads are kept as independent persistent copies), with select-all and permanent delete.
+- **Asset library**: one global library shared by every project. All your uploads and every generation result live here, organised in sub-folders: generation results go automatically into the fixed "生成历史" folder (image / video / audio), plus default folders you can rename or delete. Canvases reference library items directly (no per-canvas copies); deleting an item leaves a "deleted" placeholder on canvases that used it. Global asset groups, move/rename, server-side select-all and a delete preview listing affected canvases.
 - **Task center**: every generation is a real backend task with server-side search, pagination, favorites, trash and bulk download.
 - **Layer studio**: decompose an image into 2–100 editable layers, optional OCR, version restore and export.
 - **Interface management**: several named provider configurations; each generation node picks its own (new nodes preselect your last choice per type), and submitted tasks keep an immutable revision.

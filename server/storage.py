@@ -443,11 +443,19 @@ def remove_task_files(task):
 
 
 def remove_task_output_files(task_id):
-    """Remove generated files while preserving references needed for retry."""
+    """Remove generated files while preserving references needed for retry.
+
+    LIBRARY-GLOBAL-20261116 S6a: outputs already registered in the global library
+    (``task_assets.media_id``) are kept, row and output link alike. Only succeeded tasks
+    register, so this matters when a late duplicate run of an already succeeded task is
+    discarded (``complete_task`` refused): dropping the row would lose the task->media link.
+    """
     removed = 0
     deleted_assets = []
     for asset in task_db.list_assets(task_id):
         if not asset['kind'].startswith('output_'):
+            continue
+        if asset.get('media_id'):
             continue
         if os.path.isfile(asset['path']):
             try:

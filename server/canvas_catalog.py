@@ -79,8 +79,24 @@ def task_projects(task):
     return projects, bool(ids)
 
 
+def library_media(value):
+    """S9 (QA D1): media row for an old selection that entered the global library; None if it did not.
+
+    Raises 410 ``media_deleted`` when the user deleted it in the library (never served or copied again).
+    """
+    source, ident, _ = parse_selection(value)
+    if source == 'cupsy':
+        return None
+    from media_library import legacy_media
+    return legacy_media(source, ident)
+
+
 def resolve(value, check_file=True):
     source, ident, key = parse_selection(value)
+    media_row = library_media(value)
+    if media_row is not None:
+        from media_library import media_path
+        return media_row, media_path(media_row) if check_file else None, []
     if tasks.get_db().execute('SELECT 1 FROM canvas_catalog_hidden WHERE item_key=?',(key,)).fetchone():
         raise store.CanvasError('素材已移出素材库',404)
     if source == 'local':
@@ -153,6 +169,12 @@ def transfer(target, data, library=False):
         for selection in items:
             source, ident, key = parse_selection(selection)
             if key in mapping:
+                continue
+            media_row = library_media(selection)
+            if media_row is not None:
+                # Already in the global library: reference the media item, never a new copy (S9).
+                from canvas_media_refs import node_asset
+                mapping[key] = node_asset(media_row)
                 continue
             row, path, _ = resolve(selection)
             try:
@@ -233,7 +255,10 @@ def register_routes(bp, body):
         if selection['source']=='cupsy':
             raise store.CanvasError('Cupsy素材请通过原远端素材管理入口删除',409)
         if selection['source']=='task':
-            raise store.CanvasError('生成产物请通过任务回收站移除，操作会影响整个任务',409)
+            # LIBRARY-GLOBAL S3: a result in 生成历史 is a library item and can be deleted there.
+            from media_library import resolve
+            if not resolve(key):
+                raise store.CanvasError('生成产物请通过任务回收站移除，操作会影响整个任务',409)
         # 2026-11-13: deleting from 本地素材 (local/library/workflow) is permanent, same path as bulk delete.
         local_delete.require_same_origin(request, json_body=False)
         result = local_delete.delete_items([key])
@@ -241,42 +266,12 @@ def register_routes(bp, body):
             raise store.CanvasError('素材不存在',404)
         return jsonify(result)
 
-    @bp.route('/api/canvas/library/tags',methods=['GET','POST'])
-    def tags():
-        if request.method=='GET':
-            return jsonify(success=True,tags=[dict(r) for r in tasks.get_db().execute('SELECT * FROM canvas_catalog_tags ORDER BY title,id')])
-        title = store.title_value(body().get('title'))
-        ident = uuid.uuid4().hex
-        with store.write_transaction() as db:
-            if db.execute('SELECT 1 FROM canvas_catalog_tags WHERE title=?',(title,)).fetchone():
-                raise store.CanvasError('标签名称已存在',409)
-            db.execute('INSERT INTO canvas_catalog_tags VALUES (?,?)',(ident,title))
-        return jsonify(success=True,tag={'id':ident,'title':title}),201
+    # LIBRARY-GLOBAL-20261116 (user decision 2026-11-16): the library has no tags any more,
+    # only (sub)folders; tag data is removed by the migration. The old endpoints are retired.
+    def tags_retired(*_args, **_kwargs):
+        return jsonify(success=False, code='tags_removed',
+                       error='素材标签功能已停用：本地素材库改为只用文件夹管理，请用“移动到文件夹”整理素材'), 410
 
-    @bp.route('/api/canvas/library/tags/<tag_id>',methods=['PATCH','DELETE'])
-    def tag_detail(tag_id):
-        with store.write_transaction() as db:
-            if not db.execute('SELECT 1 FROM canvas_catalog_tags WHERE id=?',(tag_id,)).fetchone():
-                raise store.CanvasError('标签不存在',404)
-            if request.method=='DELETE':
-                db.execute('DELETE FROM canvas_catalog_tags WHERE id=?',(tag_id,))
-                return jsonify(success=True)
-            title = store.title_value(body().get('title'))
-            if db.execute('SELECT 1 FROM canvas_catalog_tags WHERE title=? AND id!=?',(title,tag_id)).fetchone():
-                raise store.CanvasError('标签名称已存在',409)
-            db.execute('UPDATE canvas_catalog_tags SET title=? WHERE id=?',(title,tag_id))
-        return jsonify(success=True,tag={'id':tag_id,'title':title})
-
-    @bp.patch('/api/canvas/library/items/<key>/tags')
-    def assign_tags(key):
-        ids = body().get('tag_ids')
-        if not isinstance(ids,list) or len(ids)>100 or any(not isinstance(i,str) for i in ids):
-            raise store.CanvasError('标签编号须为最多100项的数组')
-        with store.write_transaction() as db:
-            resolve(selection_from_key(key))
-            for ident in ids:
-                if not db.execute('SELECT 1 FROM canvas_catalog_tags WHERE id=?',(ident,)).fetchone():
-                    raise store.CanvasError('标签不存在',404)
-            db.execute('DELETE FROM canvas_catalog_item_tags WHERE item_key=?',(key,))
-            db.executemany('INSERT INTO canvas_catalog_item_tags VALUES (?,?)',[(key,i) for i in dict.fromkeys(ids)])
-        return jsonify(success=True,tags=tags_for(key))
+    bp.add_url_rule('/api/canvas/library/tags', 'library_tags_retired', tags_retired, methods=['GET','POST'])
+    bp.add_url_rule('/api/canvas/library/tags/<tag_id>', 'library_tag_detail_retired', tags_retired, methods=['PATCH','DELETE'])
+    bp.add_url_rule('/api/canvas/library/items/<key>/tags', 'library_item_tags_retired', tags_retired, methods=['PATCH'])

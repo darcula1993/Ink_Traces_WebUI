@@ -50,6 +50,8 @@ raw_items AS (
  CASE WHEN source='library' AND origins='[]' THEN 1 ELSE 0 END AS origin_unknown,
  CASE WHEN source='task' THEN catalog_result_name(path,task_id,(SELECT params FROM tasks WHERE id=r.task_id)) ELSE name END AS display_name
  FROM raw_items r WHERE NOT EXISTS (SELECT 1 FROM canvas_catalog_hidden h WHERE h.item_key=r.key)
+ AND NOT EXISTS (SELECT 1 FROM media_aliases m WHERE m.scope=r.source AND m.old_id=r.id)
+ AND NOT (r.source='task' AND EXISTS (SELECT 1 FROM task_assets ta WHERE ta.id=cast(r.id AS INTEGER) AND ta.media_id IS NOT NULL))
 ), filtered AS (SELECT * FROM items WHERE
  (:scope='all' OR EXISTS (SELECT 1 FROM json_each(project_ids) j WHERE j.value=:project_id))
  AND (:folder_filter=0 OR (source!='task' AND folder_id IS :folder_id))

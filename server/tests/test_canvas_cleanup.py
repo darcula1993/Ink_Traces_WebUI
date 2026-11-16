@@ -267,8 +267,13 @@ def test_imported_task_relation_survives_unsaved_node_document():
     response=app.app.test_client().post('/api/canvas/workflows/'+workflow['id']+'/task-results',json={'task_id':tid})
     assert response.status_code==200
     assert tasks.get_db().execute('SELECT task_id FROM canvas_workflow_tasks WHERE workflow_id=?',(workflow['id'],)).fetchone()['task_id']==tid
-    cleanup.delete_scope('workflow',workflow['id'],True)
-    assert not path.exists()
+    # LIBRARY-GLOBAL: the imported result is a library item; canvas cleanup keeps it (and its output).
+    import media_library
+    [media_id]=[a['media_id'] for a in tasks.list_assets(tid) if a['kind']=='output_image']
+    assert media_id and response.json['assets'][0]['id']==media_id
+    result=cleanup.delete_scope('workflow',workflow['id'],True)
+    assert result['retained_library']>=1 and path.exists()
+    assert media_library.status(media_id)[0]=='ok' and media_library.media_path(media_library.get_media(media_id)).is_file()
 
 
 def test_partial_output_cleanup_never_restores_damaged_task(monkeypatch):

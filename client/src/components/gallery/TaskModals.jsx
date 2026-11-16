@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { AnimatePresence, motion, useDragControls } from 'framer-motion'
-import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, FolderInput, Heart, Image as ImageIcon, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, FolderInput, FolderSearch, Heart, Image as ImageIcon, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import IconButton from '../ui/IconButton'
 import useModalFocus, { isTopModal } from '../ui/useModalFocus'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, providerLabel, downloadExtension, uniqueDownloadName, taskDownloadUrl } from './taskModel.js'
@@ -29,6 +29,9 @@ export function DetailMedia({ item, outputIndex, setOutputIndex }) {
       <div className="flex min-h-0 flex-1 items-center justify-center p-5">
         <img src={item.images[outputIndex] || item.images[0]} className="max-h-full max-w-full object-contain" alt="任务输出" />
       </div>
+      {item.deletedCount > 0 && (
+        <p className="shrink-0 px-4 pb-2 text-center text-xs text-nexus-muted" data-testid="task-partial-deleted">另有 {item.deletedCount} 个结果已从素材库删除</p>
+      )}
       {item.images.length > 1 && (
         <div className="flex h-20 shrink-0 justify-center gap-2 border-t border-white/8 p-2">
           {item.images.map((url, index) => (
@@ -211,7 +214,8 @@ export function TaskDetailModal({
   onRetry,
   onRestore,
   onSetGroup,
-  onAddLocal,
+  onReveal,
+  onMove,
   favoriteGroups,
   trash,
 }) {
@@ -460,9 +464,13 @@ export function TaskDetailModal({
             ) : download ? (
               <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="btn btn-icon"><Download size={17} /></a>
             ) : null}
-            {item.taskId && item.status === 'succeeded' && !trash && onAddLocal && (
-              <IconButton label={item.images?.length > 1 ? `全部 ${item.images.length} 个结果加入本地素材` : '结果加入本地素材'} onClick={() => onAddLocal(item)}><FolderInput size={17} /></IconButton>
+            {item.libraryMedia?.length > 0 && onReveal && (
+              <IconButton label="在素材库中显示" onClick={() => onReveal(item)}><FolderSearch size={17} /></IconButton>
             )}
+            {item.libraryMedia?.length > 0 && onMove && (
+              <IconButton label={item.libraryMedia.length > 1 ? `全部 ${item.libraryMedia.length} 个结果移动到文件夹` : '结果移动到文件夹'} onClick={() => onMove(item)}><FolderInput size={17} /></IconButton>
+            )}
+            {item.resultDeleted && <span className="px-1 text-xs text-nexus-muted" data-testid="task-detail-result-deleted">结果已删除</span>}
             {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (
               <IconButton label="取消任务" onClick={() => onCancel(item)} className="hover:text-nexus-amber"><Ban size={17} /></IconButton>

@@ -106,6 +106,11 @@ def _metadata(path, mtime_ns, ctime_ns, size):
                 'has_alpha':bool(storage.image_has_alpha(picture))}
 
 
+def task_db_has_canvas_asset(workflow_id, asset_id):
+    import tasks
+    return tasks.get_db().execute('SELECT 1 FROM canvas_assets WHERE workflow_id=? AND id=?', (workflow_id, asset_id)).fetchone() is not None
+
+
 def register_routes(bp):
     from flask import jsonify
     @bp.get('/api/canvas/image-capabilities')
@@ -114,9 +119,17 @@ def register_routes(bp):
 
     @bp.get('/api/canvas/workflows/<workflow_id>/assets/<asset_id>/metadata')
     def asset_metadata(workflow_id,asset_id):
-        row=store.get_asset(workflow_id,asset_id)
+        # LIBRARY-GLOBAL S1b: also global media ids (and old ids via aliases) for the Alpha check.
+        store.workflow(workflow_id)
+        if task_db_has_canvas_asset(workflow_id,asset_id):
+            row=store.get_asset(workflow_id,asset_id); path=None
+        else:
+            import media_library
+            media_id=media_library.resolve(asset_id)
+            if media_id is None: raise store.CanvasError('素材不存在',404)
+            row=media_library.get_media(media_id); path=media_library.media_path(row)
         if row['kind']!='image': raise store.CanvasError('只能读取图像素材元数据')
-        path=store.asset_path(row)
+        path=path or store.asset_path(row)
         try:
             stat=path.stat()
             data=_metadata(str(path),stat.st_mtime_ns,stat.st_ctime_ns,stat.st_size)

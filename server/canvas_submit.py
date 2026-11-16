@@ -603,14 +603,17 @@ def build_request(workflow, node_id, capabilities, *, read_metadata=None, resolv
     else:
         _invalid('该节点不支持生成')
 
-    prefix = f'/api/canvas/workflows/{workflow_id}/assets/'
+    # LIBRARY-GLOBAL-20261116 S2: references come from the global library (/api/canvas/media/<id>);
+    # legacy canvas copies of this canvas stay accepted until migrated.
+    from canvas_media_refs import ReferenceDeleted, is_reference_url
     handles = []
     for asset in assets:
-        url = asset.get('url')
-        if not isinstance(url, str) or not url.startswith(prefix) or asset.get('kind') not in ('image', 'video', 'audio'):
+        if not is_reference_url(workflow_id, asset.get('url')) or asset.get('kind') not in ('image', 'video', 'audio'):
             _invalid('参考素材必须先保存到当前画布')
         try:
             handle = resolve_file(asset) if resolve_file else None
+        except ReferenceDeleted:
+            _invalid(f"参考素材“{_or(asset.get('name'), asset.get('id'))}”已从素材库删除，尚未提交生成")
         except Exception:
             _invalid(f"无法读取参考素材“{_or(asset.get('name'), asset.get('id'))}”，尚未提交生成")
         handles.append((asset, handle))
@@ -630,14 +633,6 @@ def build_request(workflow, node_id, capabilities, *, read_metadata=None, resolv
     return {'path': ROUTES[node_type], 'fields': fields, 'files': files, 'multipart': bool(handles)}
 
 
-def _asset_id_from_url(workflow_id, asset):
-    rest = asset['url'][len(f'/api/canvas/workflows/{workflow_id}/assets/'):]
-    from canvas_store import ID
-    if not ID.fullmatch(rest):
-        raise ValueError('asset url')
-    return rest
-
-
 def assemble(workflow_id, node_id, capabilities):
     """build_request against the saved workflow and canvas files on disk (still no submission).
 
@@ -645,22 +640,21 @@ def assemble(workflow_id, node_id, capabilities):
     and stream it when submitting. Raises CanvasSubmitError (browser message) or
     canvas_store.CanvasError (workflow missing, 404) like the browser's workflow fetch.
     """
+    import canvas_media_refs
     import canvas_store as store
     from canvas_image_params import _metadata
 
     saved = store.workflow(workflow_id)
 
     def resolve_file(asset):
-        row = store.get_asset(workflow_id, _asset_id_from_url(workflow_id, asset), allow_archived=True)
-        return store.asset_path(row)
+        return canvas_media_refs.reference_of(workflow_id, asset)[0]
 
     def read_metadata(asset):
-        row = store.get_asset(workflow_id, asset.get('id'))
-        if row['kind'] != 'image':
+        path, mime_type, kind = canvas_media_refs.reference_of(workflow_id, asset)
+        if kind != 'image':
             raise ValueError('not an image')
-        path = store.asset_path(row)
         stat = path.stat()
-        return {**_metadata(str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size), 'mime_type': row['mime_type']}
+        return {**_metadata(str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size), 'mime_type': mime_type}
 
     return build_request({'id': workflow_id, 'revision': saved['revision'], 'document': saved['document']}, node_id,
                          capabilities, read_metadata=read_metadata, resolve_file=resolve_file)

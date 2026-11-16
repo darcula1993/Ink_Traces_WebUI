@@ -11,7 +11,8 @@ export const createCharacter=async({name,description=''})=>one(await data(axios.
 export const updateCharacter=async(id,patch)=>{const body={...patch};if('description' in body){body[DESCRIPTION_FIELD]=body.description;if(DESCRIPTION_FIELD!=='description')delete body.description}return one(await data(axios.patch(`${base}/${id}`,body)))}
 export const deleteCharacter=id=>data(axios.delete(`${base}/${id}`))
 export async function uploadCharacterImage(id,file){const body=new FormData();body.append('file',file);return data(axios.post(`${base}/${id}/images`,body))}
-// asset_ref is the library catalog selection {source,id} (local/library/workflow/task/cupsy).
+// asset_ref is the library selection {source,id}: {source:'media',id:<media id>} references the global
+// library item directly (S6c); legacy local/library/workflow/task keys resolve through aliases, cupsy is copied in.
 export const addLibraryImage=(id,selection)=>data(axios.post(`${base}/${id}/images`,{source:'library',asset_ref:selection}))
 export const addCanvasImage=(id,workflowId,assetId)=>data(axios.post(`${base}/${id}/images`,{source:'canvas',workflow_id:workflowId,asset_id:assetId}))
 export const deleteCharacterImage=(id,assetId)=>data(axios.delete(`${base}/${id}/images/${encodeURIComponent(assetId)}`))

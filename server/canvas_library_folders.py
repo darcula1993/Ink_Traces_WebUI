@@ -5,7 +5,6 @@ import canvas_store as store
 import tasks
 
 ICONS = {'folder', 'music', 'character', 'scene', 'prop', 'style'}
-DEFAULT_FOLDERS = (('音效', 'music'), ('角色', 'character'), ('场景', 'scene'), ('物品', 'prop'), ('风格', 'style'))
 
 
 def init_folder_db():
@@ -36,19 +35,19 @@ def init_folder_db():
 
 
 def ensure_default_folders(project_id):
-    """Seed once per project; user renames/deletes/moves never recreate defaults."""
+    """Only marks the project as initialized; project folders are no longer created.
+
+    LIBRARY-GLOBAL-20261116 S6b: the global media library replaces project folders (its own
+    default folders are seeded once in media_schema). New projects and not yet marked legacy
+    projects get the marker only, so the startup backfill never adds folders; existing folders
+    of old projects are left untouched.
+    """
     from canvas_cleanup import is_deleted
     with store.write_transaction() as db:
         if is_deleted('project', project_id):
             return
         store.get_project(project_id)
-        if db.execute('SELECT 1 FROM canvas_library_folder_defaults WHERE project_id=?', (project_id,)).fetchone():
-            return
-        for title, icon in DEFAULT_FOLDERS:
-            existing = db.execute('SELECT 1 FROM canvas_library_folders WHERE project_id=? AND parent_id IS NULL AND title=? LIMIT 1', (project_id, title)).fetchone()
-            if not existing:
-                save_folder(project_id, {'title': title, 'icon': icon})
-        db.execute('INSERT INTO canvas_library_folder_defaults VALUES (?,?)', (project_id, tasks.utcnow()))
+        db.execute('INSERT OR IGNORE INTO canvas_library_folder_defaults VALUES (?,?)', (project_id, tasks.utcnow()))
 
 
 def initialize_existing_defaults():

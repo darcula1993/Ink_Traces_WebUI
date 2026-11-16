@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from contextvars import ContextVar
+import copy
 
 import hashlib
 import json
@@ -233,6 +234,120 @@ def _validate_character_refs(node):
             raise CanvasError('角色引用素材须为最多9个不重复的素材编号')
 
 
+# LIBRARY-GLOBAL-20261116 S1b: documents reference global media (/api/canvas/media/<id>).
+MEDIA_URL = '/api/canvas/media/'
+# S2 switch: write-back references media ids instead of copying (canvas_media_refs.media_references_enabled).
+MEDIA_REFERENCES = True
+MEDIA_FIELDS = {'id', 'url', 'name', 'mime_type', 'kind', 'size_bytes'}
+
+
+def _asset_objects(node):
+    if isinstance(node.get('asset'), dict):
+        yield node['asset']
+    for key in ('candidates', 'referenceAssets'):
+        value = node.get(key)
+        if isinstance(value, list):
+            yield from (item for item in value if isinstance(item, dict))
+
+
+def _media_rows(db, ids):
+    """(live media rows, tombstones) for these ids."""
+    ids = [i for i in ids if isinstance(i, str) and HEX32.fullmatch(i)]
+    live, dead = {}, {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        marks = ','.join('?' * len(chunk))
+        live.update({r['id']: dict(r) for r in db.execute(f'SELECT * FROM media WHERE id IN ({marks})', chunk)})
+        dead.update({r['id']: dict(r) for r in db.execute(f'SELECT * FROM media_tombstones WHERE id IN ({marks})', chunk)})
+    return live, {k: v for k, v in dead.items() if k not in live}
+
+
+def media_reference(row):
+    """Document snapshot of a media row (or a tombstone: no size)."""
+    result = {'id': row['id'], 'name': row['name'], 'mime_type': row['mime_type'], 'kind': row['kind'], 'url': MEDIA_URL + row['id']}
+    if 'size_bytes' in row:
+        result['size_bytes'] = row['size_bytes']
+    return result
+
+
+def _normalize_media_refs(document, db):
+    """Server-side normalization on save (方案 v2 §3.8): map old canvas asset ids through
+    ``media_aliases`` (scope workflow) to media ids, refresh their snapshots, and strip
+    references to deleted media (outputs/candidates keep them as placeholders).
+
+    Mutates ``document``; returns True when anything changed. Malformed documents are left
+    for validation to reject.
+    """
+    nodes = document.get('nodes')
+    if not isinstance(nodes, list) or not all(isinstance(n, dict) for n in nodes):
+        return False
+    from media_migrate import document_ids
+    try:
+        ids = sorted(i for i in document_ids(document) if HEX32.fullmatch(i))
+    except (TypeError, AttributeError):
+        return False
+    if not ids:
+        return False
+    alias = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        alias.update({r[0]: r[1] for r in db.execute(
+            f"SELECT old_id, media_id FROM media_aliases WHERE scope='workflow' AND old_id IN ({','.join('?' * len(chunk))})", chunk)})
+    live, dead = _media_rows(db, set(ids) | set(alias.values()))
+    if not alias and not dead:
+        return False
+    rows = {**dead, **live}
+    original = json.dumps(nodes, sort_keys=True, ensure_ascii=False)
+    nodes = copy.deepcopy(nodes)  # committed to the document only when fully normalized
+    mapped = lambda i: alias.get(i, i) if isinstance(i, str) else i  # noqa: E731
+
+    def snapshot(asset):
+        if not isinstance(asset, dict) or asset.get('id') not in alias:
+            return asset
+        row = rows.get(alias[asset['id']])
+        return media_reference(row) if row else asset
+
+    def unique(items):
+        seen, result = set(), []
+        for item in items:
+            key = item.get('id') if isinstance(item, dict) else item
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+        return result
+
+    try:
+        for node in nodes:
+            if isinstance(node.get('asset'), dict):
+                node['asset'] = snapshot(node['asset'])
+            for key in ('candidates', 'referenceAssets'):
+                if isinstance(node.get(key), list):
+                    node[key] = unique([snapshot(a) for a in node[key]])
+            if 'selectedCandidateId' in node:
+                node['selectedCandidateId'] = mapped(node['selectedCandidateId'])
+            if isinstance(node.get('referenceOrder'), list):
+                node['referenceOrder'] = unique([mapped(i) for i in node['referenceOrder']])
+            if isinstance(node.get('referenceMentions'), dict):
+                node['referenceMentions'] = {k: mapped(v) for k, v in node['referenceMentions'].items()}
+            if isinstance(node.get('referenceGroups'), list):
+                node['referenceGroups'] = [{**g, 'asset_ids': unique([mapped(i) for i in g['asset_ids']])}
+                                           if isinstance(g, dict) and isinstance(g.get('asset_ids'), list) else g
+                                           for g in node['referenceGroups']]
+            if isinstance(node.get('characterRefs'), dict):
+                node['characterRefs'] = {k: {**v, 'assetIds': unique([mapped(i) for i in v['assetIds']])}
+                                         if isinstance(v, dict) and isinstance(v.get('assetIds'), list) else v
+                                         for k, v in node['characterRefs'].items()}
+        if dead:
+            from media_library import strip_document
+            nodes = strip_document({'nodes': nodes}, set(dead))[0]['nodes']
+    except (TypeError, AttributeError):
+        return False
+    if json.dumps(nodes, sort_keys=True, ensure_ascii=False) == original:
+        return False
+    document['nodes'] = nodes
+    return True
+
+
 def validate_document(document, workflow_id):
     if not isinstance(document, dict) or type(document.get('version')) is not int or document['version'] != 1:
         raise CanvasError('不支持的画布文档版本')
@@ -250,16 +365,39 @@ def validate_document(document, workflow_id):
         raise CanvasError('无效画布视口')
     if set(document) - {'version', 'nodes', 'edges', 'viewport', 'groups'}:
         raise CanvasError('未知画布文档字段')
-    registered = {row['id']: asset_public(dict(row)) for row in task_db.get_db().execute(
+    db = task_db.get_db()
+    registered = {row['id']: asset_public(dict(row)) for row in db.execute(
         'SELECT * FROM canvas_assets WHERE workflow_id=?', (workflow_id,))}
+    normalized = _normalize_media_refs(document, db)
+    nodes = document['nodes'] if normalized else nodes
+    live, dead = _media_rows(db, {a.get('id') for node in nodes if isinstance(node, dict)
+                                  for a in _asset_objects(node) if isinstance(a.get('id'), str)})
 
-    def validate_asset(asset):
+    def validate_asset(asset, placeholder=False):
+        """Canvas asset of this workflow (old model) or global media; a deleted media id is
+        accepted only as a node output/candidate placeholder (LIBRARY-GLOBAL S1b)."""
         if not isinstance(asset, dict) or not isinstance(asset.get('id'), str):
             raise CanvasError('素材引用无效')
         expected = registered.get(asset['id'])
-        if expected is None or any(asset.get(key) != expected[key] for key in ('url', 'name', 'mime_type', 'kind')):
-            raise CanvasError('素材必须引用本画布的持久素材')
-        if set(asset) - set(expected) or ('size_bytes' in asset and asset['size_bytes'] != expected['size_bytes']):
+        if expected is not None and not (asset.get('url') == MEDIA_URL + asset['id'] and (asset['id'] in live or asset['id'] in dead)):
+            if any(asset.get(key) != expected[key] for key in ('url', 'name', 'mime_type', 'kind')):
+                raise CanvasError('素材必须引用本画布的持久素材')
+            if set(asset) - set(expected) or ('size_bytes' in asset and asset['size_bytes'] != expected['size_bytes']):
+                raise CanvasError('素材引用字段无效')
+            return
+        row = live.get(asset['id'])
+        if row is None and asset['id'] in dead:
+            if not placeholder:
+                raise CanvasError('参考素材已删除，请移除后再保存')
+            row = dead[asset['id']]
+        if row is None:
+            raise CanvasError('素材必须引用本画布的持久素材或素材库素材')
+        name = asset.get('name')
+        if asset.get('url') != MEDIA_URL + asset['id'] or asset.get('kind') != row['kind'] or asset.get('mime_type') != row['mime_type'] \
+                or not isinstance(name, str) or not 1 <= len(name) <= 240:
+            raise CanvasError('素材引用与素材库不一致')
+        if set(asset) - MEDIA_FIELDS or ('size_bytes' in asset and (type(asset['size_bytes']) is not int or
+                                                                   (asset['id'] in live and asset['size_bytes'] != row['size_bytes']))):
             raise CanvasError('素材引用字段无效')
 
     seen = set()
@@ -332,14 +470,14 @@ def validate_document(document, workflow_id):
             elif value is not None and (not isinstance(value, str) or len(value) > 240):
                 raise CanvasError('节点参数无效')
         if node.get('asset') is not None:
-            validate_asset(node['asset'])
+            validate_asset(node['asset'], placeholder=True)
             if node['type'] not in ('text', 'asset') and node['asset']['kind'] != node['type']:
                 raise CanvasError('节点输出素材类型不匹配')
         candidates = node.get('candidates', [])
         if not isinstance(candidates, list) or len(candidates) > 100:
             raise CanvasError('候选素材最多100个')
         for candidate in candidates:
-            validate_asset(candidate)
+            validate_asset(candidate, placeholder=True)
             if node['type'] not in ('text', 'asset') and candidate['kind'] != node['type']:
                 raise CanvasError('候选素材类型与节点不匹配')
         references = node.get('referenceAssets', [])
@@ -446,7 +584,7 @@ def validate_document(document, workflow_id):
                 queue.append(target)
     if visited != len(nodes):
         raise CanvasError('节点连接不能形成循环')
-    return json.dumps(document, ensure_ascii=False, allow_nan=False) if legacy_dropped else encoded
+    return json.dumps(document, ensure_ascii=False, allow_nan=False) if legacy_dropped or normalized else encoded
 
 
 def create_workflow(project_id, title, document=None):

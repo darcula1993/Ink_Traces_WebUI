@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0 - 2026-11-17
+
+Breaking: the asset library model changes and existing data is migrated (see "Upgrading").
+
+- **One global library**: every project shares a single library. Uploads and all generation results are managed there and organised only by sub-folders. The per-project library, the "this project / all projects" switch and tags are removed (existing tags are deleted).
+- **Generation results live in the library**: every successful result is added automatically to the fixed "生成历史" folder, split into 图片 / 视频 / 音频 (hard links, no extra disk space). These system folders cannot be renamed, moved or deleted; results inside them can be moved or deleted. Default folders 音效 / 角色 / 场景 / 物品 / 风格 are created once. "Add to local assets" is replaced by "Show in library" and "Move to folder".
+- **Canvases reference the library directly**: nodes store library ids instead of per-canvas copies. Pasted, captured-frame, edited and directly uploaded files go into the library. Deleting a library item shows a "deleted" placeholder on nodes that used it, removes it from references, and the task card shows "result deleted"; deleting tasks, emptying the trash, cleanup or deleting a project/canvas never deletes library files.
+- **Library tools**: folder tree with sub-folders, move/rename, upload to a chosen folder (or create one on the spot), global asset groups, server-side select-all, delete preview listing affected canvases, a notice with "locate" / "move here" when an upload already exists in the library.
+- Character cards reference library images; legacy tool uploads (and BMP/TIFF converted to PNG) are registered in the library.
+- Fixes: the API no longer fails to boot when the API and Worker add a new column at the same time; ledger wording; sidebar refresh after generation; several focus and layout fixes.
+
+### Upgrading from 1.x
+Stop the API and Worker, then run `python3 scripts/migrate-library-global.py --db tasks.db --make-backup <dir>`, review the dry run, apply with `--apply --backup-dir <dir>` and check with `--verify`. Copies held only by already-deleted canvases/projects are removed. Keep the backup until you have checked the new library; `--new-since` exports anything added after the migration if you need to roll back.
+
 ## 1.9.2 - 2026-11-16
 
 - Add generation results to local assets: from the generation history (single or multi-select), a canvas node's right-click menu or its version list (current or all versions), and task cards, batch selection or task details. The result is kept as an independent copy (a hard link on the same disk, so no extra space) with no project ownership, like uploads; deleting the task, emptying the trash or cleaning a project keeps it, and deleting it keeps the task output and canvas. Adding the same result again does not create a second copy, and identical files share one local asset. Tags already on the result are carried over; the add dialog lets you pick tags and create a new tag on the spot. Tagging directly in the generation history is replaced by this flow.

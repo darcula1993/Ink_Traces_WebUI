@@ -1,4 +1,4 @@
-import { AlertTriangle, AudioLines, CircleHelp, Film, Image as ImageIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, CircleHelp, Film, Image as ImageIcon, Trash2 } from 'lucide-react'
 import CodeRainCanvas from '../CodeRainCanvas'
 import { ACTIVE_STATUSES, STATUS } from './taskModel.js'
 
@@ -16,6 +16,17 @@ export function AudioArtwork({ compact = false }) {
       <div className="audio-task-waveform" aria-hidden="true">
         {Array.from({ length: bars }, (_, index) => <span key={index} style={{ '--wave-index': index }} />)}
       </div>
+    </div>
+  )
+}
+
+// LIBRARY-GLOBAL-20261116 S4b: the result was deleted from the media library; the task record stays.
+export function DeletedResult({ compact = true, label = '结果已删除' }) {
+  return (
+    <div className="task-result-deleted absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center text-nexus-muted" data-testid="task-result-deleted" role="img" aria-label={label}>
+      <Trash2 size={compact ? 22 : 30} strokeWidth={1.4} aria-hidden="true" />
+      <span className="text-xs">{label}</span>
+      {!compact && <span className="max-w-64 text-xs leading-5">已从素材库删除；任务记录（提示词、参数与时间）仍可查看。</span>}
     </div>
   )
 }
@@ -38,6 +49,7 @@ export function TaskPreview({ item, compact = true }) {
     )
   }
 
+  if (item.resultDeleted) return <DeletedResult compact={compact} />
   if (item.type === 'video' && (item.thumbnail || item.poster || item.video)) {
     return item.thumbnail || item.poster
       ? <img src={item.thumbnail || item.poster} loading="lazy" decoding="async" className="absolute inset-0 size-full object-contain" alt="视频任务预览" />

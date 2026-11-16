@@ -1,3 +1,5 @@
+"""LIBRARY-GLOBAL-20261116 S6b: new projects no longer get project folders (the global media
+library seeds its own defaults once); existing project folders are never touched."""
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import uuid
@@ -21,56 +23,49 @@ def marker(pid):
     return tasks.get_db().execute('SELECT * FROM canvas_library_folder_defaults WHERE project_id=?', (pid,)).fetchone()
 
 
-def test_new_project_api_has_five_defaults_and_persistent_marker():
+def test_new_project_api_creates_no_project_folders_and_stays_empty_after_restart():
     client = application.app.test_client()
-    response = client.post('/api/canvas/projects', json={'title':'new'})
+    response = client.post('/api/canvas/projects', json={'title': 'new'})
     assert response.status_code == 201
     pid = response.json['project']['id']
-    result = client.get(f'/api/canvas/projects/{pid}/folders').json['folders']
-    assert [(f['title'],f['icon']) for f in result] == list(folders.DEFAULT_FOLDERS)
-    assert all(f['parent_id'] is None for f in result)
+    assert client.get(f'/api/canvas/projects/{pid}/folders').json['folders'] == []
     assert marker(pid)
-    store.init_canvas_db()
-    assert folders.list_folders(pid) == result
+    store.init_canvas_db()  # startup backfill must not seed the new project either
+    assert folders.list_folders(pid) == []
+    # Global media library defaults are unaffected (seeded once by media_schema).
+    titles = {f['title'] for f in client.get('/api/canvas/media/folders').json['folders'] if f['parent_id'] is None}
+    assert {'音效', '角色', '场景', '物品', '风格'} <= titles
+    # Users may still create folders in old project libraries until S3/S4 retire them.
+    assert client.post(f'/api/canvas/projects/{pid}/folders', json={'title': 'mine'}).status_code == 201
 
 
-def test_existing_project_only_fills_missing_roots_preserves_metadata():
+def test_existing_project_folders_and_placements_are_untouched():
     pid = legacy_project()
-    root = folders.save_folder(pid, {'title':'角色','icon':'style'})
-    # Existing duplicates and nested names are user-owned and never rewritten.
-    duplicate = folders.save_folder(pid, {'title':'角色','icon':'prop'})
-    nested = folders.save_folder(pid, {'title':'音效','parent_id':root['id'],'icon':'scene'})
-    parent = folders.save_folder(pid, {'title':'custom'})
+    root = folders.save_folder(pid, {'title': '角色', 'icon': 'style'})
+    duplicate = folders.save_folder(pid, {'title': '角色', 'icon': 'prop'})
+    nested = folders.save_folder(pid, {'title': '音效', 'parent_id': root['id'], 'icon': 'scene'})
     from test_canvas_library_folders import image_bytes
     asset = store.save_asset(pid, io.BytesIO(image_bytes('red')), 'existing.png', library=True)
-    folders.edit_asset(pid, asset['id'], {'folder_id':nested['id']})
+    folders.edit_asset(pid, asset['id'], {'folder_id': nested['id']})
     asset_before = store.get_asset(pid, asset['id'], library=True)
     before = folders.list_folders(pid)
+    assert {f['id'] for f in before} == {root['id'], duplicate['id'], nested['id']}
     store.init_canvas_db()
     assert store.get_asset(pid, asset['id'], library=True) == asset_before
     assert folders.placements(pid)[asset['id']] == nested['id']
     assert store.asset_path(asset_before).read_bytes() == image_bytes('red')
-    result = folders.list_folders(pid)
-    assert all(folders.folder(pid, item['id']) == item for item in before)
-    assert len(result) == len(before) + 4
-    assert sum(f['title']=='音效' and f['parent_id'] is None for f in result) == 1
-    assert {f['title'] for f in result if f['parent_id'] is None} >= {t for t,_ in folders.DEFAULT_FOLDERS}
-    assert marker(pid)
-    store.init_canvas_db()
-    assert folders.list_folders(pid) == result
-
-
-def test_deleted_renamed_and_moved_defaults_are_never_recreated():
-    pid = store.create_project('new')['id']
-    rows = folders.list_folders(pid)
-    folders.delete_folder(pid, rows[0]['id'])
-    folders.save_folder(pid, {'title':'my people'}, rows[1]['id'])
-    folders.save_folder(pid, {'parent_id':rows[1]['id']}, rows[2]['id'])
-    before = folders.list_folders(pid)
-    store.init_canvas_db()
-    folders.ensure_default_folders(pid)
     assert folders.list_folders(pid) == before
     assert marker(pid)
+
+
+def test_seeded_old_project_keeps_its_folders():
+    pid = legacy_project()
+    with tasks.get_db() as db:
+        db.execute('INSERT INTO canvas_library_folder_defaults VALUES (?,?)', (pid, tasks.utcnow()))
+    made = folders.save_folder(pid, {'title': '场景', 'icon': 'scene'})
+    store.init_canvas_db()
+    folders.ensure_default_folders(pid)
+    assert [f['id'] for f in folders.list_folders(pid)] == [made['id']]
 
 
 def test_archived_old_project_is_not_initialized():
@@ -82,32 +77,9 @@ def test_archived_old_project_is_not_initialized():
     assert tasks.get_db().execute('SELECT 1 FROM canvas_library_folders WHERE project_id=?', (pid,)).fetchone() is None
 
 
-@pytest.mark.parametrize('new_project', [False, True])
-def test_seed_failure_rolls_back_and_can_retry(monkeypatch, new_project):
-    pid = None if new_project else legacy_project()
-    original = folders.save_folder
-    calls = []
-    def fail_second(*args, **kwargs):
-        calls.append(1)
-        if len(calls) == 2:
-            raise RuntimeError('synthetic seed failure')
-        return original(*args, **kwargs)
-    monkeypatch.setattr(folders, 'save_folder', fail_second)
-    with pytest.raises(RuntimeError):
-        store.create_project('new') if new_project else folders.ensure_default_folders(pid)
-    assert tasks.get_db().execute('SELECT count(*) FROM canvas_library_folders').fetchone()[0] == 0
-    assert tasks.get_db().execute('SELECT count(*) FROM canvas_library_folder_defaults').fetchone()[0] == 0
-    assert tasks.get_db().execute('SELECT count(*) FROM canvas_projects').fetchone()[0] == (0 if new_project else 1)
-    monkeypatch.setattr(folders, 'save_folder', original)
-    if new_project:
-        pid = store.create_project('retry')['id']
-    else:
-        folders.ensure_default_folders(pid)
-    assert len(folders.list_folders(pid)) == 5 and marker(pid)
-
-
-def test_concurrent_seed_is_once():
+def test_concurrent_marking_is_once_and_creates_nothing():
     pid, barrier = legacy_project(), Barrier(2)
+
     def run():
         try:
             barrier.wait(timeout=3)
@@ -118,15 +90,15 @@ def test_concurrent_seed_is_once():
         futures = [executor.submit(run) for _ in range(2)]
         for future in futures:
             future.result(timeout=5)
-    assert len(folders.list_folders(pid)) == 5
+    assert folders.list_folders(pid) == []
     assert marker(pid)
 
 
-def test_new_project_seed_obeys_outer_transaction():
+def test_new_project_marker_obeys_outer_transaction():
     with pytest.raises(RuntimeError):
         with store.write_transaction():
             pid = store.create_project('rollback')['id']
-            assert marker(pid) and len(folders.list_folders(pid)) == 5
+            assert marker(pid) and folders.list_folders(pid) == []
             raise RuntimeError('caller rollback')
-    for table in ('canvas_projects','canvas_library_folders','canvas_library_folder_icons','canvas_library_folder_defaults'):
+    for table in ('canvas_projects', 'canvas_library_folders', 'canvas_library_folder_defaults'):
         assert tasks.get_db().execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0
