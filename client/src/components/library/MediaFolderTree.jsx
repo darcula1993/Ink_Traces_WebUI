@@ -15,7 +15,7 @@ export default function MediaFolderTree({folders,place,active,onPlace,expanded,o
     <button className="ul-tree-item" aria-current={current?'true':undefined} aria-label={`文件夹 ${folder.title}${system?'（系统文件夹）':''}`} title={system?`${folder.title}：系统文件夹，不可重命名或删除；内部结果可移走或删除`:folder.title} disabled={busy} onClick={()=>onPlace(folder.id)}>
      <Icon size={15} strokeWidth={1.7} aria-hidden="true"/><span>{folder.title}</span>{system&&<Lock className="ul-tree-lock" size={12} aria-label="已锁定"/>}<small>{folderCount(folders,folder)}</small>
     </button>
-    {!system&&<LibraryMore name={`文件夹 ${folder.title}`}><button onClick={()=>onAction({kind:'newFolder',item:{parent_id:folder.id}})}>新建子文件夹</button><button onClick={()=>onAction({kind:'folder',item:folder})}>重命名／移动</button><button className="is-danger" onClick={()=>onAction({kind:'deleteFolder',item:folder})}>删除文件夹</button></LibraryMore>}
+    {!system&&<LibraryMore menu name={`文件夹 ${folder.title}`}><button onClick={()=>onAction({kind:'newFolder',item:{parent_id:folder.id}})}>新建子文件夹</button><button onClick={()=>onAction({kind:'folder',item:folder})}>重命名／移动</button><button className="is-danger" onClick={()=>onAction({kind:'deleteFolder',item:folder})}>删除文件夹</button></LibraryMore>}
    </div>
    {kids.length>0&&open&&<ul role="group">{kids.map(k=>row(k,depth+1))}</ul>}
   </li>}

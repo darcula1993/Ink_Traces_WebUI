@@ -55,4 +55,19 @@
 /* LIBRARY-GLOBAL S5: global library tree extras. */
 .cv-sidebar .cv-upload-target{display:flex;align-items:center;gap:8px;padding:4px 16px;font-size:12px;color:var(--cv-secondary)}.cv-sidebar .cv-upload-target>span{flex:none}.cv-sidebar .cv-upload-target>:last-child{flex:1;min-width:0}
 .cv-sidebar .cv-folder-count{margin-left:6px;color:var(--cv-secondary);font-size:11px;font-variant-numeric:tabular-nums}.cv-sidebar .cv-folder-lock{margin-left:4px;color:var(--cv-secondary);flex:none}.cv-sidebar .cv-folder-upload-mark{margin-left:6px;font-size:11px;color:var(--cv-focus)}
-.cv-move-dialog{min-width:320px;max-width:440px}.cv-move-dialog .cv-move-summary{font-size:12px;color:var(--cv-secondary);margin:0}.cv-move-dialog .cv-move-create{display:flex;gap:6px}.cv-move-dialog .cv-move-create input{flex:1;min-width:0}.cv-move-dialog footer{display:flex;justify-content:flex-end;gap:8px}.cv-move-dialog .cv-move-new{align-self:flex-start}
+/* LIBRARY-OPS-FIX-20261117: selected folder (E9), dismissible error (E6), duplicate upload notice (D1), disabled delete reason. */
+.canvas-studio .cv-sidebar .cv-tree-folder.is-selected{background:rgba(255,255,255,.07);box-shadow:inset 2px 0 0 var(--cv-focus)}
+.canvas-studio .cv-asset-tree .cv-tree-alert{display:flex;align-items:flex-start;gap:8px;margin:4px 16px;padding:6px 8px;border:1px solid rgba(255,255,255,.1);border-radius:6px;font-size:12px}
+.canvas-studio .cv-asset-tree .cv-tree-alert span{flex:1;min-width:0}
+.canvas-studio .cv-asset-tree .cv-tree-alert button:where(:not(.btn)){flex:0 0 22px;width:22px;height:22px;padding:0;justify-content:center;background:transparent;border:0}
+.canvas-studio .cv-tree-duplicate{margin:4px 16px;padding:8px;border:1px solid rgba(255,255,255,.1);border-radius:6px;font-size:12px;display:flex;flex-direction:column;gap:6px}
+.canvas-studio .cv-tree-duplicate p{margin:0;color:var(--cv-secondary);overflow-wrap:anywhere}
+.canvas-studio .cv-tree-duplicate div{display:flex;gap:6px;align-items:center}
+.canvas-studio .cv-tree-duplicate div button:where(:not(.btn)){font-size:12px;padding:3px 8px}
+.canvas-studio .cv-tree-duplicate div button:last-child{margin-left:auto;padding:3px}
+.canvas-studio .cv-sidebar-menu button:has(> .cv-menu-note){white-space:normal;flex-wrap:wrap;height:auto;row-gap:2px}
+.canvas-studio .cv-sidebar-menu button > .cv-menu-note{flex-basis:100%;font-size:12px;line-height:1.35;color:var(--cv-secondary)}
+/* LIBRARY-OPS-FIX2-20261117 R4: dismissible success notice. */
+.canvas-studio .cv-asset-tree .cv-tree-notice{display:flex;align-items:flex-start;gap:6px}
+.canvas-studio .cv-asset-tree .cv-tree-notice span{flex:1;min-width:0}
+.canvas-studio .cv-asset-tree .cv-tree-notice button:where(:not(.btn)){flex:0 0 22px;width:22px;height:22px;padding:0;justify-content:center;background:transparent;border:0}

@@ -81,7 +81,7 @@ def test_upload_errors_and_folder_targets():
     empty = c.post('/api/canvas/media', data={'file': (io.BytesIO(b''), 'x.png')})
     assert empty.status_code == 400 and empty.json['code'] in ('empty_file', 'unsupported_media')
     system = c.post('/api/canvas/media', data={'file': (io.BytesIO(image_bytes('red')), 'a.png'), 'folder_id': SYSTEM['generated_image']})
-    assert system.status_code == 409 and system.json['code'] == 'folder_target_invalid'
+    assert system.status_code == 409 and system.json['code'] == 'folder_generated_only'
     missing = c.post('/api/canvas/media', data={'file': (io.BytesIO(image_bytes('red')), 'a.png'), 'folder_id': '0' * 32})
     assert missing.status_code == 404 and missing.json['code'] == 'folder_not_found'
     folder = c.post('/api/canvas/media/folders', json={'title': '分镜'}).json['folder']
@@ -164,6 +164,60 @@ def test_register_generated_hardlink_idempotent_move_and_q6():
     # Not in the library: the task center falls back to output.
     other_tid, _ = output(data=image_bytes('green'))
     assert media.task_media(tasks.list_assets(other_tid)[0]['id']) == ('none', None)
+
+
+def test_generated_history_only_takes_generated_results():
+    """User decision 2026-11-17 (E4): uploads cannot enter 生成历史 or its type subfolders."""
+    c = client()
+    uploaded = up(c, image_bytes('red'), 'up.png')['media']
+    move = lambda ids, folder: c.post('/api/canvas/media/move', json={'ids': ids, 'folder_id': folder})
+    for key in ('generated', 'generated_image', 'generated_video'):
+        r = move([uploaded['id']], SYSTEM[key])
+        assert r.status_code == 409 and r.json['code'] == 'folder_generated_only' and '生成历史' in r.json['error']
+        assert c.post('/api/canvas/media', data={'file': (io.BytesIO(image_bytes('green')), 'b.png'), 'folder_id': SYSTEM[key]}).json['code'] == 'folder_generated_only'
+    tid, path = output()
+    generated = media.register_generated(tid, path, 'image')
+    # All-or-nothing: a mixed selection is refused and nothing moves.
+    assert move([generated, uploaded['id']], SYSTEM['generated_image']).json['code'] == 'folder_generated_only'
+    assert media.get_media(uploaded['id'])['folder_id'] is None
+    assert move([generated], SYSTEM['generated_video']).json['code'] == 'folder_target_invalid'
+    assert move([generated], None).json['media'][0]['folder_id'] is None  # results may leave
+    assert move([generated], SYSTEM['generated_image']).json['media'][0]['folder_id'] == SYSTEM['generated_image']
+    with pytest.raises(media.MediaError) as error:
+        fresh = path.with_name('fresh.png')
+        fresh.write_bytes(image_bytes('white'))
+        media.import_file(fresh, name='x.png', origin='upload', folder_id=SYSTEM['generated_image'])
+    assert error.value.code == 'folder_generated_only'
+
+
+def test_folder_names_no_slash_and_unique_among_siblings():
+    """User decision 2026-11-17 (E3): checked on create/rename/move only; existing data unchanged."""
+    c = client()
+    create = lambda **data: c.post('/api/canvas/media/folders', json=data)
+    patch = lambda folder, **data: c.patch('/api/canvas/media/folders/' + folder, json=data)
+    slash = create(title='a/b')
+    assert slash.status_code == 400 and slash.json['code'] == 'invalid_name' and '/' in slash.json['error']
+    a = create(title='A').json['folder']
+    b = create(title='B').json['folder']
+    for title in ('A', ' a ', '生成历史', '角色'):
+        r = create(title=title)
+        assert r.status_code == 409 and r.json['code'] == 'folder_name_conflict', title
+    child = create(title='A', parent_id=b['id'])
+    assert child.status_code == 201 or child.status_code == 200
+    assert patch(b['id'], title='a').json['code'] == 'folder_name_conflict'
+    assert patch(b['id'], title='x/y').json['code'] == 'invalid_name'
+    assert patch(a['id'], title=' A ').json['folder']['title'] == 'A'  # own name is not a conflict
+    assert patch(a['id'], title='a').json['folder']['title'] == 'a'
+    moved = patch(child.json['folder']['id'], parent_id=None)
+    assert moved.status_code == 409 and moved.json['code'] == 'folder_name_conflict'
+    # Existing duplicates and slashes stay valid; only icon changes are not re-checked.
+    with store.write_transaction() as db:
+        db.execute("INSERT INTO media_folders VALUES ('f'||hex(randomblob(15)), 'a', NULL, NULL, 'folder', 't', 't')")
+        db.execute("INSERT INTO media_folders VALUES (?, 'old/name', NULL, NULL, 'folder', 't', 't')", ('e' * 32,))
+    assert patch('e' * 32, icon='scene').json['folder']['title'] == 'old/name'
+    assert patch(a['id'], icon='scene').json['folder']['icon'] == 'scene'
+    titles = [f['title'] for f in c.get('/api/canvas/media/folders').json['folders'] if f['parent_id'] is None]
+    assert titles.count('a') == 2 and 'old/name' in titles
 
 
 def test_register_generated_copies_when_link_unavailable(monkeypatch):

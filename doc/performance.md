@@ -11,8 +11,9 @@
 - Reference images preview immediately using owned object URLs. Inspection,
   autosave and generation share one workspace upload promise per File. The
   upload returns canonical dimensions, alpha information and a thumbnail URL.
-- Cupsy Assets uses 30-item pages, lazy 320-pixel image thumbnails and targeted
-  polling of pending imports. Explicit select-all still covers the whole library.
+- Cupsy Assets (remote) uses 30-item pages, lazy 320-pixel image thumbnails and
+  targeted polling of pending imports. Explicit select-all still covers the whole
+  remote library.
 - JSON and frontend text assets negotiate gzip. Responses under 1 KiB, media,
   range downloads and streaming PNG metadata are not compressed. Static gzip
   work is cached in a bounded in-process cache.
@@ -40,6 +41,22 @@ Synthetic benchmark (image tab, 20–120 term prompts, page of 50 plus count):
 40–85 ms. Pagination, counts and select-all ids are still computed by the
 server with the same filter. Revisit with a trigram index if the task table
 grows well beyond 50,000 rows.
+
+## Global library (2.0)
+
+- One `media` table for all projects. Lists are paged on the server
+  (`limit` up to 200, default 50, newest first) and filtered there by folder,
+  kind, name and origin; select-all asks the server for the matching ids
+  (at most 5,000) instead of loading every page.
+- Image thumbnails are 320-pixel WebP made on request and cached briefly by the
+  browser; video and audio have no thumbnail. Files are streamed with
+  conditional requests.
+- Generation results enter the library as hard links of the task output, so
+  they take no extra disk space on the same file system (a copy is made only
+  across file systems). Content is deduplicated by SHA-256, so identical uploads
+  and results share one file.
+- Canvases store library ids instead of copies; writing a result back to a
+  canvas no longer copies files.
 
 ## Worker settings
 
@@ -71,9 +88,10 @@ fixed percentage faster. Loopback latency excludes users' network latency.
 
 ## Verification
 
-- `pytest -q server/tests`
+- `pytest -q server/tests` (from a checkout without `config.json`)
 - `npm --prefix client run build`
-- From `client`: `npx playwright test --project=desktop --workers=1`
+- Browser (Playwright, desktop project) tests run through an isolated fixture
+  harness that is not part of the public distribution.
 
 Dedicated tests cover thin summaries, gzip/ETag/range negotiation, byte-preserving
 streamed image downloads, pool isolation, upload races and retries, object URL

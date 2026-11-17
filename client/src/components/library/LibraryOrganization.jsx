@@ -3,7 +3,7 @@ import axios from 'axios'
 import LibraryDialog from './LibraryDialog'
 import Select from '../ui/Select'
 import {createMediaFolder,updateMediaFolder,deleteMediaFolder,previewMediaDelete,deleteMedia,listMediaGroups,createMediaGroup,updateMediaGroup,deleteMediaGroup} from '../../lib/libraryApi'
-import {FOLDER_ICONS,flattenFolders,descendants,deletePlanLines} from './mediaLibrary'
+import {FOLDER_ICONS,userFolderOptions,descendants,deletePlanLines,folderNameIssue,libraryErrorText} from './mediaLibrary'
 // LIBRARY-GLOBAL-20261116 S4a: folder, group and delete dialogs of the global library (no projects, no tags).
 const GROUP_LIMIT=100,MEDIA_NAME_MAX=240
 // V2-FIX F3: rename a library item (display/download name only; file, folder and references unchanged).
@@ -13,11 +13,14 @@ export default function LibraryOrganization({action,folders,selection,onClose,on
  const [name,setName]=useState(kind==='newFolder'?'':kind==='renameMedia'?item?.name||'':item?.title||''),[parent,setParent]=useState(item?.parent_id||''),[icon,setIcon]=useState(item?.icon||'folder'),[busy,setBusy]=useState(false),[error,setError]=useState('')
  const [plan,setPlan]=useState(null),[groups,setGroups]=useState(null),[groupMode,setGroupMode]=useState('new'),[groupId,setGroupId]=useState('')
  const ids=selection.map(i=>i.media_id||i.id)
- useEffect(()=>{if(kind!=='remove'||!ids.length)return;let alive=true;previewMediaDelete(ids).then(v=>{if(alive)setPlan(v)}).catch(e=>{if(alive)setError(e?.response?.data?.error||e.message)});return()=>{alive=false}},[kind])
- useEffect(()=>{if(kind!=='group')return;let alive=true;listMediaGroups().then(v=>{if(alive)setGroups(v)}).catch(e=>{if(alive)setError(e?.response?.data?.error||e.message)});return()=>{alive=false}},[kind])
+ useEffect(()=>{if(kind!=='remove'||!ids.length)return;let alive=true;previewMediaDelete(ids).then(v=>{if(alive)setPlan(v)}).catch(e=>{if(alive)setError(libraryErrorText(e))});return()=>{alive=false}},[kind])
+ useEffect(()=>{if(kind!=='group')return;let alive=true;listMediaGroups().then(v=>{if(alive)setGroups(v)}).catch(e=>{if(alive)setError(libraryErrorText(e))});return()=>{alive=false}},[kind])
  const title={folder:'文件夹属性',newFolder:'新建文件夹',deleteFolder:'删除文件夹',remove:'删除素材',group:'加入素材组',groupEdit:'重命名素材组',renameMedia:'重命名素材',deleteGroup:'删除素材组'}[kind]
  const blocked=kind==='folder'?descendants(folders,item.id).add(item.id):new Set()
- const parentOptions=[{value:'',label:'根目录'},...flattenFolders(folders,{filter:f=>!f.system_key&&!blocked.has(f.id)}).map(f=>({value:f.id,label:`${'　'.repeat(f.depth)}${f.title}`}))]
+ const parentOptions=userFolderOptions(folders,{exclude:blocked})
+ // E3: folder names never contain “/” and are unique among siblings (checked again by the server).
+ const changed=kind==='newFolder'||kind==='folder'&&(name.trim()!==item.title||(parent||'')!==(item.parent_id||''))
+ const nameIssue=['folder','newFolder'].includes(kind)&&changed?folderNameIssue(folders,name,parent,item?.id):''
  const target=groups?.find(g=>g.id===groupId)
  const overLimit=kind==='group'&&(groupMode==='new'?ids.length>GROUP_LIMIT:!!target&&new Set([...target.media_ids,...ids]).size>GROUP_LIMIT)
  async function run(){setBusy(true);setError('');try{
@@ -31,15 +34,16 @@ export default function LibraryOrganization({action,folders,selection,onClose,on
   if(kind==='groupEdit')result=await updateMediaGroup(item.id,{title:name.trim()})
   if(kind==='deleteGroup')await deleteMediaGroup(item.id)
   onDone(result)
- }catch(e){setError(e?.response?.data?.error||e.message)}finally{setBusy(false)}}
+ }catch(e){setError(libraryErrorText(e))}finally{setBusy(false)}}
  const needsName=['folder','newFolder','groupEdit','renameMedia'].includes(kind)||kind==='group'&&groupMode==='new'
  return <LibraryDialog title={title} busy={busy} error={error} onClose={onClose} onConfirm={run} danger={['remove','deleteFolder','deleteGroup'].includes(kind)}
-  disabled={(kind==='remove'&&!plan)||(needsName&&!name.trim())||(kind==='group'&&(!groups||groupMode==='existing'&&!groupId||overLimit))}
+  disabled={(kind==='remove'&&!plan)||(needsName&&!name.trim())||!!nameIssue||(kind==='group'&&(!groups||groupMode==='existing'&&!groupId||overLimit))}
   confirmLabel={kind==='remove'?'确认删除':kind==='deleteFolder'?'删除文件夹':kind==='deleteGroup'?'删除素材组':kind==='group'?(groupMode==='new'?'新建素材组':'加入素材组'):kind==='newFolder'?'创建文件夹':'确认保存'}>
   {kind==='group'&&<><p>将所选 {ids.length} 项加入素材组。素材组是全局的，只记录对库内素材的引用，不复制文件；所有项目都可以引用。</p><div className="ul-segment" role="radiogroup" aria-label="加入方式"><label><input type="radio" name="group-mode" checked={groupMode==='new'} onChange={()=>setGroupMode('new')}/>新建素材组</label><label><input type="radio" name="group-mode" checked={groupMode==='existing'} disabled={!groups?.length} onChange={()=>setGroupMode('existing')}/>加入已有素材组</label></div>
    {groupMode==='existing'&&<label>素材组<Select ariaLabel="已有素材组" disabled={busy} value={groupId} options={[{value:'',label:'请选择素材组'},...(groups||[]).map(g=>({value:g.id,label:`${g.title}（${g.member_count} 项）`}))]} onChange={setGroupId}/></label>}
    {overLimit&&<p role="alert" className="ul-error">每个素材组最多 {GROUP_LIMIT} 个素材</p>}</>}
-  {needsName&&<label>名称<input aria-label="名称" value={name} maxLength={kind==='renameMedia'?MEDIA_NAME_MAX:120} disabled={busy} autoFocus onChange={e=>setName(e.target.value)}/></label>}
+  {needsName&&<label>名称<input aria-label="名称" value={name} maxLength={kind==='renameMedia'?MEDIA_NAME_MAX:120} disabled={busy} autoFocus aria-invalid={nameIssue?'true':undefined} aria-describedby={nameIssue?'ul-name-issue':undefined} onChange={e=>setName(e.target.value)}/></label>}
+  {nameIssue&&<p id="ul-name-issue" className="ul-error" role="status">{nameIssue}</p>}
   {['folder','newFolder'].includes(kind)&&<><label>位置<Select ariaLabel="上级文件夹" disabled={busy} value={parent} options={parentOptions} onChange={setParent}/></label><label>图标<Select ariaLabel="文件夹图标" disabled={busy} value={icon} options={Object.entries(FOLDER_ICONS).map(([value,label])=>({value,label}))} onChange={setIcon}/></label></>}
   {kind==='renameMedia'&&<p className="ul-muted">只改变素材显示与下载时的名称；文件、所在文件夹及画布、任务中的引用保持不变。名称不能包含“/”或换行。</p>}
   {kind==='deleteFolder'&&<p>删除文件夹“{item.title}”？只能删除空文件夹，请先移出其中的素材和子文件夹。素材不会因删除文件夹而删除。</p>}

@@ -129,13 +129,20 @@ def _folder(db, folder_id):
     return dict(row)
 
 
-def _placement(db, folder_id, kind=None):
-    """Target folder for items: root, a user folder, or the system subfolder of the same kind."""
+def _placement(db, folder_id, kind=None, origin=None):
+    """Target folder for items: root, a user folder, or the system subfolder of the same kind.
+
+    生成历史 and its type subfolders only take generation results (origin generated, user
+    decision 2026-11-17); results may still leave them for user folders or the root.
+    """
     if folder_id is None:
         return None
     folder = _folder(db, folder_id)
-    if folder['system_key'] and (kind is None or folder['system_key'] != 'generated_' + kind):
-        raise MediaError('系统文件夹只接收对应类型的生成结果', 409, 'folder_target_invalid')
+    if folder['system_key']:
+        if origin != 'generated':
+            raise MediaError('生成历史只接收生成结果，上传素材不能移入', 409, 'folder_generated_only')
+        if kind is None or folder['system_key'] != 'generated_' + kind:
+            raise MediaError('生成历史下的图片/视频/音频只接收对应类型的生成结果', 409, 'folder_target_invalid')
     return folder_id
 
 
@@ -170,6 +177,11 @@ def _save_folder(data, folder_id=None):
         title = data.get('title', old['title'] if old else None)
         if not isinstance(title, str) or not title.strip() or len(title) > 120:
             raise MediaError('文件夹名称须为1至120个字符', 400, 'invalid_name')
+        title = title.strip()
+        renamed = old is None or title != old['title']
+        # User decision 2026-11-17 (E3): only new names are checked; existing folders keep theirs.
+        if renamed and '/' in title:
+            raise MediaError('文件夹名称不能包含“/”', 400, 'invalid_name')
         parent_id = data.get('parent_id', old['parent_id'] if old else None)
         if parent_id is not None:
             if _folder(db, parent_id)['system_key']:
@@ -180,12 +192,17 @@ def _save_folder(data, folder_id=None):
                     raise MediaError('文件夹不能移动到自身或子文件夹中', 409, 'folder_cycle')
                 seen.add(ancestor)
                 ancestor = _folder(db, ancestor)['parent_id']
+        if renamed or parent_id != old['parent_id']:
+            # Same level = same parent (root included); names compare trimmed and case-insensitive.
+            siblings = db.execute('SELECT id, title FROM media_folders WHERE parent_id IS ? AND id IS NOT ?', (parent_id, folder_id))
+            if any(r['title'].strip().casefold() == title.casefold() for r in siblings):
+                raise MediaError(f'同一位置已有名为“{title}”的文件夹', 409, 'folder_name_conflict')
         now = tasks.utcnow()
         if old:
-            db.execute('UPDATE media_folders SET title=?,parent_id=?,icon=?,updated_at=? WHERE id=?', (title.strip(), parent_id, icon, now, folder_id))
+            db.execute('UPDATE media_folders SET title=?,parent_id=?,icon=?,updated_at=? WHERE id=?', (title, parent_id, icon, now, folder_id))
         else:
             folder_id = uuid.uuid4().hex
-            db.execute('INSERT INTO media_folders VALUES (?,?,?,?,?,?,?)', (folder_id, title.strip(), parent_id, None, icon, now, now))
+            db.execute('INSERT INTO media_folders VALUES (?,?,?,?,?,?,?)', (folder_id, title, parent_id, None, icon, now, now))
         return folder_public(db, _folder(db, folder_id))
 
 
@@ -260,7 +277,7 @@ def import_file(path, *, name, origin, folder_id=None, source_task_id=None, link
         existing = db.execute('SELECT id FROM media WHERE sha256=?', (checksum,)).fetchone()
         if existing:
             return existing['id'], False
-        folder_id = _placement(db, folder_id, mime.split('/')[0])
+        folder_id = _placement(db, folder_id, mime.split('/')[0], origin)
         media_id = uuid.uuid4().hex
         target = root() / (media_id + extension)
         try:
@@ -321,9 +338,7 @@ def save_upload(stream, name, *, folder_id=None, origin='upload'):
         checksum = digest.hexdigest()
         with store.write_transaction() as db:
             kind = mime.split('/')[0]
-            if folder_id is not None and _folder(db, folder_id)['system_key']:
-                raise MediaError('不能上传到系统文件夹', 409, 'folder_target_invalid')
-            folder_id = _placement(db, folder_id, kind)
+            folder_id = _placement(db, folder_id, kind, origin)
             existing = db.execute('SELECT * FROM media WHERE sha256=?', (checksum,)).fetchone()
             if existing:
                 # Dedup returns the existing item unchanged (folder, name, origin), also when it is a
@@ -401,7 +416,7 @@ def move_media(ids, folder_id):
         if any(r is None for r in rows):
             raise MediaError('素材不存在或已删除', 404, 'media_not_found')
         for row in rows:
-            _placement(db, folder_id, row['kind'])
+            _placement(db, folder_id, row['kind'], row['origin'])
         db.executemany('UPDATE media SET folder_id=? WHERE id=?', [(folder_id, i) for i in ids])
         return [public(db.execute('SELECT * FROM media WHERE id=?', (i,)).fetchone()) for i in ids]
 

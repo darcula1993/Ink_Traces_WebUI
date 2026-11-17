@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.2 - 2026-11-17
+
+- Library rules: the "生成历史" folder and its 图片/视频/音频 sub-folders only accept generation results (uploads cannot be moved in; generation results can be moved out); folder names may not contain "/" and may not repeat among siblings (case-insensitive; existing folders are left as they are).
+- Rename library items from the library dialog and the canvas sidebar.
+- Uploading content that is already in the library (sidebar and library dialog) tells you which folder it is in, with "locate" and "move here".
+- The canvas sidebar, node menu and version list use the library's "move to folder" dialog: it preselects the item's current folder and disables "生成历史" for uploads.
+- Deleted placeholders on canvas nodes can be replaced from the library as well as by uploading.
+- The sidebar refreshes when a generation finishes; uploading with a folder selected puts the file in that folder; a non-empty folder's delete action is disabled with the reason.
+- Dialogs submit with Enter, focus the name field when opened and return focus when closed; success notices for deletes and renames; folder paths shown as "parent / child"; accessibility fixes for the folder tree and menus.
+- Cost ledger wording now matches what is estimated (image, layer and video estimated; audio unknown).
+
 ## 2.0.1 - 2026-11-17
 
 - The 2.0.0 package was missing `scripts/migrate-library-global.py`, which the upgrade from 1.x needs. It is now included. No other changes.

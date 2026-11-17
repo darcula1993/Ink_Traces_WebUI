@@ -16,7 +16,7 @@ import CharacterLibrary from './CharacterLibrary'
 import MediaPreview from '../canvas/MediaPreview'
 import {listMedia,listMediaFolders,selectMediaIds,lookupMedia,uploadMedia,moveMedia,mediaDownloadUrl,listMediaGroups,getMediaGroup,updateMediaGroup} from '../../lib/libraryApi'
 import {downloadAsset} from '../../lib/canvasAssetVersions'
-import {mediaItem,originLabel,placeFilters,placeTitle,folderChildren,uploadFolderOptions,uploadTargetFor,GENERATED} from './mediaLibrary'
+import {mediaItem,originLabel,placeFilters,placeTitle,folderChildren,uploadFolderOptions,uploadTargetFor,GENERATED,libraryErrorText} from './mediaLibrary'
 import {Download,Trash2,Upload,LayoutGrid,ExternalLink,FolderInput,ChevronLeft,UserRound,X} from 'lucide-react'
 const ImageAssetEditor=React.lazy(()=>import('../image-editor/ImageAssetEditor'))
 const kinds={all:'全部',image:'图片',video:'视频',audio:'音频'}
@@ -35,7 +35,7 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
  const [action,setAction]=useState(null),[moving,setMoving]=useState(null),[editing,setEditing]=useState(null),[preview,setPreview]=useState(null),[uploadOptions,setUploadOptions]=useState(false),[uploadChoice,setUploadChoice]=useState(null),[picker,setPicker]=useState(null),[charactersBusy,setCharactersBusy]=useState(false),[expanded,setExpanded]=useState(()=>new Set()),[duplicates,setDuplicates]=useState(null)
  const focus=useRef(new Set(focusMediaIds||[])),allNotice=useRef(''),scrollRef=useRef(null),uploadTrigger=useRef(null),fileRef=useRef(null),alive=useRef(true),lock=useRef(false),restoreEdit=useRef(null)
  useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
- const message=e=>e?.response?.data?.error||e?.message||'操作失败'
+ const message=e=>libraryErrorText(e)
  const generatedFolder=folders.find(f=>f.system_key===GENERATED)
  // Folders and the navigation totals (全部素材 / 根目录) follow every mutation.
  useEffect(()=>{let active=true;Promise.all([listMediaFolders(),listMedia({},{limit:1}),listMedia({folder_id:'root'},{limit:1})]).then(([list,all,root])=>{if(!active)return;setFolders(list);setCounts({all:all.total,root:root.total});setFoldersReady(true);const generated=list.find(f=>f.system_key===GENERATED);if(generated)setExpanded(v=>v.size?v:new Set([generated.id]));setPlace(current=>current==='@generated'?generated?.id||'all':current!=='all'&&current!=='root'&&!list.some(f=>f.id===current)?'all':current)}).catch(e=>{if(active){setError(message(e));setFoldersReady(true)}});return()=>{active=false}},[revision])
@@ -132,7 +132,14 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
  <div className="ul-pager"><button disabled={page<=1||busy} onClick={()=>setPage(page-1)}>上一页</button><span>{result.total} 项 · 第 {page} / {Math.max(1,Math.ceil(result.total/LIMIT))} 页</span><button disabled={page*LIMIT>=result.total||busy} onClick={()=>setPage(page+1)}>下一页</button></div></>}
  </div></>}<input ref={fileRef} type="file" multiple accept="image/*,video/*,audio/*" hidden onChange={e=>{const files=[...e.target.files];e.target.value='';upload(files)}}/>
  </LibraryShell>
- {action&&<LibraryOrganization key={`${action.kind}:${action.item?.id||''}`} action={action} folders={folders} selection={action.items||selected} onClose={()=>setAction(null)} onDone={result=>{const done=action;setAction(null);if(done.kind==='renameMedia'&&result){setSelected(current=>current.map(i=>i.key===result.id?mediaItem(result):i));setNotice(`已重命名为“${result.name}”`)}if(['remove','group'].includes(done.kind)&&!done.items)setSelected([]);if(done.kind==='group')setNotice('已加入素材组');if(done.kind==='deleteGroup'&&groupId===done.item.id)goGroups();if(done.kind==='deleteFolder'&&place===done.item.id)goPlace('all');refresh()}} onBeforeDelete={onBeforeDelete} onDeleted={deleted}/>}
+ {action&&<LibraryOrganization key={`${action.kind}:${action.item?.id||''}`} action={action} folders={folders} selection={action.items||selected} onClose={()=>setAction(null)} onDone={result=>{const done=action;setAction(null);if(done.kind==='renameMedia'&&result){setSelected(current=>current.map(i=>i.key===result.id?mediaItem(result):i));setNotice(`已重命名为“${result.name}”`)}if(['remove','group'].includes(done.kind)&&!done.items)setSelected([]);if(done.kind==='group')setNotice('已加入素材组')
+  // LIBRARY-OPS-FIX E5: every library change confirms itself in the status line.
+  if(done.kind==='remove'&&result){const count=result.deleted_ids?.length||0,missing=result.missing?.length||0;setNotice(`已永久删除 ${count} 个素材${missing?`（${missing} 项已不存在，已跳过）`:''}`)}
+  if(done.kind==='groupEdit'&&result)setNotice(`已重命名素材组为“${result.title||result.group?.title||''}”`)
+  if(done.kind==='deleteGroup')setNotice(`已删除素材组“${done.item.title}”，组内素材保留`)
+  if(done.kind==='newFolder'&&result)setNotice(`已新建文件夹“${result.title}”`)
+  if(done.kind==='folder'&&result)setNotice(`已保存文件夹“${result.title}”`)
+  if(done.kind==='deleteFolder')setNotice(`已删除文件夹“${done.item.title}”`);if(done.kind==='deleteGroup'&&groupId===done.item.id)goGroups();if(done.kind==='deleteFolder'&&place===done.item.id)goPlace('all');refresh()}} onBeforeDelete={onBeforeDelete} onDeleted={deleted}/>}
  {moving&&<MoveToFolderDialog media={moving} onClose={()=>setMoving(null)} onDone={outcome=>{setMoving(null);setNotice(outcome.text);setSelected(current=>current.map(i=>{const m=outcome.moved.find(x=>x.id===i.key);return m?mediaItem(m):i}));refresh()}}/>}
  {picker&&<UnifiedAssetLibrary key="character-picker" title={picker.title} applyLabel={picker.applyLabel} allowedKinds={picker.kinds} selectionLimit={picker.limit} onApply={async items=>{await picker.onApply(items);if(alive.current)setPicker(null)}} onClose={()=>setPicker(null)}/>}
  {preview&&createPortal(<div className="ul-preview-host"><MediaPreview asset={preview} onClose={()=>setPreview(null)}/></div>,document.body)}

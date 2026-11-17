@@ -6,6 +6,7 @@ This guide covers installing, configuring, starting and testing Ink Traces WebUI
 
 - Python 3.10+
 - Node.js 18+ and npm
+- ffmpeg (`ffprobe` must be on `PATH`; it checks uploaded audio/video and is required by the 2.0 library migration)
 - API credentials for at least one provider (BytePlus Ark and/or Cupsy)
 
 ## 2. Install
@@ -28,12 +29,12 @@ Edit `config.json` (never committed; it holds your credentials). It uses the v2 
 
 - Accounts: `providers.byteplus.api_key` (BytePlus Ark) and/or `providers.cupsy.api_key`, each with its `endpoint` and timeouts.
 - Seedance 2.5 on BytePlus: put your own endpoint ID (`ep-…` from the BytePlus console) in `providers.byteplus.endpoint_ids.seedance_2_5`; the example ships the placeholder `ep-your-endpoint-id`, which counts as not configured.
-- Image: `generation.image.default` (`byteplus` or `cupsy`) and `generation.image.byteplus.model`. Video: `generation.video.byteplus.model` / `fast_model` and `generation.video.cupsy.model`. Audio: `generation.audio.cupsy.model`. Layer decomposition uses the BytePlus image model (`generation.image.byteplus.model`); there is no separate layer setting. If an older v2 file still has `generation.layer`, remove it with `python3 scripts/config-drop-layer.py` (dry run) / `--apply`.
+- Image: `generation.image.default` (`byteplus` or `cupsy`) and `generation.image.byteplus.model`. Video: `generation.video.byteplus.model` / `fast_model` and `generation.video.cupsy.model`. Audio: `generation.audio.cupsy.model`. Layer decomposition uses the BytePlus image model (`generation.image.byteplus.model`); there is no separate layer setting. If a 1.0.0 file still has a `generation.layer` section, delete that section.
 - Ark reference video uploads: set `deployment.public_base_url` to the public origin of this application.
 - Cupsy references: `deployment.cupsy_source.base_url`, a public HTTP(S) origin that routes back to this application.
 - Sessions: set `auth.secret_key` (or env `INK_TRACES_SECRET_KEY`); otherwise an ignored `.flask_secret_key` file is generated.
 
-Validate the file with `python3 server/config_v2.py check`; `start.sh` runs the same check and does not start anything when it fails. The server only reads v2. A configuration file from a pre-release version (no `config_version`) must be converted first: stop the services and run `python3 scripts/migrate-config-v2.py` (dry run, prints key paths only), then add `--apply` (writes a `config.json.pre-v2` backup). Details are in [doc/development.md](doc/development.md#配置configjson-v2).
+Validate the file with `python3 server/config_v2.py check`; `start.sh` runs the same check and does not start anything when it fails. The server only reads this v2 layout; unknown keys, old sections or a missing `config_version` stop start-up with an error naming the key path.
 
 See the [README](README.md) and [Cupsy notes](doc/cupsy_compatibility.md) for details.
 
@@ -58,7 +59,22 @@ sudo ./deploy/configure-public-source.sh        # apply (Nginx + Certbot)
 
 Port 80 must be reachable for HTTP-01 validation and firewall rules are your responsibility. To run behind systemd, `deploy/restart_with_https.py --service nanobanana.service --dry-run` shows what it would change; it needs root to apply. The Nginx and Certbot templates are in [`deploy/nginx/`](deploy/nginx/) and [`deploy/certbot/`](deploy/certbot/).
 
-## 6. Run the tests (mock providers, no paid requests)
+## 6. Upgrading from 1.x to 2.0
+
+2.0 replaces the per-project libraries, tags and per-canvas copies with one global library and migrates existing data once (see [CHANGELOG](CHANGELOG.md)). Run the steps below from the 2.0 checkout, next to the existing `tasks.db`; `canvas_assets/` and `output/` are expected beside it (otherwise pass `--asset-root` / `--output-dir`).
+
+1. Install ffmpeg and check that `ffprobe -version` works; the migration stops part-way without it.
+2. Make sure no generation task or node-group run is active, then stop the API and the Worker.
+3. Back up: `python3 scripts/migrate-library-global.py --db tasks.db --make-backup <new-dir>` (SQLite backup, hard-link snapshot of `canvas_assets/` and `output/`, checksums).
+4. Dry run: `python3 scripts/migrate-library-global.py --db tasks.db` prints what will be imported, skipped, deduplicated and cleaned up, and anything that blocks the migration. Nothing is written.
+5. Apply: `python3 scripts/migrate-library-global.py --db tasks.db --apply --backup-dir <new-dir>`. It refuses while tasks or runs are active, while the Worker is still running, or without a fresh backup of this database. If interrupted, run the same command again; a repeated run changes nothing.
+6. Check: `python3 scripts/migrate-library-global.py --db tasks.db --verify`, then start the services and open the library.
+
+Copies held only by already-deleted canvases or projects are removed during the migration (`--include-archived` imports them instead); tags and project folders are deleted and their assets placed in the library root. Keep the backup until you have checked the new library.
+
+To roll back: stop the services, export what changed after the migration with `--new-since <apply finish time> --export-dir <new-empty-dir>` (new files plus a `changes.json` of moves, renames, deletions, folders and groups), restore `tasks.db` from the backup directory and `canvas_assets/` / `output/` from its snapshot (for example `cp -al`), and go back to the 1.x code.
+
+## 7. Run the tests (mock providers, no paid requests)
 
 Backend tests use mocked providers. Run them from a checkout that has **no** `config.json` (the test session refuses to start when one exists):
 
@@ -74,6 +90,7 @@ Browser (Playwright) tests depend on an isolated fixture setup that is not part 
 cd client && npm install && npm run build
 ```
 
-## 7. Maintenance
+## 8. Maintenance
 
-With services stopped: `python3 server/maintenance.py all --grace-hours 24` removes expired media, compacts legacy data and vacuums SQLite. `./clean.sh` removes regenerable caches.
+With services stopped: `python3 server/maintenance.py all --grace-hours 24` removes expired task media (results kept in the library are not touched), compacts legacy data and vacuums SQLite. `./clean.sh` removes regenerable caches.
+Back up `tasks.db`, `canvas_assets/` (library files) and `output/` together.

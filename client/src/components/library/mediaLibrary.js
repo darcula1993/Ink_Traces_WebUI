@@ -22,17 +22,33 @@ export function flattenFolders(folders,{filter=()=>true}={}){const children=fold
 // Count shown beside a folder: its own items, plus the subfolders for the locked “生成历史”.
 export function folderCount(folders,folder){if(folder.system_key!==GENERATED)return folder.media_count||0;return (folder.media_count||0)+folders.filter(f=>f.parent_id===folder.id).reduce((n,f)=>n+(f.media_count||0),0)}
 
-const indent=f=>`${'　'.repeat(f.depth)}${f.title}`
-// Upload / new-folder targets: root and user folders (system folders only receive generation results).
-export const uploadFolderOptions=folders=>[{value:'',label:'根目录'},...flattenFolders(folders,{filter:f=>!f.system_key}).map(f=>({value:f.id,label:indent(f)}))]
-// “移动到文件夹”: root, user folders, and the system subfolder matching the kind when every item shares it.
-// Labels are full parent paths (“父 / 子”), as in every “移动到文件夹” dialog (V2-FIX F6).
+// Upload / new-folder / parent targets: root and user folders (system folders only receive generation results).
+// Labels are full parent paths (“父 / 子”) so same-named folders in different places stay distinguishable (LIBRARY-OPS-FIX E9).
 export const folderPathLabel=(folders,id)=>folderPath(folders,id).map(f=>f.title).join(' / ')
-export function moveFolderOptions(folders,kinds){
- const unique=[...new Set(kinds)],options=[{value:'',label:'根目录'},...flattenFolders(folders,{filter:f=>!f.system_key}).map(f=>({value:f.id,label:folderPathLabel(folders,f.id)}))]
- if(unique.length===1){const system=folders.find(f=>f.system_key===generatedKindKey(unique[0]));if(system)options.push({value:system.id,label:folderPathLabel(folders,system.id)})}
+export const userFolderOptions=(folders,{exclude=new Set()}={})=>[{value:'',label:'根目录'},...flattenFolders(folders,{filter:f=>!f.system_key&&!exclude.has(f.id)}).map(f=>({value:f.id,label:folderPathLabel(folders,f.id)}))]
+export const uploadFolderOptions=folders=>userFolderOptions(folders)
+// “生成历史” and its 图片/视频/音频 subfolders only take generation results (user decision 2026-11-17, E4).
+export const GENERATED_ONLY_HINT='“生成历史”下的图片／视频／音频只接收对应类型的生成结果，上传等其他来源的素材不能移入；生成结果可移出到任意文件夹。'
+// “移动到文件夹”: root, user folders, and the system subfolder matching the kind when every item shares it.
+// origins (when known): the system subfolder is offered disabled, with the reason, unless every item is a generation result.
+export function moveFolderOptions(folders,kinds,origins=null){
+ const unique=[...new Set(kinds)],options=userFolderOptions(folders)
+ if(unique.length===1){const system=folders.find(f=>f.system_key===generatedKindKey(unique[0]));if(system){const blocked=origins&&origins.some(o=>o!==GENERATED);options.push({value:system.id,label:`${folderPathLabel(folders,system.id)}${blocked?'（只接收生成结果）':''}`,disabled:!!blocked})}}
  return options
 }
+// Client-side mirror of the server folder-name rules (E3, new folders and renames only): no “/”, unique among siblings
+// (trimmed, case-insensitive, as the server). The server message is still shown verbatim when it rejects.
+export function folderNameIssue(folders,title,parentId,selfId=null){
+ const name=(title||'').trim()
+ if(!name)return ''
+ if(name.includes('/'))return '文件夹名称不能包含“/”'
+ const key=name.toLowerCase()
+ if(folders.some(f=>f.id!==selfId&&(f.parent_id||'')===(parentId||'')&&(f.title||'').trim().toLowerCase()===key))return `同一位置已有名为“${name}”的文件夹`
+ return ''
+}
+// Chinese text for library API errors: the server message when present, else a fallback by error code.
+const ERROR_CODES={folder_generated_only:'生成历史只接收生成结果，上传素材不能移入',folder_target_invalid:'生成历史下的图片/视频/音频只接收对应类型的生成结果',folder_name_conflict:'同一位置已有同名文件夹',invalid_name:'名称无效',folder_cycle:'文件夹不能移动到自身或子文件夹中',folder_not_empty:'文件夹非空，请先移出素材和子文件夹'}
+export function libraryErrorText(e,fallback='操作失败'){const data=e?.response?.data;if(data?.error)return data.error;if(data?.code&&ERROR_CODES[data.code])return ERROR_CODES[data.code];if(e?.response?.status===409)return fallback;return e?.message||fallback}
 // The folder every item is in now ('' = root); null when they are in different folders (V2-FIX F7).
 export function currentFolderOf(media){const own=[...new Set(media.map(m=>m.folder_id||''))];return own.length===1?own[0]:null}
 // Where an upload lands when started from the current view: the current user folder, otherwise root.
