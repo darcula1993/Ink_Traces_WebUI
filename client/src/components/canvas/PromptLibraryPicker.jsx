@@ -4,19 +4,12 @@ import axios from 'axios'
 import { Library, BookmarkPlus, Search } from 'lucide-react'
 import { filterPrompts, promptPreview, canSavePrompt, nextActiveIndex, insertTextNatively } from '../../lib/promptLibrary'
 
-// Prompt-library entry for the node panel. `getTextarea` returns the prompt textarea; `value` is its current text.
-export default function PromptLibraryPicker({ getTextarea, value, onInsertFallback }) {
-  const [open, setOpen] = useState(false)
+// CANVAS-LAYOUT-2-20261118: the library loading and the search + listbox are reusable (rail panel
+// CanvasPromptPanel); the picker keeps its DOM, ids and behaviour.
+export function usePromptLibrary() {
   const [prompts, setPrompts] = useState([])
-  const [query, setQuery] = useState('')
-  const [active, setActive] = useState(0)
   const [status, setStatus] = useState('')
-  const [anchor, setAnchor] = useState(null)
   const [loading, setLoading] = useState(false)
-  const selection = useRef({ start: null, end: null })
-  const searchRef = useRef(null), triggerRef = useRef(null)
-  const visible = useMemo(() => filterPrompts(prompts, query), [prompts, query])
-
   const load = async () => {
     setLoading(true); setStatus('')
     try {
@@ -25,6 +18,45 @@ export default function PromptLibraryPicker({ getTextarea, value, onInsertFallba
       else setStatus('提示词库同步失败')
     } catch { setStatus('无法加载提示词库') } finally { setLoading(false) }
   }
+  return { prompts, status, setStatus, loading, load }
+}
+
+// Inserts at the given (or the textarea's own) selection with native undo; falls back to `onFallback(next)`.
+export function insertPromptText(textarea, text, { value = '', start, end, onFallback } = {}) {
+  const from = start ?? textarea?.selectionStart ?? null, to = end ?? textarea?.selectionEnd ?? null
+  if (insertTextNatively(textarea, text, from, to)) return true
+  const base = String(value || ''), at = from ?? base.length, until = to ?? at
+  onFallback?.(`${base.slice(0, at)}${text}${base.slice(until)}`)
+  textarea?.focus()
+  return false
+}
+
+// Search box + listbox. `pickOn` is 'mousedown' (popover: keeps the prompt textarea selection) or 'click'.
+export function PromptLibraryList({ listId, optionPrefix, inputRef, query, onQuery, prompts, visible, active, onActive, onPick, loading, pickOn = 'mousedown', optionTitle = '插入到光标处' }) {
+  return <>
+    <label className="cv-prompt-library-search"><Search size={13} aria-hidden="true" /><input ref={inputRef} role="combobox" aria-expanded="true" aria-controls={listId} aria-activedescendant={visible[active] ? `${optionPrefix}${visible[active].id}` : undefined} aria-label="搜索提示词" placeholder="搜索提示词" value={query} onChange={event => onQuery(event.target.value)} /></label>
+    <div id={listId} role="listbox" aria-label="提示词列表" className="cv-prompt-library-list">
+      {loading && !prompts.length ? <div className="cv-prompt-library-empty" role="status">加载中…</div>
+        : visible.length === 0 ? <div className="cv-prompt-library-empty" role="status">{query ? '没有匹配的提示词' : '提示词库为空'}</div>
+        : visible.map((prompt, index) => (
+          <button type="button" key={prompt.id} id={`${optionPrefix}${prompt.id}`} role="option" aria-selected={index === active} tabIndex={-1} className={`cv-prompt-library-option ${index === active ? 'is-active' : ''}`} title={optionTitle} onMouseEnter={pickOn === 'mousedown' ? () => onActive(index) : undefined}
+            {...(pickOn === 'mousedown' ? { onMouseDown: event => { event.preventDefault(); onPick(prompt, index) } } : { onClick: () => onPick(prompt, index) })}>{promptPreview(prompt.text)}</button>
+        ))}
+    </div>
+  </>
+}
+
+// Prompt-library entry for the node panel. `getTextarea` returns the prompt textarea; `value` is its current text.
+// `compact`: icon-only trigger (card prompt, CANVAS-LAYOUT-2-WIRE) without the save button and status text.
+export default function PromptLibraryPicker({ getTextarea, value, onInsertFallback, compact = false, label = '从提示词库插入' }) {
+  const [open, setOpen] = useState(false)
+  const { prompts, status, setStatus, loading, load } = usePromptLibrary()
+  const [query, setQuery] = useState('')
+  const [active, setActive] = useState(0)
+  const [anchor, setAnchor] = useState(null)
+  const selection = useRef({ start: null, end: null })
+  const searchRef = useRef(null), triggerRef = useRef(null)
+  const visible = useMemo(() => filterPrompts(prompts, query), [prompts, query])
 
   const openPicker = () => {
     const textarea = getTextarea()
@@ -84,20 +116,13 @@ export default function PromptLibraryPicker({ getTextarea, value, onInsertFallba
   }
 
   return (
-    <div className="cv-prompt-library" data-testid="prompt-library">
-      <button type="button" ref={triggerRef} className="btn btn-ghost btn-sm" aria-haspopup="dialog" aria-expanded={open} title="从提示词库插入" aria-label="从提示词库插入" onClick={() => (open ? close() : openPicker())}><Library size={13} aria-hidden="true" /><span>提示词库</span></button>
-      <button type="button" className="btn btn-ghost btn-sm" disabled={!canSavePrompt(value)} title="把当前提示词存入提示词库" aria-label="存入提示词库" onClick={save}><BookmarkPlus size={13} aria-hidden="true" /><span>存入提示词库</span></button>
-      <span className="cv-prompt-library-status" role="status" aria-live="polite" data-testid="prompt-library-status">{status}</span>
+    <div className={`cv-prompt-library${compact ? ' is-compact' : ''}`} data-testid={compact ? 'card-prompt-library' : 'prompt-library'} onPointerDown={compact ? event => event.stopPropagation() : undefined}>
+      <button type="button" ref={triggerRef} className={compact ? 'cv-card-prompt-library' : 'btn btn-ghost btn-sm'} aria-haspopup="dialog" aria-expanded={open} title={label} aria-label={label} onMouseDown={compact ? event => event.preventDefault() : undefined} onClick={event => { if (compact) event.stopPropagation(); open ? close() : openPicker() }}><Library size={compact ? 16 : 13} aria-hidden="true" />{!compact && <span>提示词库</span>}</button>
+      {!compact && <button type="button" className="btn btn-ghost btn-sm" disabled={!canSavePrompt(value)} title="把当前提示词存入提示词库" aria-label="存入提示词库" onClick={save}><BookmarkPlus size={13} aria-hidden="true" /><span>存入提示词库</span></button>}
+      {!compact && <span className="cv-prompt-library-status" role="status" aria-live="polite" data-testid="prompt-library-status">{status}</span>}
       {open && createPortal(
         <div ref={popoverRef} className="cv-prompt-library-popover is-floating" role="dialog" aria-label="提示词库" onKeyDown={onKeyDown} onPointerDown={event => event.stopPropagation()} style={place ? { position: 'fixed', ...place } : { position: 'fixed', left: 0, top: 0, opacity: 0 }}>
-          <label className="cv-prompt-library-search"><Search size={13} aria-hidden="true" /><input ref={searchRef} role="combobox" aria-expanded="true" aria-controls="cv-prompt-library-list" aria-activedescendant={visible[active] ? `cv-prompt-option-${visible[active].id}` : undefined} aria-label="搜索提示词" placeholder="搜索提示词" value={query} onChange={event => setQuery(event.target.value)} /></label>
-          <div id="cv-prompt-library-list" role="listbox" aria-label="提示词列表" className="cv-prompt-library-list">
-            {loading && !prompts.length ? <div className="cv-prompt-library-empty" role="status">加载中…</div>
-              : visible.length === 0 ? <div className="cv-prompt-library-empty" role="status">{query ? '没有匹配的提示词' : '提示词库为空'}</div>
-              : visible.map((prompt, index) => (
-                <button type="button" key={prompt.id} id={`cv-prompt-option-${prompt.id}`} role="option" aria-selected={index === active} tabIndex={-1} className={`cv-prompt-library-option ${index === active ? 'is-active' : ''}`} title="插入到光标处" onMouseEnter={() => setActive(index)} onMouseDown={event => { event.preventDefault(); insert(prompt) }}>{promptPreview(prompt.text)}</button>
-              ))}
-          </div>
+          <PromptLibraryList listId="cv-prompt-library-list" optionPrefix="cv-prompt-option-" inputRef={searchRef} query={query} onQuery={setQuery} prompts={prompts} visible={visible} active={active} onActive={setActive} onPick={insert} loading={loading} />
         </div>, triggerRef.current?.closest('.canvas-studio') || document.body
       )}
     </div>

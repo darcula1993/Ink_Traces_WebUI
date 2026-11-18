@@ -2,8 +2,11 @@
 // menu). New references are appended after the existing ones, so the keyframe
 // rule "first image = first frame, second = last frame" stays order based.
 import {effectiveVideoModel,videoCapabilities} from './videoGenerationRules.js'
+import {imageCapabilities} from './imageGenerationRules.js'
 
 const ACCEPTS = { image: ['image'], video: ['image', 'video', 'audio'], audio: ['image', 'audio'] }
+export const ACCEPTED_REFERENCE_KINDS = ACCEPTS
+export const AUDIO_REFERENCE_LIMITS = { image: 1, audio: 3 }
 const KIND = { image: '图片', video: '视频', audio: '音频' }
 
 export function referenceDropError(node, currentAssets = [], addingKinds = [], provider = null) {
@@ -26,8 +29,23 @@ export function referenceDropError(node, currentAssets = [], addingKinds = [], p
   }
   if (node.type === 'audio') {
     if (count('image') && count('audio')) return '音频参考不能混用图片和音频'
-    if (count('image') > 1) return '音频参考最多 1 张图片'
-    if (count('audio') > 3) return '音频参考最多 3 段音频'
+    if (count('image') > AUDIO_REFERENCE_LIMITS.image) return `音频参考最多 ${AUDIO_REFERENCE_LIMITS.image} 张图片`
+    if (count('audio') > AUDIO_REFERENCE_LIMITS.audio) return `音频参考最多 ${AUDIO_REFERENCE_LIMITS.audio} 段音频`
   }
   return null
+}
+
+// CANVAS-PORTS-LIB-20261117: per-kind reference limits for a generation node, from the
+// same capability tables as referenceDropError / canvasApi. A kind the node does not
+// accept has limit 0. Returns null when the interface/model is unknown (no limit check).
+export function referenceLimits(node, provider = null) {
+  if (!node || !ACCEPTS[node.type]) return null
+  if (node.type === 'video' && node.params?.video_mode === 'keyframe') return { image: 2, video: 0, audio: 0 }
+  if (node.type === 'video') {
+    const spec = videoCapabilities(effectiveVideoModel(node.params?.model, provider?.models))
+    return spec ? { image: spec.maxRefImages, video: spec.maxRefVideos, audio: spec.maxRefAudios } : null
+  }
+  if (node.type === 'audio') return { ...AUDIO_REFERENCE_LIMITS, video: 0 }
+  if (!provider) return null
+  return { image: imageCapabilities(provider.provider || provider.id, provider.capability_model || provider.model).maxReferences, video: 0, audio: 0 }
 }

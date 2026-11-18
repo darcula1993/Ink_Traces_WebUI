@@ -405,7 +405,7 @@ def validate_document(document, workflow_id):
         if not isinstance(node, dict) or not isinstance(node.get('id'), str) or not ID.fullmatch(node['id']) or node['id'] in seen:
             raise CanvasError('节点ID无效或重复')
         seen.add(node['id'])
-        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs'}:
+        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs', 'size'}:
             raise CanvasError('未知节点字段')
         if type(node.get('rating', 0)) is not int or not 0 <= node.get('rating', 0) <= 5:
             raise CanvasError('节点评级必须为0至5的整数')
@@ -416,6 +416,14 @@ def validate_document(document, workflow_id):
                 raise CanvasError('仅图像、视频、音频生成节点可标记上游已变更')
             if type(node['upstreamStale']) is not bool:
                 raise CanvasError('上游变更标记必须为布尔值')
+        if 'size' in node:
+            # CARD-PROMPT-RESIZE-20261118: manual node size as a multiple of the automatic size; absent = automatic.
+            size = node['size']
+            if node['type'] == 'text':
+                raise CanvasError('文本节点不能调整大小')
+            if not isinstance(size, dict) or set(size) != {'scale'} or type(size['scale']) not in (int, float) \
+                    or not math.isfinite(size['scale']) or not 0.25 <= size['scale'] <= 4:
+                raise CanvasError('节点尺寸须为0.25至4倍的缩放值')
         order = node.get('referenceOrder', [])
         if not isinstance(order, list) or len(order) > 600 or any(not isinstance(i, str) or not re.fullmatch(r'[0-9a-f]{32}', i) for i in order) or len(set(order)) != len(order):
             raise CanvasError('参考素材排序须为最多600个不重复的素材编号')

@@ -405,6 +405,49 @@ def api_bulk_delete_tasks():
     })
 
 
+TRASH_TASK_TYPES = ('image', 'video', 'audio')
+SKIP_REASONS = ('cancel_requested', 'leased', 'not_in_trash')
+
+
+@task_api.route('/api/tasks/trash/empty', methods=['POST'])
+def api_empty_task_trash():
+    """Permanently delete every trashed task of one type (EMPTY-TRASH-20261118).
+
+    Uses the same rules as single/bulk permanent deletion: tasks still cancelling or
+    holding a worker lease are skipped, and library files are never removed. Rows are
+    processed in short keyset batches so the database is never locked for long.
+    """
+    data = request.get_json(silent=True)
+    task_type = data.get('type') if isinstance(data, dict) else None
+    if task_type not in TRASH_TASK_TYPES:
+        return jsonify({'success': False, 'error': 'type 必须是 image、video 或 audio'}), 400
+    deleted_ids = []
+    skipped = {}
+    after_id = 0
+    while True:
+        batch = task_db.list_trashed_task_ids(task_type, after_id)
+        if not batch:
+            break
+        after_id = batch[-1]
+        purged, batch_skipped = task_db.purge_trashed_tasks(batch, task_type)
+        skipped.update(batch_skipped)
+        for task, assets in purged:
+            remove_task_files(task, assets)
+            deleted_ids.append(task['id'])
+    reasons = {reason: 0 for reason in SKIP_REASONS}
+    for reason in skipped.values():
+        reasons[reason] = reasons.get(reason, 0) + 1
+    return jsonify({
+        'success': True,
+        'type': task_type,
+        'deleted': len(deleted_ids),
+        'deleted_ids': deleted_ids,
+        'skipped': len(skipped),
+        'skipped_ids': list(skipped),
+        'skipped_reasons': reasons,
+    })
+
+
 @task_api.route('/api/tasks/<int:task_id>', methods=['DELETE'])
 def api_delete_task(task_id):
     t = task_db.get_task(task_id)

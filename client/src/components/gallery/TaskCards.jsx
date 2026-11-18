@@ -1,10 +1,13 @@
 import React from 'react'
+import useGridWindow from '../../lib/useGridWindow'
 import { Ban, Check, FolderInput, FolderSearch, Heart, Trash2 } from 'lucide-react'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, formatTime, providerLabel, taskTypeLabel, selectionToken } from './taskModel.js'
 import { TaskPreview } from './TaskPreview.jsx'
 
 export const TaskCard = React.memo(function TaskCard({
   item,
+  windowIndex,
+  windowStyle,
   detailed,
   selectionMode,
   checked,
@@ -28,7 +31,7 @@ export const TaskCard = React.memo(function TaskCard({
     onOpen(item)
   }
   return (
-    <article
+    <article style={{contentVisibility:"visible",...windowStyle}} data-window-card={windowIndex}
       role="button"
       tabIndex={0}
       data-testid="task-gallery-card"
@@ -128,14 +131,14 @@ export const TaskCard = React.memo(function TaskCard({
       {detailed && (
         <div className="task-card-details border-t border-white/8 px-3 py-2.5">
           <p className="line-clamp-2 min-h-10 break-words text-xs leading-5 text-nexus-text-light">{item.prompt || '未填写提示词'}</p>
-          {item.favoriteGroups?.length > 0 && (
+          {(item.favoriteGroups?.length > 0 ? (
             <div className="mt-2 flex min-w-0 gap-1 overflow-hidden">
               {item.favoriteGroups.slice(0, 2).map(group => (
                 <span key={group.id} className="favorite-group-pill" data-color={group.color}>{group.name}</span>
               ))}
               {item.favoriteGroups.length > 2 && <span className="favorite-group-pill">+{item.favoriteGroups.length - 2}</span>}
             </div>
-          )}
+          ) : <div className="mt-2" style={{height:22}} aria-hidden="true"/>)}
           <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-nexus-muted">
             <span>#{item.taskId}</span>
             {item.provider && <span className="truncate">{providerLabel(item.provider)}</span>}
@@ -148,16 +151,22 @@ export const TaskCard = React.memo(function TaskCard({
 })
 
 export const TaskCardList = React.memo(function TaskCardList({ items, loading, detailed, selectedKeys, ...props }) {
+  const window = useGridWindow(items.length)
+  const indices=Array.from({length:Math.max(0,window.end-window.start)},(_,i)=>i+window.start)
+  if(window.pinned)for(const index of [window.pinned.index-1,window.pinned.index,window.pinned.index+1])if(index>=0&&index<items.length&&!indices.includes(index))indices.push(index)
+  indices.sort((a,b)=>a-b)
   return (
-    <div className="task-gallery-grid">
+    <div className="task-gallery-grid" ref={window.ref} style={{position:"relative",paddingTop:window.padTop,paddingBottom:window.padBottom}}>
       {loading && items.length === 0 && Array.from({ length: 8 }, (_, index) => (
         <div key={`skeleton-${index}`} className="task-card-skeleton" aria-hidden="true">
           <div className="task-card-skeleton-media" />
           {detailed && <div className="task-card-skeleton-lines"><span /><span /></div>}
         </div>
       ))}
-      {items.map(item => (
+      {indices.map(index => {const item=items[index];return (
         <TaskCard
+          windowIndex={index}
+          windowStyle={window.pinned&&(index<window.start||index>=window.end)?{position:"absolute",top:Math.floor(index/window.pinned.columns)*window.pinned.stride,left:(index%window.pinned.columns)*(window.pinned.width+window.pinned.gap),width:window.pinned.width}:undefined}
           key={item.key}
           item={item}
           detailed={detailed}
@@ -165,7 +174,7 @@ export const TaskCardList = React.memo(function TaskCardList({ items, loading, d
           selectionTokenValue={selectionToken(item)}
           {...props}
         />
-      ))}
+      )})}
     </div>
   )
 })

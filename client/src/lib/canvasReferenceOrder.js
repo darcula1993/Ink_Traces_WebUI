@@ -54,3 +54,22 @@ export function reconcileReferenceMentions(before,after) {
  }
  return {...after,nodes:updated}
 }
+
+// CANVAS-PORTS-LIB-20261117 (user 11-17 Q4): dropping onto occupied port N inserts the
+// reference at position N of its kind; the rest shift back. `assets` is the current
+// resolveNodeInputs order (the new reference already included, e.g. appended last).
+export function referenceOrderWithInsert(assets,assetId,position) {
+ const moving=assets.find(asset=>asset.id===assetId)
+ if(!moving)throw new Error('参考素材已变化，请重新连接')
+ const rest=assets.filter(asset=>asset.id!==assetId),same=rest.filter(asset=>asset.kind===moving.kind)
+ const n=Math.max(1,Math.min(Math.floor(Number(position))||1,same.length+1))
+ const index=n>same.length?rest.length:rest.indexOf(same[n-1])
+ return [...rest.slice(0,index),moving,...rest.slice(index)].map(asset=>asset.id)
+}
+// Same mention rewriting and "shared upstream text" refusal as reorderNodeReferences.
+export function insertNodeReferenceAt(document,nodeId,assetId,position) {
+ const node=document.nodes.find(item=>item.id===nodeId)
+ if(!node)throw new Error('节点已不存在，请重新选择')
+ const {assets}=resolveNodeInputs(node,document.nodes,document.edges),order=referenceOrderWithInsert(assets,assetId,position)
+ return order.every((id,index)=>assets[index].id===id)?document:reorderNodeReferences(document,nodeId,order)
+}

@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
-import TextToImage from './components/TextToImage'
-import ImageToImage from './components/ImageToImage'
+const TextToImage = lazyPanel(() => import('./components/TextToImage'))
+const ImageToImage = lazyPanel(() => import('./components/ImageToImage'))
 import ImageOutputControls from './components/image-parameters/ImageOutputControls'
 import useImageDimensionDraft from './components/image-parameters/useImageDimensionDraft'
 import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imageRequestFields,imageSizeSummary as getImageSizeSummary} from './lib/imageGenerationRules'
-import PromptCollection from './components/PromptCollection'
-import TaskGallery from './components/TaskGallery'
-import PngInfoModal from './components/PngInfoModal'
+const PromptCollection = lazyPanel(() => import('./components/PromptCollection'))
+const TaskGallery = lazyPanel(() => import('./components/TaskGallery'))
+const PngInfoModal = lazyPanel(() => import('./components/PngInfoModal'))
 import useModalFocus, { isTopModal } from './components/ui/useModalFocus'
-import ReferenceMediaModal from './components/ReferenceMediaModal'
-import ToolAssetLibrary from './components/library/ToolAssetLibrary'
+const ReferenceMediaModal = lazyPanel(() => import('./components/ReferenceMediaModal'))
+const ToolAssetLibrary = lazyPanel(() => import('./components/library/ToolAssetLibrary'))
 import PromptMentionTextarea from './components/PromptMentionTextarea'
 import SortableReferenceItem, { moveArrayItem } from './components/SortableReferenceItem'
 import IconButton from './components/ui/IconButton'
@@ -27,6 +27,14 @@ import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CU
 import { currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile, readFileDataUrl, videoDropZoneHandlers } from './lib/referenceMedia.js'
 import { makeImgTab, makeVideoTab, DEFAULT_AUDIO_FORM, IMAGE_WORKSPACE_OPTIONS, VIDEO_WORKSPACE_OPTIONS } from './lib/workspaceTabs.js'
 import { TASK_CENTER_EVENT, TASK_CENTER_MODES } from './lib/taskCenterLink.js'
+
+// Keep loading boundaries local so navigation and existing forms stay usable.
+function lazyPanel(load) {
+  const Component = React.lazy(load)
+  return function LazyPanel(props) {
+    return <React.Suspense fallback={<div role="status" className="p-6 text-nexus-muted">正在加载…</div>}><Component {...props} /></React.Suspense>
+  }
+}
 
 axios.defaults.withCredentials = true
 
@@ -51,6 +59,7 @@ function App({ onLogout }) {
   const [providerRevision, setProviderRevision] = useState(0)
   const [notification, setNotification] = useState(null)
   const notificationTimer = useRef(null)
+  const [appMode, setTabAppMode] = useState(initialTabMode)
   const appShellRef = useRef(null)
 
   const notify = useCallback((message, tone = 'success') => {
@@ -63,7 +72,7 @@ function App({ onLogout }) {
 
   useEffect(() => {
     const shell = appShellRef.current
-    if (!shell || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
+    if (!shell || appMode === 'canvas' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined
     let frameId = null
 
     const updateHighlight = (event) => {
@@ -80,7 +89,7 @@ function App({ onLogout }) {
       shell.removeEventListener('pointermove', updateHighlight)
       cancelAnimationFrame(frameId)
     }
-  }, [])
+  }, [appMode])
 
   const [apiProvider, setApiProvider] = useState('ark')
   const [providerInfoReady, setProviderInfoReady] = useState(false)
@@ -106,7 +115,6 @@ function App({ onLogout }) {
   // decides where a fresh tab lands: a new tab always opens the canvas (user decision 11-14);
   // a reload keeps this tab's own tool.
   const [, setServerAppMode] = useWorkspaceState('appMode', 'canvas')
-  const [appMode, setTabAppMode] = useState(initialTabMode)
   const setAppMode = useCallback(mode => { setTabAppMode(mode); writeTabMode(mode); setServerAppMode(mode) }, [setServerAppMode])
   const canvasBeforeLeave = useRef(null), modeSwitchPending = useRef(false)
   async function changeAppMode(mode) {
@@ -1981,12 +1989,12 @@ function App({ onLogout }) {
 
       </main>
 
-      <PngInfoModal
+      {showPngInfo && <PngInfoModal
         open={showPngInfo}
         onClose={() => setShowPngInfo(false)}
         onApply={handleApplyPngInfo}
-      />
-      <ReferenceMediaModal media={referenceMedia} onClose={() => setReferenceMedia(null)} />
+      />}
+      {referenceMedia && <ReferenceMediaModal media={referenceMedia} onClose={() => setReferenceMedia(null)} />}
       {showCupsyAssets && <ToolAssetLibrary
         onApply={useLocalLibraryItems}
         onRemoteApply={useRemoteLibraryItems}

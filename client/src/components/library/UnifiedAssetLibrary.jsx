@@ -29,7 +29,7 @@ const LIMIT=40
 // (“在素材库中显示” from the task center, S4b).
 export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=false,allowedKinds=['image','video','audio'],selectionLimit=100,onApply,onClose,onRemote,initialSource='local',validateSelection,onBeforeDelete,onDeleted,title=null,applyLabel=null,initialFolderId=null,focusMediaIds=null}){
  const [view,setView]=useState(()=>initialSource==='characters'&&browseOnly?'characters':'media'),[place,setPlace]=useState(()=>initialFolderId||(initialSource==='generated'?'@generated':'all'))
- const [kind,setKind]=useState('all'),[query,setQuery]=useState(''),[page,setPage]=useState(1),[result,setResult]=useState({items:[],total:0}),[folders,setFolders]=useState([]),[foldersReady,setFoldersReady]=useState(false),[counts,setCounts]=useState({})
+ const [kind,setKind]=useState('all'),[query,setQuery]=useState(''),[listingParams,setListingParams]=useState({page:1,q:''}),[result,setResult]=useState({items:[],total:0}),[folders,setFolders]=useState([]),[foldersReady,setFoldersReady]=useState(false),[counts,setCounts]=useState({})
  const [groups,setGroups]=useState(null),[groupId,setGroupId]=useState(null),[groupDetail,setGroupDetail]=useState(null)
  const [selected,setSelected]=useState([]),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[queryError,setQueryError]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[revision,setRevision]=useState(0)
  const [action,setAction]=useState(null),[moving,setMoving]=useState(null),[editing,setEditing]=useState(null),[preview,setPreview]=useState(null),[uploadOptions,setUploadOptions]=useState(false),[uploadChoice,setUploadChoice]=useState(null),[picker,setPicker]=useState(null),[charactersBusy,setCharactersBusy]=useState(false),[expanded,setExpanded]=useState(()=>new Set()),[duplicates,setDuplicates]=useState(null)
@@ -39,9 +39,13 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
  const generatedFolder=folders.find(f=>f.system_key===GENERATED)
  // Folders and the navigation totals (全部素材 / 根目录) follow every mutation.
  useEffect(()=>{let active=true;Promise.all([listMediaFolders(),listMedia({},{limit:1}),listMedia({folder_id:'root'},{limit:1})]).then(([list,all,root])=>{if(!active)return;setFolders(list);setCounts({all:all.total,root:root.total});setFoldersReady(true);const generated=list.find(f=>f.system_key===GENERATED);if(generated)setExpanded(v=>v.size?v:new Set([generated.id]));setPlace(current=>current==='@generated'?generated?.id||'all':current!=='all'&&current!=='root'&&!list.some(f=>f.id===current)?'all':current)}).catch(e=>{if(active){setError(message(e));setFoldersReady(true)}});return()=>{active=false}},[revision])
+ const {page,q:debouncedQuery}=listingParams
+ const setPage=value=>setListingParams(current=>({...current,page:typeof value==='function'?value(current.page):value}))
+ // Commit the search term and first page together; pending input never fetches the old term.
+ useEffect(()=>{if(query===debouncedQuery)return;const timer=setTimeout(()=>setListingParams({page:1,q:query}),250);return()=>clearTimeout(timer)},[query,debouncedQuery])
  const filters=()=>({...placeFilters(folders,place),kind,q:query})
  const listing=view==='media'&&foldersReady&&place!=='@generated'
- useEffect(()=>{if(!listing){if(view!=='media')setLoading(false);return}const controller=new AbortController();setLoading(true);setQueryError('');listMedia(filters(),{page,limit:LIMIT},controller.signal).then(data=>{if(!controller.signal.aborted)setResult(data)}).catch(e=>{if(!controller.signal.aborted)setQueryError(message(e))}).finally(()=>{if(!controller.signal.aborted)setLoading(false)});return()=>controller.abort()},[listing,place,kind,query,page,revision])
+ useEffect(()=>{if(!listing){if(view!=='media')setLoading(false);return}if(query!==debouncedQuery){setLoading(true);return}const controller=new AbortController();setLoading(true);setQueryError('');listMedia({...filters(),q:debouncedQuery},{page,limit:LIMIT},controller.signal).then(data=>{if(!controller.signal.aborted)setResult(data)}).catch(e=>{if(!controller.signal.aborted)setQueryError(message(e))}).finally(()=>{if(!controller.signal.aborted)setLoading(false)});return()=>controller.abort()},[listing,place,kind,query,debouncedQuery,page,revision])
  useEffect(()=>{if(view!=='groups')return;let active=true;setLoading(true);setQueryError('');(groupId?getMediaGroup(groupId).then(d=>{if(active)setGroupDetail(d)}):listMediaGroups().then(g=>{if(active)setGroups(g)})).catch(e=>{if(active)setQueryError(message(e))}).finally(()=>{if(active)setLoading(false)});return()=>{active=false}},[view,groupId,revision])
  // The upload target follows the current place unless the user picked another folder in 上传设置 for this place;
  // derived (not set by an effect) so an upload right after changing folders never uses the previous target (S7).
@@ -59,7 +63,7 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
  // S10 D2: the “已全选当前筛选 N 项” notice describes one filter; it goes when the selection is cleared or the filter changes.
  function dropAllNotice(){if(allNotice.current){const text=allNotice.current;allNotice.current='';setNotice(n=>n===text?'':n)}}
  function clearSelection(){setSelected([]);dropAllNotice()}
- function filter(setter,value){setter(value);setPage(1);dropAllNotice()}
+ function filter(setter,value){setter(value);if(setter!==setQuery)setPage(1);dropAllNotice()}
  const allowed=item=>allowedKinds.includes(item.asset.kind)
  function check(merged){if(!browseOnly&&merged.length>selectionLimit)throw new Error(`最多选择 ${selectionLimit} 个素材`);if(!browseOnly&&merged.some(i=>!allowed(i)))throw new Error('当前节点不支持所选媒体类型');const issue=browseOnly?null:validateSelection?.(merged);if(issue)throw new Error(issue)}
  function selectItems(items,replace=false){const merged=[...new Map([...(replace?[]:selected),...items].map(i=>[i.key,i])).values()];check(merged);setSelected(merged)}

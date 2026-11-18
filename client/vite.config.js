@@ -19,6 +19,22 @@ try {
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [{ find: /^react-konva$/, replacement: path.resolve(__dirname, 'src/lib/konvaMinimal.js') }],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('commonjsHelpers')) return 'vendor-react'
+          if (!id.includes('/node_modules/')) return
+          if (/\/(react|react-dom|scheduler)\//.test(id)) return 'vendor-react'
+          if (id.includes('/lucide-react/')) return 'vendor-icons'
+          if (/\/(konva|react-konva|react-reconciler)\//.test(id)) return 'vendor-konva'
+        },
+      },
+    },
+  },
   server: {
     host: config.client.host,
     port: config.client.port,

@@ -5,20 +5,27 @@ const BASE_DEFAULT_WIDTH = 300
 // UI-ITER-R2-FIX: >=2200px the sidebar content is zoomed 1.2, so its default/limits scale with it.
 const scaleFactor = () => (typeof window !== 'undefined' && window.innerWidth >= 2200 ? 1.2 : 1)
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
-function readWidth() {
+function readWidth(storageKey, fallback) {
   try {
-    const saved = Number(localStorage.getItem(STORAGE_KEY))
-    return Number.isFinite(saved) && saved >= 160 && saved <= 640 ? saved : Math.round(BASE_DEFAULT_WIDTH * scaleFactor())
-  } catch { return Math.round(BASE_DEFAULT_WIDTH * scaleFactor()) }
+    const saved = Number(localStorage.getItem(storageKey))
+    return Number.isFinite(saved) && saved >= 160 && saved <= 640 ? saved : fallback
+  } catch { return fallback }
 }
 
-export default function ResizableSidebar({children}) {
+// CANVAS-LAYOUT-2-20261118: also hosts the left rail's pop-out panel (pinned or floating). Without the new
+// props it behaves exactly as the old sidebar shell. `minWidth`/`maxWidth` are in unscaled px (spec: 240–360),
+// `reserve` is the width kept for the rest of the layout, `onWidth` reports the effective width.
+export default function ResizableSidebar({children, className = '', storageKey = STORAGE_KEY, minWidth = null, maxWidth = 640,
+  defaultWidth = BASE_DEFAULT_WIDTH, reserve = 480, label = '调整左侧栏宽度', onWidth, ...rest}) {
   const shell = useRef(null), gesture = useRef(null), endGuard = useRef(null)
-  const [preferred, setPreferred] = useState(readWidth)
+  const fallbackWidth = () => Math.round(defaultWidth * scaleFactor())
+  const [preferred, setPreferred] = useState(() => readWidth(storageKey, fallbackWidth()))
   const [available, setAvailable] = useState(1440)
   const [dragging, setDragging] = useState(false)
-  const scale = scaleFactor(), max = Math.min(640 * scale, Math.max(160, available - 480)), min = Math.min(280, max)
+  const scale = scaleFactor(), floor = minWidth == null ? 160 : minWidth * scale
+  const max = Math.min(maxWidth * scale, Math.max(floor, available - reserve)), min = Math.min(minWidth == null ? 280 : floor, max)
   const width = clamp(preferred, min, max)
+  useEffect(() => { onWidth?.(width) }, [width])
 
   useEffect(() => {
     const parent = shell.current.parentElement
@@ -30,7 +37,7 @@ export default function ResizableSidebar({children}) {
 
   const persist = value => {
     setPreferred(value)
-    try { localStorage.setItem(STORAGE_KEY, String(value)) } catch { /* Layout remains usable without storage. */ }
+    try { localStorage.setItem(storageKey, String(value)) } catch { /* Layout remains usable without storage. */ }
   }
   const finish = (event, cancel = false) => {
     const current = gesture.current
@@ -73,9 +80,9 @@ export default function ResizableSidebar({children}) {
     endGuard.current = cleanup
   }
 
-  return <div ref={shell} className={`cv-sidebar-shell${dragging ? ' is-resizing' : ''}`} style={{width, flexBasis: width}}>
+  return <div ref={shell} {...rest} className={`cv-sidebar-shell${className ? ` ${className}` : ''}${dragging ? ' is-resizing' : ''}`} style={{width, flexBasis: width}}>
     {children}
-    <div className="cv-sidebar-resizer" role="separator" aria-label="调整左侧栏宽度" aria-orientation="vertical"
+    <div className="cv-sidebar-resizer" role="separator" aria-label={label} aria-orientation="vertical"
       aria-valuemin={Math.round(min)} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(width)}
       aria-valuetext={`${Math.round(width)} 像素`} tabIndex={0} title="拖动调整宽度；双击恢复默认；方向键微调"
       onPointerDown={event => {
@@ -94,7 +101,7 @@ export default function ResizableSidebar({children}) {
       }}
       onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)}
       onLostPointerCapture={event => finish(event, true)}
-      onDoubleClick={() => persist(Math.round(BASE_DEFAULT_WIDTH * scaleFactor()))}
+      onDoubleClick={() => persist(fallbackWidth())}
       onKeyDown={event => {
         if (event.key === 'Escape' && gesture.current) {
           event.preventDefault(); event.stopPropagation()

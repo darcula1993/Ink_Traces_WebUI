@@ -1,0 +1,52 @@
+/* CANVAS-PORTS-UI-20261118: dynamic reference ports (spec §4.2). Port colour tokens --cv-port-image/video/audio
+ * are defined once in canvasChrome.css (PORT-COLORS-20261118); only the over-limit alias lives here. */
+.canvas-studio {
+  /* Over-limit = the global --danger red (#df8a90): 7.57 / 7.24 / 6.85 : 1 on bg / node / label. It is never the
+   * only cue: an over-limit port gets a dashed ring and its name reads "· 超出上限" (PORT-COLORS-20261118). */
+  --cv-port-over: var(--danger);
+}
+.canvas-studio .cv-ports { position: absolute; inset: 0 auto 0 0; width: 0; z-index: 2; }
+.canvas-studio .cv-node .cv-port-ref, .canvas-studio .cv-node .cv-port-group { --port-color: var(--cv-port-image); }
+.canvas-studio .cv-node :is(.cv-port-ref, .cv-port-group).is-video { --port-color: var(--cv-port-video); }
+.canvas-studio .cv-node :is(.cv-port-ref, .cv-port-group).is-audio { --port-color: var(--cv-port-audio); }
+
+/* occupied by a connection: solid; from the library (no edge): ring with a small solid dot; empty: hollow ring;
+ * pending upstream (no result yet): dashed hollow ring. */
+.canvas-studio .cv-node .cv-port-ref::after { width: 9px; height: 9px; border-radius: 50%; box-sizing: border-box; background: var(--port-color); box-shadow: 0 0 0 2px var(--surface-1, #111); border: 0; }
+.canvas-studio .cv-node .cv-port-ref.is-library::after { background: radial-gradient(circle, var(--port-color) 0 2px, var(--surface-1, #111) 2.5px); border: 2px solid var(--port-color); width: 11px; height: 11px; }
+.canvas-studio .cv-node .cv-port-ref.is-empty::after { background: var(--surface-1, #111); border: 2px solid var(--port-color); width: 11px; height: 11px; opacity: .8; }
+.canvas-studio .cv-node .cv-port-ref.is-pending::after { background: transparent; border: 1.5px dashed var(--port-color); width: 11px; height: 11px; }
+.canvas-studio .cv-node .cv-port-ref:hover::after, .canvas-studio .cv-node .cv-port-ref:focus-visible::after { box-shadow: 0 0 0 2px var(--surface-1, #111), 0 0 0 4px var(--accent, #45c088); }
+/* Non-colour type cue: video rounded square, audio diamond, image circle (same fill states as above). */
+.canvas-studio .cv-node .cv-port-ref.is-video::after { border-radius: 2px; }
+.canvas-studio .cv-node .cv-port-ref.is-audio::after { border-radius: 2px; transform: rotate(45deg) scale(.9); }
+/* Over limit: dashed red ring outside the dot (shape + colour), not just a colour swap. */
+.canvas-studio .cv-node .cv-port-ref.is-over::after { box-shadow: 0 0 0 2px var(--surface-1, #111); outline: 1.5px dashed var(--cv-port-over); outline-offset: 2px; }
+/* Drag highlight: a compatible empty port glows in its own type colour (focus green is kept for hover/focus). */
+.canvas-studio .cv-node .cv-port-ref.is-drop-ready::after { box-shadow: 0 0 0 2px var(--surface-1, #111), 0 0 0 4px var(--port-color); opacity: 1; }
+.canvas-studio .cv-node .cv-port-group::after { display: none; }
+.canvas-studio .cv-node .cv-port-group { width: auto !important; min-width: 24px; left: -18px; border-radius: 999px; }
+.canvas-studio .cv-port-badge { display: inline-block; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 18px; white-space: nowrap; color: var(--on-accent, #06140d); background: var(--port-color); }
+.canvas-studio .cv-port-group.is-over .cv-port-badge { outline: 1.5px dashed var(--cv-port-over); outline-offset: 2px; }
+
+/* Names: only while the node is selected, hovered, a connection is being dragged, or the port has focus. */
+.canvas-studio .cv-port-name { display: none; position: absolute; right: calc(100% + 2px); top: 50%; transform: translateY(-50%); padding: 1px 6px; border-radius: 6px; font-size: 11px; line-height: 16px; white-space: nowrap; pointer-events: none; color: var(--cv-text, #e6e6e6); background: var(--surface-2, #1b1d20); border: 1px solid color-mix(in srgb, var(--port-color) 55%, transparent); }
+.canvas-studio .cv-port-ref.is-over .cv-port-name { color: var(--cv-port-over); border-color: var(--cv-port-over); }
+.canvas-studio .cv-node:is(.is-selected, :hover, .is-port-candidate) .cv-port-name,
+.canvas-studio .cv-node .cv-port-ref:focus-visible .cv-port-name { display: block; }
+/* Low zoom: dots only; the native tooltip (screen coordinates) still names the port. */
+.canvas-studio .cv-world.is-lod-low .cv-port-name, .canvas-studio .cv-world.is-lod-low .cv-port-hint { display: none !important; }
+
+.canvas-studio .cv-node.is-port-refused { opacity: .72; }
+.canvas-studio .cv-port-refusal, .canvas-studio .cv-port-hint { position: absolute; left: 14px; top: 4px; transform: translateY(-100%); white-space: nowrap; padding: 2px 8px; border-radius: 6px; font-size: 12px; line-height: 18px; background: var(--surface-2, #1b1d20); border: 1px solid var(--cv-border, rgba(255,255,255,.1)); color: var(--cv-secondary, #aaa); pointer-events: none; }
+.canvas-studio .cv-port-refusal { color: var(--cv-port-over); border-color: var(--cv-port-over); }
+.canvas-studio .cv-port-warning { position: absolute; left: 0; bottom: calc(100% + 4px); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 1px 8px; border-radius: 6px; font-size: 12px; line-height: 18px; color: var(--cv-port-over); background: var(--surface-1, #111); border: 1px solid var(--cv-port-over); }
+
+/* Per-kind thumbnail numbers (spec §4.2 缩略图编号): kind-colour corner on the number badge. */
+.canvas-studio .cv-reference-thumb[data-kind] .cv-reference-number { box-shadow: inset 3px 0 0 var(--kind-color, var(--cv-port-image)); padding-left: 5px; }
+.canvas-studio .cv-reference-thumb[data-kind=image] { --kind-color: var(--cv-port-image); }
+.canvas-studio .cv-reference-thumb[data-kind=video] { --kind-color: var(--cv-port-video); }
+.canvas-studio .cv-reference-thumb[data-kind=audio] { --kind-color: var(--cv-port-audio); }
+
+@media (prefers-reduced-motion: reduce) { .canvas-studio .cv-ports .cv-port { transition: none; } }
+@media (forced-colors: active) { .canvas-studio .cv-node .cv-port-ref::after { border: 1px solid ButtonText; } }

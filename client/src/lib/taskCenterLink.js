@@ -22,6 +22,17 @@ export function requestTaskCenter({ taskId, type } = {}) {
   return event.defaultPrevented
 }
 
+// CANVAS-LAYOUT-2-20261118: "本画布任务" footer links — switch to a tool's task center without a task id
+// (nothing is stored, so the task center opens normally). Returns true when the app shell handled it.
+export function requestToolTaskCenter(type) {
+  if (!TASK_CENTER_MODES.includes(type)) return false
+  const target = globalThis.window || globalThis
+  if (typeof target.dispatchEvent !== 'function' || typeof globalThis.CustomEvent !== 'function') return false
+  const event = new globalThis.CustomEvent(TASK_CENTER_EVENT, { detail: { taskId: null, type, at: Date.now() }, cancelable: true })
+  target.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
 // Task center side: the pending task id for this tool (taken once), else null.
 export function takeTaskCenterFocus(mode, now = Date.now()) {
   const store = storage()

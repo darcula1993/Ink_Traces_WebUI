@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.0 - 2026-11-18
+
+Canvas layout redesign (inspired by ImagineArt's node canvas), performance work and a one-click trash.
+
+- **Right properties panel**: interface, model and generation parameters move from the floating panel under the node to a fixed panel on the right. Single column, full-width controls, an "Advanced" group (custom size, background, watermark) and a sticky cost estimate with the Generate button; selecting several nodes shows "Run selected".
+- **Prompt inside the node card**: a fixed-height text area (14px, scrolls inside, never grows past the card) editable at any zoom, with a tool row: prompt library, @character cards (lists character cards only), expand to a large editor, cost estimate and a Generate button on every generation card.
+- **Typed reference ports**: generation nodes list their inputs on the left by type (image circle, video square, audio diamond); one empty port appears after the used ones until the model limit; the port number is the reference order and matches @图片N; over-limit references are marked and can be removed in one step (undoable). Port names appear on selection, hover or while dragging.
+- **Left icon rail** with pop-out panels (project/canvas, library, character cards, prompt library, this canvas's tasks) that can be pinned; minimap, undo/redo and zoom in the bottom-left corner.
+- **Node toolbar** above the selected image or video node: edit, rotate, annotate, download, preview, version history (now a popover; removed from the right panel), and for video capture current/last frame. Results are saved as new library items.
+- Nodes can be resized from the bottom-right corner (media keeps its aspect; double-click resets). New video nodes default to 480p.
+- **Empty trash**: the image, video and audio task centres can empty their trash in one step (per type, with a count in the confirmation). Library files are never deleted; tasks that are still cancelling or running are skipped.
+- **Performance**: node cards no longer re-render while another node is dragged; zoom styles are scoped; long task and sidebar media lists are windowed; search is debounced and fetched once; the annotation tool and other heavy parts load on demand; sidebar video thumbnails no longer load the video itself.
+- Fixes: the version-history button did nothing on generation nodes; the prompt editor could extend outside the node; known flaky browser tests fixed.
+
 ## 2.0.2 - 2026-11-17
 
 - Library rules: the "生成历史" folder and its 图片/视频/音频 sub-folders only accept generation results (uploads cannot be moved in; generation results can be moved out); folder names may not contain "/" and may not repeat among siblings (case-insensitive; existing folders are left as they are).

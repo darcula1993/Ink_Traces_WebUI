@@ -1,0 +1,94 @@
+/* Node-card prompt styles (CARD-PROMPT-RESIZE-20261118). Imported by CanvasNodePrompt.jsx. */
+/* Base card prompt rules (moved from propertiesPanel.css by CARD-PROMPT-RESIZE-20261118). Legacy text cards use them
+ * as they are; generation cards override them with the bottom band below. */
+.canvas-studio .cv-node .cv-node-prompt { position: relative; height: 56px; padding-top: 6px; box-sizing: border-box; }
+.canvas-studio .cv-node[data-node-type=text] .cv-node-prompt { height: 100%; padding-top: 0; }
+.canvas-studio .cv-node-prompt-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; width: 100%; height: 100%; padding: 4px 30px 4px 8px; overflow: hidden; border: 1px solid var(--cv-border); border-radius: 6px; background: var(--field); color: var(--cv-text); font-size: 12px; line-height: 1.45; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.canvas-studio .cv-node[data-node-type=text] .cv-node-prompt-preview { -webkit-line-clamp: 10; }
+.canvas-studio .cv-node-prompt-preview.is-empty { color: var(--text-2); }
+.canvas-studio .cv-node-prompt-preview:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: var(--ring-focus); }
+.canvas-studio .cv-node-prompt.has-issue :is(.cv-node-prompt-preview, .cv-card-prompt) { border-color: var(--danger); }
+/* PROMPT-OVERFLOW-20261118 (user decision 11-18): the editor is a fixed part of the card. Focus never grows or
+ * floats it (the old :focus-within 106px overlay crossed the node's bottom border); long text scrolls inside,
+ * and the larger 扩大编辑提示词 dialog stays available. */
+.canvas-studio .cv-node-prompt.is-editable .cv-prompt-mention { position: absolute; left: 0; right: 0; top: 6px; bottom: 0; min-height: 0; z-index: 3; }
+.canvas-studio .cv-node[data-node-type=text] .cv-node-prompt.is-editable .cv-prompt-mention { top: 0; height: 100%; }
+.canvas-studio .cv-card-prompt { width: 100%; height: 100%; min-height: 0; max-height: none; resize: none; overflow-x: hidden; overflow-y: auto; padding: 4px 30px 4px 8px; border: 1px solid var(--cv-border-strong); border-radius: 6px; background: var(--field); color: var(--cv-text); font-size: 12px; line-height: 1.45; }
+.canvas-studio .cv-card-prompt:focus { outline: none; border-color: var(--border-focus); }
+.canvas-studio .cv-card-generate { position: absolute; right: 4px; bottom: 4px; z-index: 4; display: grid; place-items: center; width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 999px; background: var(--accent); color: #0b0d0c; cursor: pointer; }
+.canvas-studio .cv-card-generate:hover:not(:disabled) { filter: brightness(1.08); }
+.canvas-studio .cv-card-generate:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.canvas-studio .cv-card-generate:disabled { background: var(--field); color: var(--text-2); cursor: not-allowed; }
+
+/* CARD-PROMPT-RESIZE-20261118 (user 11-18, scheme A as ImagineArt): the card's bottom band. A full-width text area
+ * with no inner box (one with the card, 1px separator above; about 3 lines at the automatic size, never grows, scrolls
+ * inside) and a tool row: 提示词库, @角色卡 | 展开编辑, cost, ↑生成. Height = --cv-prompt-h from nodeGeometry, so the
+ * band always ends at the node's bottom border; the status footer sits right above it. */
+.canvas-studio .cv-node.cv-node-sized > .cv-node-prompt.is-card {
+  position: absolute; left: 0; right: 0; bottom: 0; height: var(--cv-prompt-h); padding: 0; display: flex; flex-direction: column;
+  border-top: 1px solid var(--cv-border); border-radius: 0 0 7px 7px; overflow: hidden; box-sizing: border-box;
+}
+.canvas-studio .cv-node.cv-node-sized > .cv-node-prompt.is-card:focus-within { border-top-color: var(--border-focus); }
+.canvas-studio .cv-node.cv-node-sized > .cv-node-prompt.is-card.has-issue { border-top-color: var(--danger); }
+.canvas-studio .cv-node.cv-node-sized:has(> .cv-node-prompt.is-card) .cv-node-footer { bottom: calc(var(--cv-prompt-h) + 3px); }
+.canvas-studio .cv-node-prompt.is-card .cv-node-prompt-text { position: relative; flex: 1 1 auto; min-height: 0; }
+.canvas-studio .cv-node-prompt.is-card.is-editable .cv-prompt-mention { inset: 0; height: 100%; min-height: 0; z-index: 3; } /* inline position: relative */
+/* CARD-PROMPT-READABLE-20261118 (user 11-18: the text was hard to read, the buttons too small). The text sits in an
+ * inset field one lightness step above the card (--surface-raised, no added border): the transparent 6px/8px/2px
+ * border is the gap to the card edge, so the field box still fills .cv-node-prompt-text (geometry unchanged in
+ * tests) and the inset ring draws the focus state around the visible field. 14px/20px, 3 lines = 60px + 4/4 padding;
+ * text --text #e4e5e7 on #1e1f22 = 13.1:1, placeholder --text-2 #a1a4a9 = 6.6:1 (both measured in the task log). */
+.canvas-studio .cv-node-prompt.is-card :is(.cv-card-prompt, .cv-node-prompt-preview) {
+  display: block; width: 100%; height: 100%; margin: 0; padding: 4px 8px; box-sizing: border-box;
+  border: solid transparent; border-width: 6px 8px 2px; border-radius: 14px 14px 14px 14px / 12px 12px 8px 8px;
+  background: var(--surface-raised); background-clip: padding-box;
+  color: var(--cv-text); font-size: 14px; line-height: 20px; -webkit-line-clamp: unset; overflow-x: hidden; text-align: left;
+  transition: box-shadow var(--dur-fast, .12s) ease-out;
+}
+.canvas-studio .cv-node-prompt.is-card .cv-card-prompt { overflow-y: auto; scrollbar-width: thin; }
+.canvas-studio .cv-node-prompt.is-card .cv-node-prompt-preview { overflow-y: hidden; }
+.canvas-studio .cv-node-prompt.is-card .cv-node-prompt-preview.is-empty, .canvas-studio .cv-node-prompt.is-card .cv-card-prompt::placeholder { color: var(--text-2); opacity: 1; }
+.canvas-studio .cv-node-prompt.is-card.is-editable :is(.cv-card-prompt, .cv-node-prompt-preview):hover { box-shadow: inset 0 0 0 1px var(--cv-border-strong); }
+.canvas-studio .cv-node-prompt.is-card .cv-node-prompt-preview:focus-visible,
+.canvas-studio .cv-node-prompt.is-card .cv-card-prompt:focus { outline: none; border-color: transparent; box-shadow: inset 0 0 0 2px var(--border-focus); }
+.canvas-studio .cv-node-prompt.is-card.has-issue :is(.cv-card-prompt, .cv-node-prompt-preview) { border-color: transparent; box-shadow: inset 0 0 0 1px var(--danger); }
+/* Tool row (36px): 28px buttons, 16px icons, 13px labels; every hit area is at least 28×28. */
+.canvas-studio .cv-node-prompt-tools {
+  flex: 0 0 36px; display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 0 16px 0 8px;
+}
+.canvas-studio .cv-node-prompt-tools-start, .canvas-studio .cv-node-prompt-tools-end { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.canvas-studio .cv-node-prompt-tools-start { flex: 0 0 auto; }
+.canvas-studio .cv-node-prompt-tools-end { flex: 1 1 auto; justify-content: flex-end; margin-left: auto; }
+.canvas-studio .cv-node-prompt-tools .cv-prompt-library.is-compact { position: static; display: block; }
+.canvas-studio .cv-card-prompt-library {
+  display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 1px solid var(--cv-border); border-radius: 999px;
+  background: var(--surface-1); color: var(--cv-secondary); cursor: pointer;
+}
+.canvas-studio .cv-card-tool {
+  display: inline-flex; align-items: center; gap: 3px; height: 28px; min-height: 0; padding: 0 9px 0 6px; border: 1px solid var(--cv-border); border-radius: 999px;
+  background: var(--surface-1); color: var(--cv-secondary); font-size: 13px; line-height: 1; white-space: nowrap; cursor: pointer;
+}
+.canvas-studio .cv-card-prompt-expand {
+  display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; min-height: 0; padding: 0;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--cv-secondary); cursor: pointer;
+}
+.canvas-studio :is(.cv-card-prompt-library, .cv-card-tool, .cv-card-prompt-expand):hover:not(:disabled) { color: var(--cv-text); border-color: var(--cv-border-strong); background: var(--surface-raised); }
+.canvas-studio :is(.cv-card-prompt-library, .cv-card-tool, .cv-card-prompt-expand):focus-visible { outline: none; color: var(--cv-text); border-color: var(--border-focus); box-shadow: var(--ring-focus); }
+.canvas-studio .cv-card-tool:disabled { opacity: .55; cursor: not-allowed; }
+.canvas-studio .cv-card-cost { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 28px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.canvas-studio .cv-node-prompt-tools .cv-card-generate { position: static; flex: 0 0 auto; width: 28px; height: 28px; }
+.canvas-studio .cv-node-prompt-tools .cv-card-generate:hover:not(:disabled) { filter: none; background: var(--accent-hover); box-shadow: 0 0 0 3px var(--accent-soft); }
+.canvas-studio .cv-node-prompt-tools .cv-card-generate:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; box-shadow: none; }
+/* CARD-PROMPT-RESIZE-20261118: bottom-right resize grip (inside the card corner, clear of the 生成 button). Shown on
+ * hover / selection / keyboard focus; the cursor and the grip lines are the affordance. */
+.canvas-studio .cv-node-resize {
+  position: absolute; right: 1px; bottom: 1px; z-index: 6; width: 14px; height: 14px; min-height: 0; padding: 0; border: 0; border-radius: 0 0 7px 0;
+  background: linear-gradient(135deg, transparent 0 52%, var(--cv-secondary) 52% 60%, transparent 60% 72%, var(--cv-secondary) 72% 80%, transparent 80%);
+  cursor: nwse-resize; touch-action: none; opacity: 0; transition: opacity var(--dur-fast, .12s) ease-out;
+}
+.canvas-studio .cv-node:is(:hover, .is-selected) > .cv-node-resize, .canvas-studio .cv-node-resize:focus-visible { opacity: .9; }
+.canvas-studio .cv-node-resize.is-manual { --cv-secondary: var(--accent); }
+.canvas-studio .cv-node-resize:focus-visible { outline: none; box-shadow: var(--ring-focus); }
+/* Below LOD_ZOOM the cost is hidden (rule kept from UI-ITER-R1 when it was 12px) like the other secondary node text (the 生成 button's
+ * name and tooltip still carry it). */
+.canvas-studio .cv-world.is-lod-low .cv-node .cv-card-cost { visibility: hidden; }

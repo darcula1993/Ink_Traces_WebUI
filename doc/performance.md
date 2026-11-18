@@ -23,6 +23,51 @@
   Filesystem cleanup runs in one background maintenance executor, no longer in
   prompt autosave requests or the scheduler's heartbeat loop.
 
+## Frontend loading and canvas gestures (2026-11-18)
+
+Tool panels, the task gallery and large dialogs load through local Suspense
+boundaries, preserving the navigation while a chunk loads. React, icons and
+Konva have separate chunks; Konva registers only the shapes used by the editors.
+A cold mock canvas transferred 432,588 compressed bytes versus 477,533 before
+these changes. Three local ready-time samples did not establish a latency gain
+(median 238 to 244 ms); payload reduction is not a promise of faster readiness.
+
+Canvas mode stops the shell-wide pointer light CSS updates. Reference and port
+calculations are cached independently of node position; media dimensions still
+invalidate port geometry. The minimap retains its backing buffer when its size
+is unchanged. Zoom values are assigned to the controls that consume them rather
+than inherited through every canvas element.
+
+In a desktop Chrome mock with 100 nodes, drag RAF interval p95 fell from
+50.1 to 16.7 ms and tasks over 50 ms fell from 151 to zero. Zoom p95 fell
+from 50.1 to 33.3 ms and still drops frames. RAF intervals reflect display
+refresh and timer precision; these measurements do not prove a strict
+less-than-16.7-ms target or performance on other hardware. The
+`canvas-drag-perf.spec.js` probe records timing separately from correctness
+checks for saves, reference ports and generation requests.
+
+## Large media lists (2026-11-18)
+
+The task gallery windows accumulated lists of at least 200 cards. Sidebar
+folders window lists of at least 80 media rows while retaining the existing
+server page limits. Focused items and their adjacent keyboard items remain
+mounted at their actual positions; selection and reveal can reach offscreen
+items without mounting every intervening row. The library keeps its 40-item
+server pages and debounces search for 250 ms. Counts, pagination and select-all
+remain server-owned.
+
+Library thumbnails use thumbnail URLs only. Media without a thumbnail show a
+type icon; browsing no longer loads original videos to extract a frame.
+Opening a preview still requests the original media.
+
+In a mock with 2,400 assets and 5,000 tasks (2,010 tasks loaded), task DOM nodes
+fell from 41,056 to 1,143 and scrolling RAF p95 from 116.7 to 16.8 ms. The
+expanded sidebar mounted 33 of 1,920 rows, with scrolling p95 33.4 to 16.8 ms
+and no original-video requests (550 before). These are synthetic Chrome
+measurements, not guarantees for user hardware. Library scrolling remained
+33.4 ms p95. The `large-list-performance.spec.js` probe also verifies focus,
+keyboard adjacency, shrinking search results and cross-page sidebar reveal.
+
 ## Task search (2026-11-14, FIX-B3B)
 
 Gallery search (`q` on task list, id list and navigation) is a substring match
@@ -97,3 +142,11 @@ Dedicated tests cover thin summaries, gzip/ETag/range negotiation, byte-preservi
 streamed image downloads, pool isolation, upload races and retries, object URL
 lifetime, whole-library selection, pagination, hidden tabs and status batching.
 Generation requests in tests are mocked; performance work requires no paid calls.
+
+On the subsequent 100-node run, memoized node cards rendered 151 times across
+150 pointer moves (previously 15,100). Stable event delegates use the latest
+committed props. A scoped CSS rule now sets the five zoom-sensitive controls'
+non-inherited value, including newly mounted controls. Zoom interval p95 was
+16.8 ms. The annotation dialog now loads Konva on first use. Cold canvas
+resources in the mock fixture fell from 434,522 to 363,392 compressed bytes.
+Library search now applies the debounced term and page one together.

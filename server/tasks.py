@@ -968,6 +968,58 @@ def delete_task(task_id):
     db.commit()
 
 
+TRASH_PURGE_BATCH = 50
+
+
+def list_trashed_task_ids(task_type, after_id=0, limit=None):
+    """Keyset page of trashed task ids of one type (EMPTY-TRASH-20261118)."""
+    rows = get_db().execute(
+        'SELECT id FROM tasks WHERE type = ? AND deleted_at IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
+        (task_type, after_id, limit or TRASH_PURGE_BATCH),
+    ).fetchall()
+    return [row['id'] for row in rows]
+
+
+def purge_trashed_tasks(task_ids, task_type):
+    """Delete eligible trashed task rows in one short write transaction.
+
+    Eligibility is re-checked under BEGIN IMMEDIATE so a concurrent restore, cancel or
+    worker lease cannot race the delete: rows must still be trashed, of ``task_type``,
+    not ``cancel_requested`` and hold no lease. Returns ``(purged, skipped)`` where
+    ``purged`` is a list of ``(task, assets)`` snapshots taken before the delete (task
+    files are removed by the caller after commit, outside the lock) and ``skipped`` maps
+    task id to reason.
+    """
+    db = get_db()
+    purged = []
+    skipped = {}
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        for task_id in task_ids:
+            row = db.execute('SELECT * FROM tasks WHERE id = ?', (task_id,)).fetchone()
+            if not row or row['type'] != task_type:
+                continue  # gone meanwhile (deleted elsewhere); nothing to report
+            if row['deleted_at'] is None:
+                skipped[task_id] = 'not_in_trash'
+                continue
+            if row['status'] == 'cancel_requested':
+                skipped[task_id] = 'cancel_requested'
+                continue
+            if row['lease_owner']:
+                skipped[task_id] = 'leased'
+                continue
+            assets = [dict(asset) for asset in db.execute(
+                'SELECT * FROM task_assets WHERE task_id = ?', (task_id,),
+            ).fetchall()]
+            db.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+            purged.append((_row_to_dict(row), assets))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return purged, skipped
+
+
 def delete_all_tasks():
     db = get_db()
     count = db.execute('SELECT COUNT(*) FROM tasks').fetchone()[0]

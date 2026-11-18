@@ -152,6 +152,8 @@ export default function PromptMentionTextarea({
   onKeyDown,
   onChange,
   referenceTokenState,
+  filterMentionItems,
+  onBlur,
   ...textareaProps
 }) {
   const textareaRef = useRef(null), dismissedMention = useRef(null), composing = useRef(false), inserting = useRef(false)
@@ -175,14 +177,16 @@ export default function PromptMentionTextarea({
     showPeek(range, { left: caret.left, top: caret.top + caret.lineHeight + 6 }, 'caret')
   }
 
+  // CARD-PROMPT-RESIZE-20261118: an optional per-mention filter (the card's @角色卡 button lists character cards only).
+  const scopedItems = useMemo(() => mention && filterMentionItems ? filterMentionItems(mentionItems, mention) : mentionItems, [mention, mentionItems, filterMentionItems])
   const filteredItems = useMemo(() => {
-    if (!mention?.query) return mentionItems
-    return mentionItems.filter(item => (
+    if (!mention?.query) return scopedItems
+    return scopedItems.filter(item => (
       item.label.toLowerCase().includes(mention.query)
       || String(item.alias || '').toLowerCase().includes(mention.query)
       || String(item.name || '').toLowerCase().includes(mention.query)
     ))
-  }, [mention?.query, mentionItems])
+  }, [mention?.query, scopedItems])
 
   const updateMention = (nextValue, cursor) => {
     // While an asynchronous insert is pending (and right after it), selection events must not reopen the menu.
@@ -353,7 +357,7 @@ export default function PromptMentionTextarea({
           }
         }}
         onScroll={() => { updateMenuPosition(); setPeek(null) }}
-        onBlur={() => { setMention(null); setPeek(null) }}
+        onBlur={event => { setMention(null); setPeek(null); onBlur?.(event) }}
         onKeyUp={event => { if (!isComposing(event) && !event.shiftKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) snapCaret(event.currentTarget); peekAtCaret(event.currentTarget) }}
         onMouseUp={event => { const textarea = event.currentTarget; if (!composing.current) requestAnimationFrame(() => { if (document.activeElement === textarea && event.detail < 2) snapCaret(textarea) }) }}
         onDoubleClick={event => { const textarea = event.currentTarget, range = referenceAt(textarea.value, textarea.selectionStart, textarea.selectionEnd); if (range) textarea.setSelectionRange(range.start, range.end, 'forward') }}

@@ -13,6 +13,7 @@ import askConfirm from './ui/askConfirm'
 import { takeTaskCenterFocus } from '../lib/taskCenterLink.js'
 import ToolAssetLibrary from './library/ToolAssetLibrary'
 import MoveToFolderDialog from './gallery/MoveToFolderDialog.jsx'
+import EmptyTrashButton from './gallery/EmptyTrashButton.jsx'
 import { collectMedia, listMediaFolders, systemFolderId } from './gallery/taskLibrary.js'
 
 function useLiveCallback(callback) {
@@ -1114,6 +1115,7 @@ function TaskGallery({
             </AnimatePresence>
           </div>
         )}
+        {!selectionMode && view === 'trash' && <EmptyTrashButton key={mode} mode={mode} revision={total} onEmptied={fetchTasks} />}
         {!selectionMode && (
           <div className="relative ml-auto w-48">
             <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-nexus-muted" />

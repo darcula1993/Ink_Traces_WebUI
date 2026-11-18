@@ -1,5 +1,11 @@
+/* Only the controls that consume zoom receive it; do not invalidate the entire world subtree. */
+@property --cv-zoom {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 1;
+}
 /* FIX-B2B-20261114: canvas controls keep a usable on-screen size at low zoom.
-   --cv-zoom is set on .cv-world by CanvasStudio. */
+   --cv-zoom is supplied directly to consuming controls by CanvasStudio. */
 
 /* Node-group button bar: counter-scaled so labels stay about 12px on screen below 100%;
    it grows upwards from the group's top edge, at least as wide as the group and never wrapping. */

@@ -152,17 +152,20 @@ def attach_library_status(tasks):
     return tasks
 
 
-def remove_task_files(task):
+def remove_task_files(task, assets=None):
     """Permanent task deletion (LIBRARY-GLOBAL S3): remove the task's own files only.
 
     Library files (``<asset_root>/media``) are never removed here, whatever a task row
     points at; an output registered in the library survives as the library item (its
     task output path is only a second hard link or an independent copy). Other task
-    files and the output directory are removed as before.
+    files and the output directory are removed as before. ``assets`` is an optional
+    snapshot of the task's asset rows, used when the task row is already deleted.
     """
     import media_library
     library = media_library.root()
-    paths = {asset['path'] for asset in task_db.list_assets(task['id'])}
+    if assets is None:
+        assets = task_db.list_assets(task['id'])
+    paths = {asset['path'] for asset in assets}
     params = task.get('params') or {}
     paths.update(params.get('ref_video_paths') or [])
     for path in paths:

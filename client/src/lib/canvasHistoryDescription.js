@@ -11,7 +11,7 @@ export function describeCanvasChange(delta,before,after) {
  if(fields.length===1&&fields[0].key==='title')return `重命名${label}`
  if(fields.length===1&&fields[0].key==='text')return `修改${label}的提示词`
  if(fields.length===1&&fields[0].key==='params.generate_audio')return `${fields[0].after===false?'关闭':'开启'}${label}的输出音频`
- const names={providerSelection:'节点接口',referenceOrder:'参考顺序',referenceMentions:'素材提及',rating:'评级','params.model':'模型','params.aspect_ratio':'画幅','params.ratio':'画幅','params.resolution':'分辨率','params.duration':'时长','params.video_mode':'视频模式','params.omni_reference_task_type':'任务类型','params.first_frame':'首帧','params.last_frame':'尾帧',referenceAssets:'参考素材',referenceGroups:'素材组'}
+ const names={providerSelection:'节点接口',referenceOrder:'参考顺序',referenceMentions:'素材提及',rating:'评级','params.model':'模型','params.aspect_ratio':'画幅','params.ratio':'画幅','params.resolution':'分辨率','params.duration':'时长','params.video_mode':'视频模式','params.omni_reference_task_type':'任务类型','params.first_frame':'首帧','params.last_frame':'尾帧',referenceAssets:'参考素材',referenceGroups:'素材组',size:'大小'}
  if(fields.length)return `调整${label}的${[...new Set(fields.map(f=>names[f.key]||'参数'))].join('、')}`
  const addEdges=delta.edges.filter(e=>e.after),removeEdges=delta.edges.filter(e=>!e.after)
  if(addEdges.length&&!removeEdges.length)return `添加 ${addEdges.length} 条连接`
