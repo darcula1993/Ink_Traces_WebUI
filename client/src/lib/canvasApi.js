@@ -5,7 +5,7 @@ import {resolveNodeInputs} from './canvasReferences.js'
 import {isSeedream55,imageParameterIssues,imageRequestFields} from './imageGenerationRules.js'
 import { CUPSY_AUDIO_MODEL, canvasAudioParams, canvasAudioIssue, videoModelLabel } from './generationSettings.js'
 import {nodeProvider,selectionKey,normalizeProviderPreferences} from './canvasProviderSelection.js'
-import {isMediaAsset,deletedReferenceIssue,markDeletedMedia} from './canvasMediaStatus.js'
+import {isMediaAsset,markDeletedMedia,markTrashedMedia} from './canvasMediaStatus.js'
 import {assertMediaAvailable} from './canvasMedia.js'
 
 import {effectiveVideoModel,videoCapabilities,videoRatio,videoParameterError} from './videoGenerationRules.js'
@@ -124,18 +124,28 @@ export function canvasInputs(node, nodes, edges) {
   return {prompt:result.prompt,assets:result.assets,frames:result.frames}
 }
 
-async function referenceFiles(workflowId, assets) {
-  return Promise.all(assets.map(async asset => {
+// GEN-RESULT-LIFECYCLE-20261119 (plan A): references are submitted by library id (no browser download and
+// re-upload); the server resolves each id to the library file, refuses unknown/deleted/trashed/mistyped ones
+// before creating a task, and keeps a hard-link snapshot in the task. Field, order and filename are exactly
+// what the old multipart upload sent, so the Provider request is unchanged.
+function referenceEntries(workflowId, assets) {
+  return assets.map(asset => {
     // LIBRARY-GLOBAL S5: references are library media (/api/canvas/media/<id>); old canvas assets stay readable until migrated.
     if (!(isMediaAsset(asset) || asset.url?.startsWith(`${workflowUrl(workflowId)}/assets/`)) || !['image', 'video', 'audio'].includes(asset.kind)) invalid('参考素材必须先保存到当前画布')
-    try {
-      const response = await axios.get(asset.url, { responseType: 'blob' })
-      return { asset, blob: response.data }
-    } catch (error) {
-      if (isMediaAsset(asset) && error?.response?.status === 410) { markDeletedMedia([asset.id]); invalid(deletedReferenceIssue(asset)) }
-      invalid(`无法读取参考素材“${asset.name || asset.id}”，尚未提交生成`)
+    return asset
+  })
+}
+export function referenceMediaField(nodeType, videoMode, frames, assets) {
+  const entries = []
+  for (const asset of assets) {
+    const field = nodeType === 'image' ? 'images' : nodeType === 'audio' ? 'references' : { image: 'ref_images', video: 'ref_videos', audio: 'ref_audios' }[asset.kind]
+    if (nodeType === 'video' && videoMode === 'keyframe') {
+      for (const [role, name] of [['first_frame', 'image'], ['last_frame', 'last_image']]) if ((role === 'first_frame' ? frames.first?.id : frames.last?.id) === asset.id) entries.push({ field: name, id: asset.id, filename: asset.name || 'frame.png' })
+      continue
     }
-  }))
+    entries.push({ field, id: asset.id, filename: asset.name || `reference.${asset.kind === 'image' ? 'png' : asset.kind === 'video' ? 'mp4' : 'wav'}` })
+  }
+  return entries
 }
 
 export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
@@ -193,23 +203,27 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   } else invalid('该节点不支持生成')
 
   await assertMediaAvailable(assets, invalid)
-  const files = await referenceFiles(workflowId, assets)
+  const references = referenceEntries(workflowId, assets)
   let body = fields
-  if (files.length) {
+  if (references.length) {
     body = new FormData()
     for (const [name, value] of Object.entries(fields)) if (value !== undefined) body.append(name, String(value))
-    for (const { asset, blob } of files) {
-      const field = node.type === 'image' ? 'images' : node.type === 'audio' ? 'references' : { image: 'ref_images', video: 'ref_videos', audio: 'ref_audios' }[asset.kind]
-      if (node.type === 'video' && fields.video_mode === 'keyframe') {
-        for (const [role, name] of [['first_frame','image'], ['last_frame','last_image']]) if ((role === 'first_frame' ? frames.first?.id : frames.last?.id) === asset.id) body.append(name, blob, asset.name || 'frame.png')
-        continue
-      }
-      body.append(field, blob, asset.name || `reference.${asset.kind === 'image' ? 'png' : asset.kind === 'video' ? 'mp4' : 'wav'}`)
-    }
+    body.append('reference_media', JSON.stringify(referenceMediaField(node.type, fields.video_mode, frames, references)))
   }
   // A network error after this point may still have created a billed task.
   // Callers must retain an unknown state, never automatically resubmit.
-  const result = await data(axios.post(path, body, { timeout: 300000 }))
+  let result
+  try { result = await data(axios.post(path, body, { timeout: 300000 })) } catch (error) {
+    // The server refused a reference before creating any task (400): show it like the old pre-upload check.
+    const code = error?.response?.status === 400 && error.response.data?.code
+    if (code === 'media_deleted' || code === 'media_trashed') {
+      const asset = references.find(item => item.id === error.response.data.reference_id)
+      if (asset && isMediaAsset(asset)) { if (code === 'media_trashed') markTrashedMedia([asset.id]); else markDeletedMedia([asset.id]) }
+      invalid(error.response.data.error)
+    }
+    if (code === 'media_not_found' || code === 'reference_kind_mismatch' || code === 'invalid_reference') invalid(error.response.data.error)
+    throw error
+  }
   const id = result.db_task_id || result.task_id
   if (!Number.isInteger(id) || id <= 0) throw new Error('提交结果未返回本地任务编号，请在任务记录中核查')
   // A created task is always in flight; a non-vocabulary status is not stored.

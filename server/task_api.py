@@ -5,6 +5,7 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, send_file, after_this_request
+import gen_results
 import storage
 import tasks as task_db
 from request_utils import as_bool, positive_id
@@ -13,7 +14,7 @@ from task_media import (
     _task_download_name, _task_png_text_entries, _task_output_asset,
     _task_asset_response, _attach_task_input_references,
     OUTPUT_KINDS, RESULT_DELETED, ResultDeleted, attach_library_status, deleted_thumbnail,
-    remove_task_files, _library_state, _library_file,
+    _library_state, _library_file,
 )
 
 task_api = Blueprint('tasks', __name__)
@@ -381,28 +382,33 @@ def api_bulk_delete_tasks():
             'missing_ids': missing_ids,
         })
 
-    deleted_ids = []
-    missing_ids = []
-    skipped_ids = []
-    for task_id in task_ids:
-        task = task_db.get_task(task_id)
-        if not task:
-            missing_ids.append(task_id)
-            continue
-        if task.get('deleted_at') is None or task.get('status') == 'cancel_requested':
-            skipped_ids.append(task_id)
-            continue
-        remove_task_files(task)
-        task_db.delete_task(task_id)
-        deleted_ids.append(task_id)
-
+    # GEN-RESULT-LIFECYCLE-20261119: the tasks' 生成历史 results are deleted with them.
+    result = gen_results.purge(task_ids)
     return jsonify({
         'success': True,
-        'deleted': len(deleted_ids),
-        'deleted_ids': deleted_ids,
-        'missing_ids': missing_ids,
-        'skipped_ids': skipped_ids,
+        'deleted': len(result['deleted_ids']),
+        'deleted_ids': result['deleted_ids'],
+        'missing_ids': result['missing_ids'],
+        'skipped_ids': list(result['skipped']),
+        'skipped_reasons': result['skipped'],
+        'media_deleted': len(result['media_deleted_ids']),
     })
+
+
+@task_api.route('/api/tasks/delete-preview', methods=['POST'])
+def api_task_delete_preview():
+    """What permanently deleting these trashed tasks (``ids``) or emptying the trash of one
+    ``type`` removes from the media library: their 生成历史 results and the canvases, groups
+    and character cards referencing them (GEN-RESULT-LIFECYCLE-20261119). Read only."""
+    data = request.get_json(silent=True)
+    if isinstance(data, dict) and 'type' in data and 'ids' not in data:
+        if data['type'] not in TRASH_TASK_TYPES:
+            return jsonify({'success': False, 'error': 'type 必须是 image、video 或 audio'}), 400
+        return jsonify({'success': True, **gen_results.preview(gen_results.trashed_ids(data['type']), data['type'])})
+    task_ids, id_error = _parse_task_ids(data or {}, maximum=5000)
+    if id_error:
+        return id_error
+    return jsonify({'success': True, **gen_results.preview(task_ids)})
 
 
 TRASH_TASK_TYPES = ('image', 'video', 'audio')
@@ -414,8 +420,9 @@ def api_empty_task_trash():
     """Permanently delete every trashed task of one type (EMPTY-TRASH-20261118).
 
     Uses the same rules as single/bulk permanent deletion: tasks still cancelling or
-    holding a worker lease are skipped, and library files are never removed. Rows are
-    processed in short keyset batches so the database is never locked for long.
+    holding a worker lease are skipped; the tasks' 生成历史 results are deleted with them
+    (GEN-RESULT-LIFECYCLE-20261119), copies in other folders are kept. Rows are processed
+    in short keyset batches so the database is never locked for long.
     """
     data = request.get_json(silent=True)
     task_type = data.get('type') if isinstance(data, dict) else None
@@ -423,17 +430,17 @@ def api_empty_task_trash():
         return jsonify({'success': False, 'error': 'type 必须是 image、video 或 audio'}), 400
     deleted_ids = []
     skipped = {}
+    media_deleted = 0
     after_id = 0
     while True:
         batch = task_db.list_trashed_task_ids(task_type, after_id)
         if not batch:
             break
         after_id = batch[-1]
-        purged, batch_skipped = task_db.purge_trashed_tasks(batch, task_type)
-        skipped.update(batch_skipped)
-        for task, assets in purged:
-            remove_task_files(task, assets)
-            deleted_ids.append(task['id'])
+        result = gen_results.purge(batch, task_type)
+        skipped.update(result['skipped'])
+        deleted_ids += result['deleted_ids']
+        media_deleted += len(result['media_deleted_ids'])
     reasons = {reason: 0 for reason in SKIP_REASONS}
     for reason in skipped.values():
         reasons[reason] = reasons.get(reason, 0) + 1
@@ -445,6 +452,7 @@ def api_empty_task_trash():
         'skipped': len(skipped),
         'skipped_ids': list(skipped),
         'skipped_reasons': reasons,
+        'media_deleted': media_deleted,
     })
 
 
@@ -459,9 +467,17 @@ def api_delete_task(task_id):
             return jsonify({'success': False, 'error': '任务需要先移入回收站'}), 409
         if t.get('status') == 'cancel_requested':
             return jsonify({'success': False, 'error': '任务仍在取消中，请稍后再彻底删除'}), 409
-        remove_task_files(t)
-        task_db.delete_task(task_id)
-        return jsonify({'success': True, 'permanent': True})
+        result = gen_results.purge([task_id])
+        reason = result['skipped'].get(task_id)
+        if reason == 'leased':
+            return jsonify({'success': False, 'error': '任务仍在执行中，请稍后再彻底删除'}), 409
+        if reason == 'cancel_requested':
+            return jsonify({'success': False, 'error': '任务仍在取消中，请稍后再彻底删除'}), 409
+        if reason == 'not_in_trash':
+            return jsonify({'success': False, 'error': '任务需要先移入回收站'}), 409
+        if task_id not in result['deleted_ids']:
+            return jsonify({'success': False, 'error': '任务不存在'}), 404
+        return jsonify({'success': True, 'permanent': True, 'media_deleted': len(result['media_deleted_ids'])})
     moved = task_db.move_tasks_to_trash([task_id])
     return jsonify({'success': True, 'trashed': bool(moved)})
 

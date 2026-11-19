@@ -40,7 +40,8 @@ def test_empty_trash_returns_zero(task_type):
     r = empty(task_type)
     assert r.status_code == 200
     assert r.json == {'success': True, 'type': task_type, 'deleted': 0, 'deleted_ids': [], 'skipped': 0,
-                      'skipped_ids': [], 'skipped_reasons': {'cancel_requested': 0, 'leased': 0, 'not_in_trash': 0}}
+                      'skipped_ids': [], 'skipped_reasons': {'cancel_requested': 0, 'leased': 0, 'not_in_trash': 0},
+                      'media_deleted': 0}
     assert tasks.get_task(live) is not None
 
 
@@ -69,13 +70,14 @@ def test_skips_cancel_requested_and_leased_tasks():
 
 def test_concurrent_restore_between_listing_and_purge_is_skipped(monkeypatch):
     first, second = trashed('image'), trashed('image')
-    original = tasks.purge_trashed_tasks
+    import gen_results
+    original = gen_results.purge
 
-    def restore_then_purge(task_ids, task_type):
+    def restore_then_purge(task_ids, task_type=None):
         tasks.restore_tasks([second])  # a restore commits before the purge transaction starts
         return original(task_ids, task_type)
 
-    monkeypatch.setattr(tasks, 'purge_trashed_tasks', restore_then_purge)
+    monkeypatch.setattr(gen_results, 'purge', restore_then_purge)
     r = empty('image').json
     assert r['deleted_ids'] == [first] and r['skipped_ids'] == [second]
     assert r['skipped_reasons']['not_in_trash'] == 1
@@ -91,15 +93,17 @@ def test_batches_cover_more_than_one_page(monkeypatch):
     assert tasks.list_trashed_task_ids('audio') == [blocked]
 
 
-def test_library_files_survive_and_task_files_are_removed():
+def test_generated_history_results_go_with_the_tasks_and_task_files_are_removed():
+    """GEN-RESULT-LIFECYCLE-20261119: emptying the trash deletes the tasks' 生成历史 results."""
     tid, path = generated()
     media_id, library_file = in_library(tid, path)
     plain, plain_path = generated('green')
     tasks.move_tasks_to_trash([tid, plain])
     r = empty('image').json
-    assert sorted(r['deleted_ids']) == sorted([tid, plain])
-    assert library_file.exists() and media.get_media(media_id)
-    assert client().get(f'/api/canvas/media/{media_id}').data == image_bytes('blue')
+    assert sorted(r['deleted_ids']) == sorted([tid, plain]) and r['media_deleted'] == 1
+    assert not library_file.exists()
+    gone = client().get(f'/api/canvas/media/{media_id}')
+    assert gone.status_code == 410 and gone.json['code'] == 'media_deleted'
     assert not plain_path.exists() and not Path(storage.OUTPUT_DIR, 'image', str(plain)).exists()
     assert tasks.list_assets(plain) == [] and tasks.list_assets(tid) == []
 
@@ -124,7 +128,7 @@ def test_result_deleted_cards_keep_their_rule():
     assert c.get(f'/api/canvas/media/{gone_media}').status_code in (404, 410)
 
 
-def test_empty_keeps_canvas_node_and_global_group_references():
+def test_empty_leaves_deleted_placeholders_on_canvas_and_groups():
     import canvas_store as store
     from test_local_delete import doc_with_reference
 
@@ -138,15 +142,18 @@ def test_empty_keeps_canvas_node_and_global_group_references():
     saved = doc_with_reference(workflow, asset)
     group = c.post('/api/canvas/media/groups', json={'title': 'reference group', 'media_ids': [media_id]}).json['group']
     tasks.move_tasks_to_trash([tid])
+    preview = c.post('/api/tasks/delete-preview', json={'type': 'image'}).json
+    assert preview['task_ids'] == [tid] and preview['media']['count'] == 1
+    assert [w['workflow_id'] for w in preview['media']['affected_workflows']] == [workflow]
+    assert [g['id'] for g in preview['media']['media_groups']] == [group['id']]
     assert empty('image').json['deleted_ids'] == [tid]
-    assert library_file.read_bytes() == image_bytes('blue')
-    assert c.get(asset['url']).status_code == 200
-    assert c.get(asset['url']).data == image_bytes('blue')
+    assert not library_file.exists()
+    assert c.get(asset['url']).status_code == 410
     after = store.workflow(workflow)
-    assert after['document'] == saved['document']
-    assert after['revision'] == saved['revision']
+    assert after['revision'] == saved['revision'] + 1
+    nodes = {n['id']: n for n in after['document']['nodes']}
+    assert nodes['src']['asset']['id'] == media_id  # placeholder kept in place
+    assert nodes['gen']['referenceAssets'] == [] and nodes['gen']['referenceMentions'] == {}
     expanded = c.get('/api/canvas/media/groups/' + group['id']).json
-    assert expanded['group']['media_ids'] == [media_id]
-    assert expanded['group']['deleted_count'] == 0
-    assert [(item['media_id'], item['status']) for item in expanded['items']] == [(media_id, 'ok')]
-    assert c.get(expanded['items'][0]['media']['url']).data == image_bytes('blue')
+    assert expanded['group']['media_ids'] == [media_id] and expanded['group']['deleted_count'] == 1
+    assert [(item['media_id'], item['status']) for item in expanded['items']] == [(media_id, 'deleted')]

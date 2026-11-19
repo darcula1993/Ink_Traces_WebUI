@@ -93,7 +93,8 @@ def test_deleted_library_result_keeps_task_card_and_shows_result_deleted():
     assert c.post('/api/tasks/bulk-download', json={'ids': [tid]}).status_code == 404
 
 
-def test_task_delete_trash_purge_and_expiry_never_remove_library_files():
+def test_task_purge_deletes_generated_history_but_expiry_never_removes_library_files():
+    """GEN-RESULT-LIFECYCLE-20261119 replaces "deletion never removes library files" for tasks."""
     c = client()
     tid, path = generated()
     media_id, library_file = in_library(tid, path)
@@ -107,15 +108,22 @@ def test_task_delete_trash_purge_and_expiry_never_remove_library_files():
     assert path.exists() and other_path.exists() and not plain_path.exists()
     tasks.get_db().execute('UPDATE task_assets SET expires_at=NULL')
     tasks.get_db().commit()
-    # Trash + permanent delete (single and bulk) remove the task, not the library item.
+    # A copy out of 生成历史 survives the task.
+    keep = c.post('/api/canvas/media/folders', json={'title': 'keep'}).json['folder']
+    copy_id = c.post('/api/canvas/media/move', json={'ids': [other_id], 'folder_id': keep['id']}).json['media'][0]['id']
+    # Trash + permanent delete (single and bulk) remove the task and its 生成历史 result.
     assert c.delete(f'/api/tasks/{tid}').json['trashed']
-    assert c.delete(f'/api/tasks/{tid}?permanent=1').json['permanent']
+    assert c.delete(f'/api/tasks/{tid}?permanent=1').json['media_deleted'] == 1
     tasks.move_tasks_to_trash([other, plain])
-    assert c.post('/api/tasks/bulk-delete', json={'ids': [other, plain], 'permanent': True}).json['deleted'] == 2
-    assert library_file.exists() and other_file.exists()
-    assert c.get(f'/api/canvas/media/{media_id}').data == image_bytes('blue')
-    assert c.get(f'/api/canvas/media/{other_id}').status_code == 200
+    r = c.post('/api/tasks/bulk-delete', json={'ids': [other, plain], 'permanent': True}).json
+    assert r['deleted'] == 2 and r['media_deleted'] == 1
+    assert not library_file.exists() and not other_file.exists()
+    assert c.get(f'/api/canvas/media/{media_id}').status_code == 410
+    assert c.get(f'/api/canvas/media/{other_id}').status_code == 410
+    assert c.get(f'/api/canvas/media/{copy_id}').data == image_bytes('green')
     assert tasks.get_task(tid) is None and not Path(storage.OUTPUT_DIR, 'image', str(plain)).exists()
+    library_file = media.media_path(media.get_media(copy_id))
+    other_file = library_file
     # Orphan maintenance leaves the library untouched as well.
     storage.cleanup_orphans(0)
     assert library_file.exists() and other_file.exists()

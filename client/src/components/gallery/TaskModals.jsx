@@ -468,7 +468,7 @@ export function TaskDetailModal({
               <IconButton label="在素材库中显示" onClick={() => onReveal(item)}><FolderSearch size={17} /></IconButton>
             )}
             {item.libraryMedia?.length > 0 && onMove && (
-              <IconButton label={item.libraryMedia.length > 1 ? `全部 ${item.libraryMedia.length} 个结果移动到文件夹` : '结果移动到文件夹'} onClick={() => onMove(item)}><FolderInput size={17} /></IconButton>
+              <IconButton label={item.libraryMedia.length > 1 ? `全部 ${item.libraryMedia.length} 个结果复制到文件夹` : '结果复制到文件夹'} onClick={() => onMove(item)}><FolderInput size={17} /></IconButton>
             )}
             {item.resultDeleted && <span className="px-1 text-xs text-nexus-muted" data-testid="task-detail-result-deleted">结果已删除</span>}
             {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}

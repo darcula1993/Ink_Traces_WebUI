@@ -2,7 +2,7 @@
 // task log "S1 接口契约"). Canvas uploads, pastes, frame captures and image "save as" go into the
 // library; nodes store the media id and never a canvas copy.
 import axios from 'axios'
-import {MEDIA_PREFIX,isMediaAsset,isMediaId,mediaNodeAsset,markDeletedMedia,deletedReferenceIssue} from './canvasMediaStatus.js'
+import {MEDIA_PREFIX,isMediaAsset,isMediaId,mediaNodeAsset,markDeletedMedia,markTrashedMedia,unmarkMedia,deletedReferenceIssue} from './canvasMediaStatus.js'
 
 const base = '/api/canvas/media'
 const data = async promise => (await promise).data
@@ -29,7 +29,7 @@ export async function uploadCanvasLibraryMedia(file, { origin = 'canvas_upload',
 }
 
 export const LOOKUP_BATCH = 500
-// ref → {ref,status:'ok'|'deleted'|'missing',media_id,media?}; refs may be media ids, "scope:old_id" or old URLs.
+// ref → {ref,status:'ok'|'deleted'|'trashed'|'missing',media_id,media?}; refs may be media ids, "scope:old_id" or old URLs.
 export async function lookupMedia(refs) {
   const unique = [...new Set(refs.filter(ref => typeof ref === 'string' && ref))], found = new Map()
   for (let index = 0; index < unique.length; index += LOOKUP_BATCH) {
@@ -38,13 +38,18 @@ export async function lookupMedia(refs) {
   }
   return found
 }
-// Ids of the given media the library reports as deleted (also recorded in the runtime registry).
+// Ids of the given media the library reports as unavailable (also recorded in the runtime registry):
+// deleted, or 'trashed' (a 生成历史 result whose task is in the trash, GEN-RESULT-LIFECYCLE-20261119).
+// Trashed ids that are 'ok' again (task restored) are unmarked.
 export async function deletedAmong(ids) {
   const media = [...new Set(ids.filter(isMediaId))]
   if (!media.length) return []
-  const found = await lookupMedia(media), deleted = media.filter(id => found.get(id)?.status === 'deleted')
+  const found = await lookupMedia(media), status = id => found.get(id)?.status
+  const deleted = media.filter(id => status(id) === 'deleted'), trashed = media.filter(id => status(id) === 'trashed')
   if (deleted.length) markDeletedMedia(deleted)
-  return deleted
+  if (trashed.length) markTrashedMedia(trashed)
+  unmarkMedia(media.filter(id => status(id) === 'ok'))
+  return [...deleted, ...trashed]
 }
 // Right before a generation request: a deleted reference is refused with a Chinese reason.
 export async function assertMediaAvailable(assets, invalid) {
@@ -74,7 +79,7 @@ export async function resolveLibraryMedia(items) {
   items.forEach((item, index) => {
     const entry = refs[index] && found.get(refs[index])
     if (entry?.status === 'ok' && entry.media) assets.push({ index, asset: mediaNodeAsset(entry.media) })
-    else if (entry?.status === 'deleted') deleted.push(item.asset?.name || entry.media?.name || '素材')
+    else if (entry?.status === 'deleted' || entry?.status === 'trashed') deleted.push(item.asset?.name || entry.media?.name || '素材')
     else legacy.push({ index, item })
   })
   return { assets, legacy, deleted }

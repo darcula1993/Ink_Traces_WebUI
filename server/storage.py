@@ -469,7 +469,11 @@ def remove_task_output_files(task_id):
 
 
 def clone_image_inputs(source_task_id, target_task_id):
-    """Copy persisted image references into a new retry task directory."""
+    """Link persisted image references into a new retry task directory.
+
+    GEN-RESULT-LIFECYCLE point 2: a hard link (no extra space), copying only across file
+    systems; media files are never modified in place, so sharing the inode is safe.
+    """
     target_dir = task_output_dir('image', target_task_id)
     copied = 0
     inputs = [asset for asset in task_db.list_assets(source_task_id) if asset['kind'] == 'input_image']
@@ -479,7 +483,10 @@ def clone_image_inputs(source_task_id, target_task_id):
             continue
         extension = os.path.splitext(asset['path'])[1].lower() or '.png'
         path = os.path.join(target_dir, f'ref_{index}{extension}')
-        shutil.copy2(asset['path'], path)
+        try:
+            os.link(asset['path'], path)
+        except OSError:
+            shutil.copy2(asset['path'], path)
         register_file(target_task_id, 'input_image', path, asset.get('mime_type'))
         copied += 1
     return target_dir, copied

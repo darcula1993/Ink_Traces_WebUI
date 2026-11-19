@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 
 import app as application
+import media_library
 from logging_config import configure_logging
 import storage
 import tasks as task_db
@@ -392,6 +393,7 @@ class Worker:
 
     def _cleanup(self):
         try:
+            media_library.recover_staged_deletes()
             storage.cleanup_workspace_assets_all()
             expired = storage.cleanup_expired_assets()
             orphaned = storage.cleanup_orphans(self.orphan_grace_seconds)

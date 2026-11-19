@@ -67,8 +67,10 @@ class Wire:
 
 
 def without_revision(call):
+    # GEN-RESULT-LIFECYCLE plan A: group runs send references by id (reference_media); the view still
+    # receives the same file parts as the browser's old upload, so that field is left out of the comparison.
     call = dict(call)
-    call['form'] = [(k, v) for k, v in call['form'] if k != 'canvas_workflow_revision']
+    call['form'] = [(k, v) for k, v in call['form'] if k not in ('canvas_workflow_revision', 'reference_media')]
     if isinstance(call['json'], dict):
         call['json'] = {k: v for k, v in call['json'].items() if k != 'canvas_workflow_revision'}
     return call
@@ -181,6 +183,8 @@ def test_group_submission_matches_single_node_submission(env, monkeypatch):
     # b received a's new result as its reference, as multipart like the browser's FormData.
     a_result = env.node(env.doc(), 'a')['asset']
     assert group_calls[1]['multipart'] and [f[0] for f in group_calls[1]['files']] == ['images']
+    assert ('reference_media', json.dumps([{'field': 'images', 'id': env.node(env.doc(), 'a')['asset']['id'],
+                                            'filename': env.node(env.doc(), 'a')['asset']['name']}], ensure_ascii=False)) in group_calls[1]['form']
     # a's result is a library media reference (no canvas copy); b got exactly its bytes.
     import media_library
     assert a_result['url'] == f"/api/canvas/media/{a_result['id']}"

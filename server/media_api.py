@@ -67,8 +67,12 @@ def ids():
 @media_api.get(PREFIX + '/<media_id>')
 def read_file(media_id):
     row = media.get_media(media_id)
-    response = send_file(media.media_path(row), mimetype=row['mime_type'], download_name=row['name'],
-                         as_attachment=request.args.get('download') == '1', conditional=True)
+    try:
+        response = send_file(media.media_path(row), mimetype=row['mime_type'], download_name=row['name'],
+                             as_attachment=request.args.get('download') == '1', conditional=True)
+    except FileNotFoundError:
+        media.get_media(media_id)  # recheck for a tombstone if delete won the file-open race
+        raise media.MediaError('素材文件不可读取', 409, 'file_missing') from None
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Cache-Control'] = 'private, no-cache'
     return response
@@ -101,6 +105,8 @@ def thumbnail(media_id):
             picture.thumbnail((320, 320))
             picture.convert('RGB').save(output, format='WEBP', quality=75)
     except (OSError, ValueError, Image.DecompressionBombError) as error:
+        if isinstance(error, FileNotFoundError):
+            media.get_media(media_id)
         raise media.MediaError('缩略图不可用', 409, 'file_missing') from error
     output.seek(0)
     response = send_file(output, mimetype='image/webp')
@@ -118,7 +124,7 @@ def move():
     data = body()
     if 'folder_id' not in data:
         raise media.MediaError('缺少目标文件夹 folder_id（根目录传 null）')
-    return jsonify(success=True, media=media.move_media(data.get('ids'), data['folder_id']))
+    return jsonify(success=True, **media.move_media(data.get('ids'), data['folder_id']))
 
 
 @media_api.route(PREFIX + '/folders', methods=['GET', 'POST'])

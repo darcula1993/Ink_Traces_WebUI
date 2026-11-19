@@ -289,6 +289,8 @@ def _live(media_id):
     state, _ = media.status(media_id)
     if state == 'deleted':
         raise store.CanvasError('素材已从素材库删除', 410)
+    if state == 'trashed':
+        raise store.CanvasError('该生成结果所在的任务在回收站，恢复任务后可用', 409)
     if state != 'ok':
         raise store.CanvasError('素材不存在', 404)
     return ('media', media_id)

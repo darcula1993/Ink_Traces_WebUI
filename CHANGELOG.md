@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.0 - 2026-11-20
+
+- Results in generation history follow their tasks into and out of the trash. Permanent deletion previews affected references and removes the history entries. Copies in other folders remain available.
+- Copy a generation result to another folder while keeping its original in history. Copies use hard links when supported.
+- Canvas generation and group runs submit library references by ID. The server snapshots inputs and preserves the existing provider payload.
+- Recover staged library files after an interrupted delete and return a deleted status when a media read races with removal.
+- The first start updates the SQLite media table to allow independent copies of the same content. Back up the database before upgrading.
+
 ## 2.1.0 - 2026-11-18
 
 Canvas layout redesign (inspired by ImagineArt's node canvas), performance work and a one-click trash.

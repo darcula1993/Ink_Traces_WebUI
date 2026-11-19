@@ -27,15 +27,20 @@ export function folderCount(folders,folder){if(folder.system_key!==GENERATED)ret
 export const folderPathLabel=(folders,id)=>folderPath(folders,id).map(f=>f.title).join(' / ')
 export const userFolderOptions=(folders,{exclude=new Set()}={})=>[{value:'',label:'根目录'},...flattenFolders(folders,{filter:f=>!f.system_key&&!exclude.has(f.id)}).map(f=>({value:f.id,label:folderPathLabel(folders,f.id)}))]
 export const uploadFolderOptions=folders=>userFolderOptions(folders)
-// “生成历史” and its 图片/视频/音频 subfolders only take generation results (user decision 2026-11-17, E4).
-export const GENERATED_ONLY_HINT='“生成历史”下的图片／视频／音频只接收对应类型的生成结果，上传等其他来源的素材不能移入；生成结果可移出到任意文件夹。'
-// “移动到文件夹”: root, user folders, and the system subfolder matching the kind when every item shares it.
-// origins (when known): the system subfolder is offered disabled, with the reason, unless every item is a generation result.
-export function moveFolderOptions(folders,kinds,origins=null){
+// “生成历史” and its 图片/视频/音频 subfolders only receive new generation results (E4; GEN-RESULT-LIFECYCLE-20261119:
+// nothing is moved or copied into them, and a result moved out is copied — the original stays with its task).
+export const GENERATED_ONLY_HINT='“生成历史”只接收新生成的结果，不能移入；从生成历史移到其他文件夹会复制一份独立素材，原结果仍留在生成历史并随任务删除，复制出的不受影响。'
+// “移动到文件夹”: root and user folders; the system subfolder matching the kind is listed disabled with the reason.
+export function moveFolderOptions(folders,kinds){
  const unique=[...new Set(kinds)],options=userFolderOptions(folders)
- if(unique.length===1){const system=folders.find(f=>f.system_key===generatedKindKey(unique[0]));if(system){const blocked=origins&&origins.some(o=>o!==GENERATED);options.push({value:system.id,label:`${folderPathLabel(folders,system.id)}${blocked?'（只接收生成结果）':''}`,disabled:!!blocked})}}
+ if(unique.length===1){const system=folders.find(f=>f.system_key===generatedKindKey(unique[0]));if(system)options.push({value:system.id,label:`${folderPathLabel(folders,system.id)}（只接收新生成的结果）`,disabled:true})}
  return options
 }
+// GEN-RESULT-LIFECYCLE-20261119: items of “生成历史” are copied, other items moved.
+export const generatedFolderIds=folders=>new Set(folders.filter(f=>f.system_key?.startsWith(GENERATED+'_')).map(f=>f.id))
+export function transferMode(folders,media){const gen=generatedFolderIds(folders),n=media.filter(m=>gen.has(m.folder_id)).length;return !n?'move':n===media.length?'copy':'mixed'}
+export const TRANSFER_TITLES={move:'移动到文件夹',copy:'复制到文件夹',mixed:'移动/复制到文件夹'}
+export const transferLabel=(folders,media)=>TRANSFER_TITLES[transferMode(folders,media)]
 // Client-side mirror of the server folder-name rules (E3, new folders and renames only): no “/”, unique among siblings
 // (trimmed, case-insensitive, as the server). The server message is still shown verbatim when it rejects.
 export function folderNameIssue(folders,title,parentId,selfId=null){

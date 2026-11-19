@@ -190,6 +190,8 @@ def get_cors_origins(cfg):
     return origins
 
 config = load_config()
+from media_library import recover_staged_deletes
+recover_staged_deletes()
 CORS(app, supports_credentials=True, origins=get_cors_origins(config))
 
 # 认证配置
@@ -246,6 +248,9 @@ def require_login():
         return jsonify({'success': False, 'error': '未登录'}), 401
 
 profile_runtime.install_profile_requests(app)
+
+import reference_snapshots  # noqa: E402  GEN-RESULT-LIFECYCLE: canvas references by library id, hard-link snapshots
+reference_snapshots.install(app)
 
 
 @app.after_request
@@ -1838,7 +1843,11 @@ def create_cupsy_asset_from_path(path, kind, original_name=None):
     if not os.path.isfile(local_path):
         temp_path = f'{local_path}.{uuid.uuid4().hex}.tmp'
         try:
-            shutil.copyfile(path, temp_path)
+            # GEN-RESULT-LIFECYCLE point 2: hard link when possible, copy across file systems.
+            try:
+                os.link(path, temp_path)
+            except OSError:
+                shutil.copyfile(path, temp_path)
             os.replace(temp_path, local_path)
         finally:
             if os.path.exists(temp_path):

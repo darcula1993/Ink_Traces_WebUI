@@ -21,21 +21,51 @@ export function documentMediaIds(document) {
   return [...ids]
 }
 
+// GEN-RESULT-LIFECYCLE-20261119: a 生成历史 result whose task is in the trash is "trashed": it is
+// unavailable like a deleted one (same placeholder slot, blocks generation) but labelled “结果在回收站”
+// and comes back when the task is restored (unmarkMedia). `deleted` holds both kinds; `trashed` ⊂ deleted.
 let deleted = new Set()
+let trashed = new Set()
 const listeners = new Set()
 export const isDeletedMedia = id => deleted.has(id)
+export const isTrashedMedia = id => trashed.has(id)
 export const deletedMediaIds = () => [...deleted]
+export const trashedMediaIds = () => [...trashed]
+const notify = () => { for (const listener of listeners) listener() }
 export function setDeletedMedia(ids) {
   const next = new Set(ids)
   if (next.size === deleted.size && [...next].every(id => deleted.has(id))) return false
   deleted = next
-  for (const listener of listeners) listener()
+  trashed = new Set([...trashed].filter(id => deleted.has(id)))
+  notify()
   return true
 }
-export function markDeletedMedia(ids) { return setDeletedMedia([...deleted, ...ids]) }
+export function markDeletedMedia(ids) {
+  const changed = ids.some(id => trashed.has(id))
+  if (changed) trashed = new Set([...trashed].filter(id => !ids.includes(id)))
+  return setDeletedMedia([...deleted, ...ids]) || (changed && (notify(), true))
+}
+export function markTrashedMedia(ids) {
+  const fresh = ids.filter(id => !trashed.has(id))
+  if (!fresh.length) return false
+  trashed = new Set([...trashed, ...fresh])
+  if (!setDeletedMedia([...deleted, ...fresh])) notify()
+  return true
+}
+// Trashed media that are available again (task restored).
+export function unmarkMedia(ids) {
+  const gone = ids.filter(id => trashed.has(id))
+  if (!gone.length) return false
+  trashed = new Set([...trashed].filter(id => !gone.includes(id)))
+  return setDeletedMedia([...deleted].filter(id => !gone.includes(id)))
+}
 export function onDeletedMediaChange(listener) { listeners.add(listener); return () => listeners.delete(listener) }
 
-export const deletedReferenceIssue = asset => `参考素材“${asset?.name || '未命名'}”已在素材库中删除，请替换或移除后再生成`
+export const deletedReferenceIssue = asset => trashed.has(asset?.id)
+  ? `参考素材“${asset?.name || '未命名'}”所在的生成任务在回收站，请恢复任务或替换后再生成`
+  : `参考素材“${asset?.name || '未命名'}”已在素材库中删除，请替换或移除后再生成`
+// Fired by the task center after a restore so open canvases re-check their trashed placeholders.
+export const MEDIA_STATUS_EVENT = 'ink:media-status-changed'
 // Inputs whose media was deleted in the library block generation (checked again against the
 // server right before submit; see canvasMedia.assertMediaAvailable).
 export const deletedInputIssues = assets => assets.filter(asset => isMediaAsset(asset) && deleted.has(asset.id)).map(deletedReferenceIssue)

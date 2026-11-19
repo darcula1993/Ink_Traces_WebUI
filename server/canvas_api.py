@@ -24,7 +24,11 @@ def canvas_error(error):
 def send_legacy_media(row):
     """S9 (QA D1): an old asset URL whose item entered the library is read from the media file."""
     import media_library
-    response = send_file(media_library.media_path(row), mimetype=row['mime_type'], download_name=row['name'], conditional=True)
+    try:
+        response = send_file(media_library.media_path(row), mimetype=row['mime_type'], download_name=row['name'], conditional=True)
+    except FileNotFoundError:
+        media_library.get_media(row['id'])
+        raise media_library.MediaError('素材文件不可读取', 409, 'file_missing') from None
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Cache-Control'] = 'private, no-cache'
     return response

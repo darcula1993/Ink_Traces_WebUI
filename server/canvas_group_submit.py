@@ -92,21 +92,19 @@ def _task_after(before_id, run_id, node_id):
 
 
 def _request_body(workflow_id, request, open_files):
-    """Werkzeug request arguments: the browser's FormData (fields then files in order) or JSON.
+    """Werkzeug request arguments: the browser's FormData (fields, then the references) or JSON.
 
-    Each file part carries the reference's stored MIME type (library item, or a legacy
-    canvas copy), like the browser's Blob.
+    GEN-RESULT-LIFECYCLE-20261119 (plan A): like the browser, references are sent by id in
+    ``reference_media`` (field, id, filename in order); the generation route resolves them to
+    the library files and snapshots them by hard link (``reference_snapshots``).
     """
-    import canvas_media_refs
+    import json
     import canvas_submit
     from werkzeug.datastructures import MultiDict
     if request['multipart']:
         data = MultiDict(list(canvas_submit.form_fields(request['fields']).items()))
-        for item in request['files']:
-            mime = canvas_media_refs.reference(workflow_id, item['asset_id'])[1]
-            handle = item['file'].open('rb')
-            open_files.append(handle)
-            data.add(item['field'], (handle, item['filename'], mime))
+        data.add('reference_media', json.dumps([{'field': item['field'], 'id': item['asset_id'], 'filename': item['filename']}
+                                                for item in request['files']], ensure_ascii=False))
         return dict(data=data, content_type='multipart/form-data')
     return dict(json=request['fields'])
 

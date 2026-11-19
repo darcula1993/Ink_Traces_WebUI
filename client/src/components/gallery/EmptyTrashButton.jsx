@@ -3,26 +3,32 @@ import axios from 'axios'
 import { Trash2 } from 'lucide-react'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { taskTypeLabel } from './taskModel.js'
+import TaskDeletePlan from './TaskDeletePlan'
+import { previewTaskDelete, announceMediaStatusChange } from './taskDeletePreview.js'
 
 // EMPTY-TRASH-20261118: one-click "清空回收站" for the image/video/audio task center.
 // The count comes from the server (all trashed tasks of this type, independent of the
 // gallery's paging, search and filters); the server applies the permanent-delete rules.
+// GEN-RESULT-LIFECYCLE-20261119: the tasks' 生成历史 results are deleted too; the dialog lists the server preview.
 const SKIP_LABELS = { cancel_requested: '取消中', leased: '执行中', not_in_trash: '已恢复' }
 
 export function emptyTrashSummary(result) {
   const deleted = Number(result?.deleted) || 0
   const skipped = Number(result?.skipped) || 0
-  if (!skipped) return `已彻底删除 ${deleted} 个任务`
+  const media = Number(result?.media_deleted) || 0
+  const head = `已彻底删除 ${deleted} 个任务${media ? `及生成历史中的 ${media} 个结果` : ''}`
+  if (!skipped) return head
   const reasons = Object.entries(result?.skipped_reasons || {})
     .filter(([, count]) => Number(count) > 0)
     .map(([reason, count]) => `${SKIP_LABELS[reason] || reason} ${count}`)
-  return `已彻底删除 ${deleted} 个任务，跳过 ${skipped} 个${reasons.length ? `（${reasons.join('，')}）` : ''}`
+  return `${head}，跳过 ${skipped} 个${reasons.length ? `（${reasons.join('，')}）` : ''}`
 }
 
 export default function EmptyTrashButton({ mode, revision, onEmptied }) {
   const [count, setCount] = useState(null)
   const [countFailed, setCountFailed] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [preview, setPreview] = useState(null)
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef(null)
   const typeLabel = taskTypeLabel(mode)
@@ -51,12 +57,15 @@ export default function EmptyTrashButton({ mode, revision, onEmptied }) {
 
   async function open() {
     // Re-read the count so the dialog states the server's current number.
-    try { if (await loadCount() > 0) setConfirming(true) } catch { showNotice('回收站数量读取失败，请重试') }
+    try {
+      if (await loadCount() > 0) { setPreview(await previewTaskDelete({ type: mode })); setConfirming(true) }
+    } catch { showNotice('回收站数量或删除影响读取失败，请重试') }
   }
 
   async function confirm() {
     const response = await axios.post('/api/tasks/trash/empty', { type: mode })
     setConfirming(false)
+    announceMediaStatusChange()
     showNotice(emptyTrashSummary(response.data))
     await onEmptied?.()
     loadCount().catch(() => {})
@@ -78,7 +87,7 @@ export default function EmptyTrashButton({ mode, revision, onEmptied }) {
       <span role="status" aria-live="polite" className="text-xs text-nexus-text" data-testid="empty-trash-status">{notice}</span>
       {confirming && (
         <ConfirmDialog title="清空回收站" confirmLabel="彻底删除" danger onConfirm={confirm} onClose={() => setConfirming(false)}>
-          将彻底删除 {count} 个{typeLabel}任务，不可恢复；素材库中的文件不受影响。
+          {preview ? <TaskDeletePlan preview={preview} count={count} label={typeLabel} /> : <p>将彻底删除 {count} 个{typeLabel}任务，不可恢复。</p>}
         </ConfirmDialog>
       )}
     </>

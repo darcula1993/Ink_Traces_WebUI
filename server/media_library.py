@@ -8,6 +8,7 @@ the Worker (S2) calls ``register_generated`` directly.
 """
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -19,7 +20,11 @@ import canvas_store as store
 import media_schema
 import tasks
 
+LOG = logging.getLogger(__name__)
 MEDIA_ID = re.compile(r'^[0-9a-f]{32}$')
+STAGED_DELETE = re.compile(
+    r'(?P<filename>[0-9a-f]{32}\.[a-z0-9]+)\.deleting-[0-9a-f]{32}'
+)
 KINDS = ('image', 'video', 'audio')
 ORIGINS = {'upload', 'canvas_upload', 'paste', 'frame', 'save_as', 'generated',
            'legacy_local', 'legacy_library', 'legacy_workflow'}
@@ -76,12 +81,47 @@ def public(row):
             'url': url, 'thumbnail_url': url + '/thumbnail' if row['kind'] == 'image' else None}
 
 
-def status(media_id):
-    """('ok', row) | ('deleted', tombstone) | ('missing', None)."""
+# GEN-RESULT-LIFECYCLE-20261119: an item of 生成历史 shares its task's life cycle. Its linked
+# tasks are ``source_task_id`` plus every ``task_assets`` row pointing at it; while all of them
+# are in the trash the item is hidden (a query filter: rows and files are untouched) and
+# comes back when a task is restored. Items outside 生成历史 (copies, uploads, results moved
+# out before 2026-11-19) are independent of tasks.
+GENERATED_FOLDERS = tuple(media_schema.stable_id('system', key) for key in ('generated_image', 'generated_video', 'generated_audio'))
+_GEN_IN = '(' + ','.join(f"'{i}'" for i in GENERATED_FOLDERS) + ')'
+_LINKED = ('SELECT 1 FROM tasks t WHERE t.id IN (SELECT {m}.source_task_id UNION '
+           'SELECT a.task_id FROM task_assets a WHERE a.media_id={m}.id) AND t.deleted_at IS {state}')
+
+
+def trashed_sql(alias='media'):
+    """SQL predicate: the row is a 生成历史 item whose linked tasks are all in the trash."""
+    return (f'(COALESCE({alias}.folder_id, \'\') IN {_GEN_IN} AND EXISTS ({_LINKED.format(m=alias, state="NOT NULL")}) '
+            f'AND NOT EXISTS ({_LINKED.format(m=alias, state="NULL")}))')
+
+
+def is_trashed(db, row):
+    if row['folder_id'] not in GENERATED_FOLDERS:
+        return False
+    return db.execute(f'SELECT {trashed_sql("m")} FROM media m WHERE m.id=?', (row['id'],)).fetchone()[0] == 1
+
+
+def status(media_id, reveal_trashed=False):
+    """('ok', row) | ('trashed', row) | ('deleted', tombstone) | ('missing', None).
+
+    ``trashed``: a 生成历史 item whose tasks are all in the trash (hidden until restored);
+    ``reveal_trashed`` reports it as ``ok`` (the task center shows its own trashed results).
+    """
     db = tasks.get_db()
-    row = db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()
-    if row is not None:
-        return 'ok', dict(row)
+    if reveal_trashed:
+        row = db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()
+        if row is not None:
+            return 'ok', dict(row)
+    else:
+        # Resolve the row and its trash state in one SQLite snapshot.
+        row = db.execute(f'SELECT m.*, {trashed_sql("m")} AS trashed FROM media m WHERE m.id=?',
+                         (media_id,)).fetchone()
+        if row is not None:
+            item = dict(row)
+            return ('trashed' if item.pop('trashed') else 'ok'), item
     row = db.execute('SELECT * FROM media_tombstones WHERE id=?', (media_id,)).fetchone()
     return ('deleted', dict(row)) if row is not None else ('missing', None)
 
@@ -90,14 +130,30 @@ def deleted_public(row):
     return {'id': row['id'], 'name': row['name'], 'kind': row['kind'], 'deleted': True, 'deleted_at': row['deleted_at']}
 
 
+def trashed_public(row):
+    return {'id': row['id'], 'name': row['name'], 'kind': row['kind'], 'trashed': True, 'source_task_id': row['source_task_id']}
+
+
+def trashed_error(row):
+    error = MediaError('该生成结果所在的任务在回收站，恢复任务后可用', 409, 'media_trashed')
+    error.media = trashed_public(row)
+    return error
+
+
+def deleted_error(row):
+    error = MediaError('素材已删除', 410, 'media_deleted')
+    error.media = deleted_public(row)
+    return error
+
+
 def get_media(media_id):
     state, row = status(_check_id(media_id))
     if state == 'deleted':
-        error = MediaError('素材已删除', 410, 'media_deleted')
-        error.media = deleted_public(row)
-        raise error
+        raise deleted_error(row)
     if state == 'missing':
         raise MediaError('素材不存在', 404, 'media_not_found')
+    if state == 'trashed':
+        raise trashed_error(row)
     return row
 
 
@@ -105,6 +161,10 @@ def media_path(row):
     directory = root()
     path = directory / row['relpath']
     if path.resolve() != path or not path.is_relative_to(directory) or not path.is_file():
+        # Deletion may have committed after the caller read the media row.
+        state, current = status(row['id'], reveal_trashed=True)
+        if state == 'deleted':
+            raise deleted_error(current)
         raise MediaError('素材文件不可读取', 409, 'file_missing')
     return path
 
@@ -114,7 +174,7 @@ def task_media(task_asset_id):
     row = tasks.get_db().execute('SELECT media_id FROM task_assets WHERE id=?', (task_asset_id,)).fetchone()
     if row is None or not row['media_id']:
         return 'none', None
-    state, media = status(row['media_id'])
+    state, media = status(row['media_id'], reveal_trashed=True)
     return ('none', None) if state == 'missing' else (state, media)
 
 
@@ -129,16 +189,20 @@ def _folder(db, folder_id):
     return dict(row)
 
 
-def _placement(db, folder_id, kind=None, origin=None):
+def _placement(db, folder_id, kind=None, origin=None, move=False):
     """Target folder for items: root, a user folder, or the system subfolder of the same kind.
 
     生成历史 and its type subfolders only take generation results (origin generated, user
-    decision 2026-11-17); results may still leave them for user folders or the root.
+    decision 2026-11-17). ``move`` (GEN-RESULT-LIFECYCLE-20261119): nothing is moved into
+    生成历史 any more; it only receives new results (a copy moved back would share its
+    task's life cycle again).
     """
     if folder_id is None:
         return None
     folder = _folder(db, folder_id)
     if folder['system_key']:
+        if move:
+            raise MediaError('生成历史只接收新生成的结果，不能移入或复制进来', 409, 'folder_generated_only')
         if origin != 'generated':
             raise MediaError('生成历史只接收生成结果，上传素材不能移入', 409, 'folder_generated_only')
         if kind is None or folder['system_key'] != 'generated_' + kind:
@@ -147,7 +211,7 @@ def _placement(db, folder_id, kind=None, origin=None):
 
 
 def folder_public(db, row):
-    count = db.execute('SELECT COUNT(*) FROM media WHERE folder_id=?', (row['id'],)).fetchone()[0]
+    count = db.execute(f'SELECT COUNT(*) FROM media WHERE folder_id=? AND NOT {trashed_sql()}', (row['id'],)).fetchone()[0]
     return {**{k: row[k] for k in ('id', 'title', 'parent_id', 'system_key', 'icon', 'created_at', 'updated_at')}, 'media_count': count}
 
 
@@ -246,6 +310,18 @@ def _detect(path):
         raise MediaError(str(error), status_code, 'unsupported_media') from error
 
 
+def _existing(db, checksum, origin):
+    """Dedup target: the oldest item with this content (the original, not a copy).
+
+    A hidden 生成历史 item (its task is in the trash) is not reused for non-generated
+    content: emptying the trash would delete the user's upload with it.
+    """
+    for row in db.execute('SELECT * FROM media WHERE sha256=? ORDER BY created_at, id', (checksum,)).fetchall():
+        if origin == 'generated' or not is_trashed(db, row):
+            return row
+    return None
+
+
 def _journal(db, media_id, target):
     journal = store._transaction_files.get()
     if journal is not None and journal[0] is db:
@@ -274,7 +350,7 @@ def import_file(path, *, name, origin, folder_id=None, source_task_id=None, link
     if not size:
         raise MediaError('素材不能为空', 400, 'empty_file')
     with store.write_transaction() as db:
-        existing = db.execute('SELECT id FROM media WHERE sha256=?', (checksum,)).fetchone()
+        existing = _existing(db, checksum, origin)
         if existing:
             return existing['id'], False
         folder_id = _placement(db, folder_id, mime.split('/')[0], origin)
@@ -303,13 +379,24 @@ def register_generated(task_id, path, kind, *, name=None):
         raise ValueError('kind/task_id')
     source = Path(path).absolute()
     # Probing/hashing runs outside the write lock; a retry after a failed link step is idempotent.
-    media_id, _ = import_file(source, name=name or source.name, origin='generated',
-                              folder_id=system_folder_id('generated_' + kind), source_task_id=task_id)
+    media_id, created = import_file(source, name=name or source.name, origin='generated',
+                                    folder_id=system_folder_id('generated_' + kind), source_task_id=task_id)
+    orphan = None
     with store.write_transaction() as db:
-        row = db.execute('SELECT kind FROM media WHERE id=?', (media_id,)).fetchone()
+        row = db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()
         if row is None or row['kind'] != kind:
             raise MediaError('生成结果类型与登记不符', 400, 'unsupported_media')
-        db.execute('UPDATE task_assets SET media_id=? WHERE task_id=? AND path IN (?,?)', (media_id, task_id, str(path), str(source)))
+        if db.execute('SELECT 1 FROM tasks WHERE id=?', (task_id,)).fetchone() is None:
+            # GEN-RESULT-LIFECYCLE: the task was permanently deleted between its success and
+            # this registration; undo the item created for it (never a pre-existing one).
+            if created and not db.execute('SELECT 1 FROM task_assets WHERE media_id=? AND task_id IS NOT NULL', (media_id,)).fetchone():
+                db.execute('DELETE FROM media WHERE id=?', (media_id,))
+                orphan = root() / row['relpath']
+        else:
+            db.execute('UPDATE task_assets SET media_id=? WHERE task_id=? AND path IN (?,?)', (media_id, task_id, str(path), str(source)))
+    if orphan is not None:
+        orphan.unlink(missing_ok=True)
+        raise MediaError('任务已彻底删除，结果不再入库', 404, 'media_not_found')
     return media_id
 
 
@@ -339,7 +426,7 @@ def save_upload(stream, name, *, folder_id=None, origin='upload'):
         with store.write_transaction() as db:
             kind = mime.split('/')[0]
             folder_id = _placement(db, folder_id, kind, origin)
-            existing = db.execute('SELECT * FROM media WHERE sha256=?', (checksum,)).fetchone()
+            existing = _existing(db, checksum, origin)
             if existing:
                 # Dedup returns the existing item unchanged (folder, name, origin), also when it is a
                 # generation result in 生成历史: the client offers 定位 / 移到当前文件夹 (user decision
@@ -359,7 +446,7 @@ def save_upload(stream, name, *, folder_id=None, origin='upload'):
 
 def _filters(folder_id=None, include_subfolders=False, kind=None, q=None, origin=None):
     db = tasks.get_db()
-    clauses, params = [], []
+    clauses, params = [f'NOT {trashed_sql()}'], []
     if folder_id == 'root':
         clauses.append('folder_id IS NULL')
     elif folder_id is not None:
@@ -387,7 +474,7 @@ def _filters(folder_id=None, include_subfolders=False, kind=None, q=None, origin
             raise MediaError('搜索词无效')
         clauses.append("name LIKE ? ESCAPE '\\'")
         params.append('%' + q.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + '%')
-    return (' WHERE ' + ' AND '.join(clauses)) if clauses else '', params
+    return ' WHERE ' + ' AND '.join(clauses), params
 
 
 def list_media(page=1, limit=50, **filters):
@@ -409,16 +496,61 @@ def select_ids(**filters):
 
 
 def move_media(ids, folder_id):
-    """“移动到文件夹”: only changes folder_id; all-or-nothing."""
+    """“移动到文件夹”, all-or-nothing -> {'media': [...], 'copied': [{source_id, id}]}.
+
+    Uploads and other items only change ``folder_id``. An item of 生成历史 is copied instead
+    (GEN-RESULT-LIFECYCLE-20261119, user decision 4): a new independent item (new id, hard
+    link to the same file, same name/origin/source task) lands in the target folder and the
+    original stays in 生成历史 with its task. ``media`` lists the resulting items in order.
+    """
     ids = _ids(ids)
-    with store.write_transaction() as db:
-        rows = [db.execute('SELECT * FROM media WHERE id=?', (i,)).fetchone() for i in ids]
-        if any(r is None for r in rows):
-            raise MediaError('素材不存在或已删除', 404, 'media_not_found')
-        for row in rows:
-            _placement(db, folder_id, row['kind'], row['origin'])
-        db.executemany('UPDATE media SET folder_id=? WHERE id=?', [(folder_id, i) for i in ids])
-        return [public(db.execute('SELECT * FROM media WHERE id=?', (i,)).fetchone()) for i in ids]
+    created_files = []
+    try:
+        with store.write_transaction() as db:
+            rows = [db.execute('SELECT * FROM media WHERE id=?', (i,)).fetchone() for i in ids]
+            if any(r is None for r in rows):
+                raise MediaError('素材不存在或已删除', 404, 'media_not_found')
+            if any(is_trashed(db, r) for r in rows):
+                raise MediaError('所选生成结果的任务在回收站，恢复任务后才能操作', 409, 'media_trashed')
+            result, copied = [], []
+            for row in rows:
+                if row['folder_id'] == folder_id:
+                    result.append(row['id'])
+                    continue
+                _placement(db, folder_id, row['kind'], row['origin'], move=True)
+                if row['folder_id'] in GENERATED_FOLDERS:
+                    new_id = _copy_item(db, row, folder_id, created_files)
+                    copied.append({'source_id': row['id'], 'id': new_id})
+                    result.append(new_id)
+                else:
+                    db.execute('UPDATE media SET folder_id=? WHERE id=?', (folder_id, row['id']))
+                    result.append(row['id'])
+            return {'media': [public(db.execute('SELECT * FROM media WHERE id=?', (i,)).fetchone()) for i in result],
+                    'copied': copied}
+    except BaseException:
+        for path in created_files:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def _copy_item(db, row, folder_id, created_files):
+    """Independent library item sharing ``row``'s file (hard link; copy across file systems)."""
+    source = media_path(row)
+    new_id = uuid.uuid4().hex
+    target = root() / (new_id + source.suffix)
+    try:
+        os.link(source, target)
+    except OSError:
+        temporary = target.with_name(target.name + '.tmp')
+        try:
+            shutil.copyfile(source, temporary)
+            os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+    created_files.append(target)
+    _insert(db, new_id, row['sha256'], target, row['name'], row['mime_type'], row['size_bytes'], row['origin'],
+            folder_id, row['source_task_id'], tasks.utcnow())
+    return new_id
 
 
 def rename_media(media_id, name):
@@ -503,6 +635,8 @@ def legacy_media(scope, old_id):
         error = MediaError('素材已在素材库中删除', 410, 'media_deleted')
         error.media = deleted_public(row)
         raise error
+    if state == 'trashed':
+        raise trashed_error(row)
     return row
 
 
@@ -518,6 +652,8 @@ def lookup(refs):
             item['media'] = public(row)
         elif state == 'deleted':
             item['media'] = deleted_public(row)
+        elif state == 'trashed':
+            item['media'] = trashed_public(row)
         items.append(item)
     return {'items': items}
 
@@ -587,7 +723,8 @@ def expand_group(group_id, include_deleted=True):
         if state != 'ok' and not include_deleted:
             continue
         items.append({'media_id': media_id, 'status': state,
-                      'media': public(row) if state == 'ok' else deleted_public(row) if state == 'deleted' else None})
+                      'media': public(row) if state == 'ok' else deleted_public(row) if state == 'deleted' else
+                      trashed_public(row) if state == 'trashed' else None})
     return {'group': group, 'items': items}
 
 
@@ -723,7 +860,9 @@ def _plan(db, ids):
     task_ids = set()
     for media_id in present:
         task_ids |= {r[0] for r in db.execute('SELECT task_id FROM task_assets WHERE media_id=? AND task_id IS NOT NULL', (media_id,))}
-    task_ids |= {r['source_task_id'] for r in rows if r['source_task_id'] is not None}
+    # A copy outside 生成历史 keeps its source task as provenance only; the task card shows
+    # the original, so only 生成历史 items count their source task.
+    task_ids |= {r['source_task_id'] for r in rows if r['source_task_id'] is not None and r['folder_id'] in GENERATED_FOLDERS}
     return {'rows': rows, 'removed': removed, 'documents': documents, 'groups': groups,
             'summary': {'items': [public(r) for r in rows], 'missing': missing, 'affected_workflows': affected,
                         'characters': characters, 'asset_groups': len(groups),
@@ -743,49 +882,49 @@ def delete_preview(ids):
             db.rollback()
 
 
-def delete_media(ids):
-    """Permanent library deletion: rows, files, references; nodes keep placeholders."""
-    ids = _ids(ids)
-    staged, token = [], uuid.uuid4().hex
-    try:
-        with store.write_transaction() as db:
-            plan = _plan(db, ids)
-            now = tasks.utcnow()
-            for row in plan['rows']:
-                db.execute('INSERT OR REPLACE INTO media_tombstones VALUES (?,?,?,?,?,?,?)',
-                           (row['id'], row['name'], row['kind'], row['mime_type'], row['origin'], row['source_task_id'], now))
-                db.execute('DELETE FROM media WHERE id=?', (row['id'],))
-            from characters import unlink_local
-            unlink_local(db, sorted(plan['removed']))
-            for group in plan['groups']:
-                kept = [i for i in json.loads(group['asset_ids']) if i not in plan['removed']]
-                if kept:
-                    db.execute('UPDATE canvas_asset_groups SET asset_ids=?,updated_at=? WHERE id=?', (json.dumps(kept), now, group['id']))
-                else:
-                    db.execute('DELETE FROM canvas_asset_groups WHERE id=?', (group['id'],))
-            for workflow_id, document in plan['documents'].items():
-                encoded = store.validate_document(document, workflow_id)
-                db.execute('UPDATE canvas_workflows SET document=?,revision=revision+1,updated_at=? WHERE id=?', (encoded, now, workflow_id))
-                db.execute('UPDATE canvas_projects SET updated_at=? WHERE id=(SELECT project_id FROM canvas_workflows WHERE id=?)', (now, workflow_id))
-            directory = root()
-            for row in plan['rows']:
-                path = directory / row['relpath']
-                if path.resolve() != path or not path.is_relative_to(directory) or not path.exists():
-                    continue
-                pending = path.with_name(f'{path.name}.deleting-{token}')
-                try:
-                    os.rename(path, pending)
-                except OSError as error:
-                    raise MediaError(f'素材文件无法删除，未做任何更改：{path.name}', 409, 'file_missing') from error
-                staged.append((path, pending))
-            summary = plan['summary']
-    except BaseException:
-        for path, pending in reversed(staged):
-            try:
-                os.rename(pending, path)
-            except OSError:
-                pass
-        raise
+def apply_delete(db, plan, staged, token):
+    """Inside the caller's write transaction: tombstones, references, then stage the files.
+
+    Files are renamed to ``*.deleting-<token>`` (``staged``); the caller unlinks them after
+    commit (``finish_delete``) or renames them back on failure (``undo_delete``).
+    """
+    now = tasks.utcnow()
+    for row in plan['rows']:
+        db.execute('INSERT OR REPLACE INTO media_tombstones VALUES (?,?,?,?,?,?,?)',
+                   (row['id'], row['name'], row['kind'], row['mime_type'], row['origin'], row['source_task_id'], now))
+        db.execute('DELETE FROM media WHERE id=?', (row['id'],))
+    from characters import unlink_local
+    unlink_local(db, sorted(plan['removed']))
+    for group in plan['groups']:
+        kept = [i for i in json.loads(group['asset_ids']) if i not in plan['removed']]
+        if kept:
+            db.execute('UPDATE canvas_asset_groups SET asset_ids=?,updated_at=? WHERE id=?', (json.dumps(kept), now, group['id']))
+        else:
+            db.execute('DELETE FROM canvas_asset_groups WHERE id=?', (group['id'],))
+    for workflow_id, document in plan['documents'].items():
+        encoded = store.validate_document(document, workflow_id)
+        db.execute('UPDATE canvas_workflows SET document=?,revision=revision+1,updated_at=? WHERE id=?', (encoded, now, workflow_id))
+        db.execute('UPDATE canvas_projects SET updated_at=? WHERE id=(SELECT project_id FROM canvas_workflows WHERE id=?)', (now, workflow_id))
+    directory = root()
+    for row in plan['rows']:
+        path = directory / row['relpath']
+        if path.resolve() != path or not path.is_relative_to(directory) or not path.exists():
+            continue
+        pending = path.with_name(f'{path.name}.deleting-{token}')
+        try:
+            os.rename(path, pending)
+        except OSError as error:
+            raise MediaError(f'素材文件无法删除，未做任何更改：{path.name}', 409, 'file_missing') from error
+        staged.append((path, pending))
+
+
+def undo_delete(staged):
+    if staged:
+        # Rollback has released the lock; a second deletion could already have won.
+        _reconcile_staged_deletes(reversed(staged))
+
+
+def finish_delete(staged):
     removed_files = 0
     for _, pending in staged:
         try:
@@ -793,4 +932,64 @@ def delete_media(ids):
             removed_files += 1
         except OSError:
             pass  # unregistered and never served; reclaimable by maintenance
+    return removed_files
+
+
+def recover_staged_deletes():
+    """Reconcile interrupted deletions with committed rows under the same writer lock."""
+    directory = root()
+    pending_files = []
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            match = STAGED_DELETE.fullmatch(entry.name)
+            if match and entry.is_file(follow_symlinks=False):
+                pending_files.append((directory / entry.name, directory / match['filename']))
+    if not pending_files:
+        return
+    _reconcile_staged_deletes((path, pending) for pending, path in pending_files)
+
+
+def _reconcile_staged_deletes(staged):
+    restored = removed = 0
+    with store.write_transaction() as db:
+        for path, pending in staged:
+            if pending.is_symlink() or not pending.is_file():
+                continue  # a concurrent startup or normal post-commit cleanup handled it
+            media_id = path.stem
+            row = db.execute('SELECT relpath FROM media WHERE id=?', (media_id,)).fetchone()
+            try:
+                if row is not None and row['relpath'] == path.name:
+                    # A failed transaction leaves the media row. Never overwrite a file.
+                    if not path.exists() and not path.is_symlink():
+                        os.rename(pending, path)
+                        restored += 1
+                    elif not path.is_symlink() and path.samefile(pending):
+                        pending.unlink(missing_ok=True)
+                        removed += 1
+                    else:
+                        LOG.warning('media_delete_recovery_conflict file=%s', path.name)
+                elif row is None and db.execute('SELECT 1 FROM media_tombstones WHERE id=?', (media_id,)).fetchone():
+                    pending.unlink(missing_ok=True)
+                    removed += 1
+            except FileNotFoundError:
+                continue  # normal post-commit cleanup is allowed to win
+            except OSError:
+                LOG.exception('media_delete_recovery_failed file=%s', path.name)
+    if restored or removed:
+        LOG.info('media_delete_recovery restored=%s removed=%s', restored, removed)
+
+
+def delete_media(ids):
+    """Permanent library deletion: rows, files, references; nodes keep placeholders."""
+    ids = _ids(ids)
+    staged, token = [], uuid.uuid4().hex
+    try:
+        with store.write_transaction() as db:
+            plan = _plan(db, ids)
+            apply_delete(db, plan, staged, token)
+            summary = plan['summary']
+    except BaseException:
+        undo_delete(staged)
+        raise
+    removed_files = finish_delete(staged)
     return {**summary, 'deleted_ids': [r['id'] for r in plan['rows']], 'files_removed': removed_files}

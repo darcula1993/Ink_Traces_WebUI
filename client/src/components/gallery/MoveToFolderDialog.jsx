@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import LibraryDialog from '../library/LibraryDialog'
-import { ROOT, canCreateIn, createMediaFolder, currentTarget, folderLabel, folderTargetIssue, folderTree, listMediaFolders, moveMediaToFolder } from './taskLibrary.js'
+import { ROOT, canCreateIn, createMediaFolder, currentTarget, folderLabel, folderTargetIssue, folderTree, isGeneratedFolderId, listMediaFolders, moveMediaToFolder } from './taskLibrary.js'
 import '../library/library.css'
 import './taskLibrary.css'
 
 // LIBRARY-GLOBAL-20261116 S4b: replaces “加入本地素材” in the task center. Results already live in the
-// global media library (生成历史); this only changes their folder. A folder can be created on the spot.
+// global media library (生成历史). GEN-RESULT-LIFECYCLE-20261119: results still in 生成历史 are copied (new
+// independent item; the original stays with its task), others moved. A folder can be created on the spot.
 export default function MoveToFolderDialog({ media, onClose, onDone }) {
   const [folders, setFolders] = useState([])
   const [loading, setLoading] = useState(true)
@@ -30,8 +31,13 @@ export default function MoveToFolderDialog({ media, onClose, onDone }) {
   // The 移动 button disappears with the outcome: keep focus (and Escape/Tab) inside the dialog on 完成.
   const outcomeRef = useRef(null)
   useEffect(() => { if (outcome) outcomeRef.current?.closest('[role=dialog]')?.querySelector('footer button')?.focus({ preventScroll: true }) }, [outcome])
+  // Start from the results' current folder only when it is a user folder (生成历史 takes nothing).
+  useEffect(() => { if (folders.length && target !== null && target !== ROOT && isGeneratedFolderId(folders, target)) setTarget(null) }, [folders, target])
+  const copies = media.filter(entry => entry.folderId === undefined || isGeneratedFolderId(folders, entry.folderId)).length
+  const mode = !copies ? 'move' : copies === media.length ? 'copy' : 'mixed'
+  const title = { move: '移动到文件夹', copy: '复制到文件夹', mixed: '移动/复制到文件夹' }[mode]
   const selected = target === ROOT || target === null ? null : folders.find(folder => folder.id === target)
-  const issue = target === null ? (currentTarget(media) === null && media.length > 1 ? '所选结果位于不同文件夹，请选择目标文件夹' : '请选择目标文件夹') : folderTargetIssue(selected, kinds)
+  const issue = target === null ? (new Set(media.map(entry => entry.folderId || ROOT)).size > 1 ? '所选结果位于不同文件夹，请选择目标文件夹' : '请选择目标文件夹') : folderTargetIssue(selected, kinds)
   const parent = canCreateIn(selected) ? selected : null
 
   async function create() {
@@ -50,15 +56,18 @@ export default function MoveToFolderDialog({ media, onClose, onDone }) {
     try {
       const moved = await moveMediaToFolder(media.map(entry => entry.id), target)
       if (!alive.current) return
-      const text = `已把 ${moved} 项结果移动到“${folderLabel(folders, target)}”`
+      const where = `“${folderLabel(folders, target)}”`
+      const text = mode === 'copy' ? `已把 ${moved} 项结果复制到${where}` : mode === 'mixed' ? `已把 ${moved} 项结果移动/复制到${where}` : `已把 ${moved} 项结果移动到${where}`
       setOutcome(text); onDone?.({ moved, folderId: target, text })
     } catch (e) { if (alive.current) setError(message(e)) } finally { if (alive.current) setBusy(false) }
   }
 
   return (
-    <LibraryDialog title="移动到文件夹" className="ul-subdialog-top" busy={busy} error={error} onClose={onClose} onConfirm={outcome ? null : move} disabled={loading || !media.length || !!issue} confirmLabel="移动" cancelLabel={outcome ? '完成' : '取消'}>
+    <LibraryDialog title={title} className="ul-subdialog-top" busy={busy} error={error} onClose={onClose} onConfirm={outcome ? null : move} disabled={loading || !media.length || !!issue} confirmLabel={mode === 'copy' ? '复制' : mode === 'mixed' ? '移动/复制' : '移动'} cancelLabel={outcome ? '完成' : '取消'}>
       {outcome ? <p ref={outcomeRef} role="status" data-testid="move-to-folder-outcome"><strong>{outcome}</strong></p> : <>
-        <p>把所选 {media.length} 项生成结果移动到素材库中的文件夹。只改变所在位置，不复制文件；任务记录保持不变。</p>
+        {mode === 'move'
+          ? <p>把所选 {media.length} 项生成结果移动到素材库中的文件夹。只改变所在位置，不复制文件；任务记录保持不变。</p>
+          : <p data-testid="transfer-copy-note">把所选 {copies} 项生成结果复制到素材库中的文件夹：生成独立的新素材（硬链接，不额外占空间），原结果仍留在“生成历史”并随任务删除，复制出的不受影响。{mode === 'mixed' ? `其余 ${media.length - copies} 项已不在生成历史，直接移动。` : ''}</p>}
         {loading ? <p role="status">正在载入文件夹…</p> : (
           <div role="radiogroup" aria-label="目标文件夹" className="task-move-folders">
             <label><input type="radio" name="task-move-target" checked={target === ROOT} onChange={() => setTarget(ROOT)} /> 根目录</label>

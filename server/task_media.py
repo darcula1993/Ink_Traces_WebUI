@@ -50,7 +50,8 @@ def _library_state(media_id):
     if not media_id:
         return 'none', None
     import media_library
-    state, row = media_library.status(media_id)
+    # The task center shows a trashed task's own results (GEN-RESULT-LIFECYCLE: hidden elsewhere).
+    state, row = media_library.status(media_id, reveal_trashed=True)
     return ('none', None) if state == 'missing' else (state, row)
 
 
@@ -156,8 +157,8 @@ def remove_task_files(task, assets=None):
     """Permanent task deletion (LIBRARY-GLOBAL S3): remove the task's own files only.
 
     Library files (``<asset_root>/media``) are never removed here, whatever a task row
-    points at; an output registered in the library survives as the library item (its
-    task output path is only a second hard link or an independent copy). Other task
+    points at; the task's 生成历史 results are deleted beforehand through the library
+    (``gen_results.purge``, GEN-RESULT-LIFECYCLE-20261119), copies survive. Other task
     files and the output directory are removed as before. ``assets`` is an optional
     snapshot of the task's asset rows, used when the task row is already deleted.
     """

@@ -106,8 +106,8 @@ export const TaskCard = React.memo(function TaskCard({
             {item.libraryMedia?.length > 0 && onMove && (
               <button
                 type="button"
-                aria-label="移动到文件夹"
-                title="把任务结果移动到素材库中的文件夹（不复制文件）"
+                aria-label="复制到文件夹"
+                title="把任务结果复制到素材库中的其他文件夹（原结果留在生成历史，随任务删除；复制出的不受影响）"
                 onClick={event => { event.stopPropagation(); onMove(item) }}
                 className="task-card-action"
               >

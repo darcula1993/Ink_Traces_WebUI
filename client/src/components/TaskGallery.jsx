@@ -10,6 +10,8 @@ import { TaskCardList } from './gallery/TaskCards.jsx'
 import { TaskCompareModal, TaskDetailModal } from './gallery/TaskModals.jsx'
 import ConfirmDialog from './ui/ConfirmDialog'
 import askConfirm from './ui/askConfirm'
+import TaskDeletePlan from './gallery/TaskDeletePlan'
+import { previewTaskDelete, announceMediaStatusChange } from './gallery/taskDeletePreview.js'
 import { takeTaskCenterFocus } from '../lib/taskCenterLink.js'
 import ToolAssetLibrary from './library/ToolAssetLibrary'
 import MoveToFolderDialog from './gallery/MoveToFolderDialog.jsx'
@@ -695,12 +697,16 @@ function TaskGallery({
 
   const deleteTask = useCallback(async item => {
     const permanent = view === 'trash'
-    const message = permanent
-      ? '彻底删除此任务及其输出文件？此操作无法撤销。'
-      : '将此任务移到回收站？输出文件会保留，之后可以恢复。'
+    // GEN-RESULT-LIFECYCLE-20261119: trash hides the task's 生成历史 results; permanent deletion deletes them
+    // (the server preview lists the canvases, groups and character cards referencing them).
+    let message = '将此任务移到回收站？它在素材库“生成历史”中的结果会暂时隐藏（画布上显示“结果在回收站”），恢复任务后原样回来。'
+    if (permanent) {
+      try { message = <TaskDeletePlan preview={await previewTaskDelete({ ids: [item.taskId] })} /> } catch (requestError) { setError(requestError.response?.data?.error || '无法读取删除影响，未删除'); return }
+    }
     if (!await askConfirm({ title: permanent ? '彻底删除任务' : '移到回收站', message, confirmLabel: permanent ? '彻底删除' : '移到回收站', danger: permanent })) return
     try {
       await axios.delete(`/api/tasks/${item.taskId}`, { params: permanent ? { permanent: true } : {} })
+      announceMediaStatusChange()
       setTasks(previous => previous.filter(task => Number(task.id) !== Number(item.taskId)))
       setTotal(previous => Math.max(0, previous - 1))
       setSelectedKey(null)
@@ -759,6 +765,7 @@ function TaskGallery({
     if (!item.taskId) return
     try {
       await axios.post(`/api/tasks/${item.taskId}/restore`)
+      announceMediaStatusChange()
       setTasks(previous => previous.filter(task => Number(task.id) !== Number(item.taskId)))
       setTotal(previous => Math.max(0, previous - 1))
       setSelectedKey(null)
@@ -874,9 +881,10 @@ function TaskGallery({
       .filter(Number.isInteger)
     const label = `${selectedKeys.size} 个任务卡片`
     const permanent = view === 'trash'
-    const prompt = permanent
-      ? `彻底删除选中的 ${label} 及其输出文件？此操作无法撤销。`
-      : `将选中的 ${label} 移到回收站？输出文件会保留。`
+    let prompt = `将选中的 ${label} 移到回收站？它们在素材库“生成历史”中的结果会暂时隐藏，恢复任务后原样回来。`
+    if (permanent) {
+      try { prompt = <TaskDeletePlan preview={await previewTaskDelete({ ids: taskIds })} /> } catch (requestError) { setError(requestError.response?.data?.error || '无法读取删除影响，未删除'); return }
+    }
     if (!await askConfirm({ title: permanent ? '彻底删除任务' : '移到回收站', message: prompt, confirmLabel: permanent ? '彻底删除' : '移到回收站', danger: permanent })) return
 
     try {
@@ -891,6 +899,7 @@ function TaskGallery({
         ;[...(response.data.deleted_ids || []), ...(response.data.missing_ids || [])]
           .forEach(taskId => removedTaskIds.add(Number(taskId)))
       }
+      announceMediaStatusChange()
       setTasks(previous => previous.filter(task => !removedTaskIds.has(Number(task.id))))
       setTotal(previous => Math.max(0, previous - deletedCount))
       setSelectedKeys(new Set())
@@ -915,6 +924,7 @@ function TaskGallery({
         const response = await axios.post('/api/tasks/bulk-restore', { ids: taskIds.slice(offset, offset + 250) })
         ;(response.data.restored_ids || []).forEach(taskId => restored.add(Number(taskId)))
       }
+      announceMediaStatusChange()
       setTasks(previous => previous.filter(task => !restored.has(Number(task.id))))
       setTotal(previous => Math.max(0, previous - restored.size))
       setSelectedKeys(new Set())
@@ -1350,7 +1360,7 @@ function TaskGallery({
               </div>
             )}
             {view !== 'trash' && (
-              <IconButton label="已选任务结果移动到文件夹" onClick={moveSelectedResults} disabled={selectedTaskCount === 0 || collectingMedia}>
+              <IconButton label="已选任务结果复制到文件夹" onClick={moveSelectedResults} disabled={selectedTaskCount === 0 || collectingMedia}>
                 <FolderInput size={15} />
               </IconButton>
             )}

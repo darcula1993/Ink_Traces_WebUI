@@ -36,7 +36,7 @@ import AddToCharacterDialog from './AddToCharacterDialog'
 import CanvasMoveToFolder from './CanvasMoveToFolder'
 import useCanvasMediaStatus from './useCanvasMediaStatus'
 import {uploadCanvasLibraryMedia,resolveLibraryMedia,lookupMedia,readUploadFolder,writeUploadFolder} from '../../lib/canvasMedia'
-import {isMediaAsset,isDeletedMedia,markDeletedMedia} from '../../lib/canvasMediaStatus'
+import {isMediaAsset,isDeletedMedia,isTrashedMedia,markDeletedMedia} from '../../lib/canvasMediaStatus'
 import MediaPreview,{previewItems} from './MediaPreview'
 import DeleteCanvasDialog from './DeleteCanvasDialog'
 const CanvasImageAnnotator = React.lazy(() => import('./CanvasImageAnnotator'))
@@ -1227,7 +1227,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const node=docRef.current.nodes.find(item=>item.id===id)
     if(!node)return
     if(node.type==='asset'){deleteNode(id);return}
-    const candidates=(node.candidates||[]).filter(candidate=>!(isMediaAsset(candidate)&&isDeletedMedia(candidate.id))),asset=candidates.at(-1)||null
+    const candidates=(node.candidates||[]).filter(candidate=>!(isMediaAsset(candidate)&&isDeletedMedia(candidate.id)&&!isTrashedMedia(candidate.id))),asset=candidates.at(-1)||null
     edit(current=>({...current,nodes:current.nodes.map(item=>item.id===id?{...item,candidates,asset,selectedCandidateId:asset?.id||null}:item)}),{description:`移除已删除的结果：节点“${node.title}”`})
   }
   async function revealInLibrary(asset){

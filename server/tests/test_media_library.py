@@ -148,12 +148,18 @@ def test_register_generated_hardlink_idempotent_move_and_q6():
         media.register_generated(tid, path, 'video')
     c = client()
     move = lambda folder: c.post('/api/canvas/media/move', json={'ids': [media_id], 'folder_id': folder})
-    assert move(SYSTEM['generated']).json['code'] == 'folder_target_invalid'
-    assert move(SYSTEM['generated_video']).json['code'] == 'folder_target_invalid'
+    assert move(SYSTEM['generated']).json['code'] == 'folder_generated_only'
+    assert move(SYSTEM['generated_video']).json['code'] == 'folder_generated_only'
+    # GEN-RESULT-LIFECYCLE-20261119: moving a 生成历史 item out copies it (new id, same file).
     folder = c.post('/api/canvas/media/folders', json={'title': 'keep'}).json['folder']
-    assert move(folder['id']).json['media'][0]['folder_id'] == folder['id']
-    assert move(SYSTEM['generated_image']).json['media'][0]['folder_id'] == SYSTEM['generated_image']
+    moved = move(folder['id']).json
+    copy_id = moved['media'][0]['id']
+    assert copy_id != media_id and moved['media'][0]['folder_id'] == folder['id']
+    assert moved['copied'] == [{'source_id': media_id, 'id': copy_id}]
+    assert move(SYSTEM['generated_image']).json['media'][0]['id'] == media_id  # already there: no-op
     assert c.post('/api/canvas/media/move', json={'ids': [media_id, 'e' * 32], 'folder_id': None}).json['code'] == 'media_not_found'
+    assert media.get_media(media_id)['folder_id'] == SYSTEM['generated_image']
+    assert c.post('/api/canvas/media/delete', json={'ids': [copy_id]}).json['deleted_ids'] == [copy_id]
     assert media.get_media(media_id)['folder_id'] == SYSTEM['generated_image']
     # User decision 2026-11-17 (S9): uploading the same bytes at runtime returns the existing result
     # unchanged (still in 生成历史, origin generated); Q6 "move to the root" only applies to migration.
@@ -180,9 +186,12 @@ def test_generated_history_only_takes_generated_results():
     # All-or-nothing: a mixed selection is refused and nothing moves.
     assert move([generated, uploaded['id']], SYSTEM['generated_image']).json['code'] == 'folder_generated_only'
     assert media.get_media(uploaded['id'])['folder_id'] is None
-    assert move([generated], SYSTEM['generated_video']).json['code'] == 'folder_target_invalid'
-    assert move([generated], None).json['media'][0]['folder_id'] is None  # results may leave
-    assert move([generated], SYSTEM['generated_image']).json['media'][0]['folder_id'] == SYSTEM['generated_image']
+    assert move([generated], SYSTEM['generated_video']).json['code'] == 'folder_generated_only'
+    copied = move([generated], None).json['media'][0]  # results leave as copies
+    assert copied['folder_id'] is None and copied['id'] != generated
+    # Nothing (not even a copy of a result) moves back into 生成历史.
+    assert move([copied['id']], SYSTEM['generated_image']).json['code'] == 'folder_generated_only'
+    assert media.get_media(generated)['folder_id'] == SYSTEM['generated_image']
     with pytest.raises(media.MediaError) as error:
         fresh = path.with_name('fresh.png')
         fresh.write_bytes(image_bytes('white'))

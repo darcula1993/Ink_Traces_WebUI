@@ -62,7 +62,7 @@ def register_task_outputs(task_id, strict=False):
             continue
         if asset.get('media_id'):
             state, _row = media.status(asset['media_id'])
-            if state in ('ok', 'deleted'):
+            if state in ('ok', 'deleted', 'trashed'):
                 results.append((asset['id'], state, asset['media_id']))
                 continue
         path = Path(asset['path']).absolute()
@@ -138,6 +138,8 @@ def reference(workflow_id, asset_id):
             state, row = media.status(alias)
     if state == 'deleted':
         raise ReferenceDeleted(row.get('name') or asset_id)
+    if state == 'trashed':
+        raise store.CanvasError(f'参考素材“{row.get("name") or asset_id}”所在的生成任务在回收站，请恢复任务或替换后再生成', 409)
     if state == 'ok':
         return media.media_path(row), row['mime_type'], row['kind']
     canvas = store.get_asset(workflow_id, asset_id, allow_archived=True)

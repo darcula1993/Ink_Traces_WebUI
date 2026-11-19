@@ -1,5 +1,5 @@
 // LIBRARY-GLOBAL-20261116 S4b: task center ↔ global media library (S1 contract: /api/canvas/media/*).
-// Moving only changes folder_id; files are never copied. Pure helpers are node-testable.
+// Moving changes folder_id; results still in 生成历史 are copied (GEN-RESULT-LIFECYCLE-20261119). Pure helpers are node-testable.
 import axios from 'axios'
 
 export const MOVE_BATCH = 500
@@ -51,17 +51,17 @@ export function folderTree(folders) {
   return out
 }
 
-// Mirrors the server rule (folder_target_invalid): 生成历史 itself takes nothing; a system type
-// subfolder only takes results of that type; root and user folders take anything.
+// Mirrors the server rule: 生成历史 and its type subfolders receive only new generation results, nothing is moved
+// into them (GEN-RESULT-LIFECYCLE-20261119); root and user folders take anything.
 export function folderTargetIssue(folder, kinds) {
   if (!folder) return null
-  if (folder.system_key === 'generated') return '“生成历史”只能放入其下的图片/视频/音频子文件夹'
-  if (folder.system_key?.startsWith('generated_')) {
-    const kind = folder.system_key.slice('generated_'.length)
-    if ([...new Set(kinds)].some(value => value !== kind)) return `“${folder.title}”只能放入${({ image: '图片', video: '视频', audio: '音频' })[kind] || '同类型'}结果`
-  }
+  if (folder.system_key === 'generated') return '“生成历史”只接收新生成的结果'
+  if (folder.system_key?.startsWith('generated_')) return `“${folder.title}”只接收新生成的结果`
   return null
 }
+
+// Results still in 生成历史 are copied by “复制到文件夹” (the original stays with its task).
+export const isGeneratedFolderId = (folders, id) => folders.some(folder => folder.id === id && folder.system_key?.startsWith('generated_'))
 
 export const canCreateIn = folder => !folder?.system_key
 
@@ -80,10 +80,10 @@ export function folderLabel(folders, folderId) {
 }
 
 // The folder every result is in now (ROOT for the root); null when they differ or a folder is unknown (V2-FIX F7).
-export function currentTarget(media) {
+export function currentTarget(media, folders = []) {
   if (!media.length || media.some(entry => entry.folderId === undefined)) return null
   const own = [...new Set(media.map(entry => entry.folderId || ROOT))]
-  return own.length === 1 ? own[0] : null
+  return own.length === 1 && !isGeneratedFolderId(folders, own[0]) ? own[0] : null
 }
 
 // Library results of the given task items (deleted ones excluded), de-duplicated.
