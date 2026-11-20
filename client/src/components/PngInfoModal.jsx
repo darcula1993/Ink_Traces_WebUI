@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import axios from 'axios'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Braces, Copy, FileImage, Send, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react'
+import { Braces, Copy, FileImage, Grid3X3, Send, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react'
 import IconButton from './ui/IconButton'
 import useModalFocus, { isTopModal } from './ui/useModalFocus'
+import { DropTargetReticle, PngInfoDropArt } from './art/ShellEmptyArt'
 
 const PARAM_LABELS = {
   aspect_ratio: '画幅',
@@ -29,7 +30,7 @@ function formatValue(key, value) {
   return String(value)
 }
 
-export default function PngInfoModal({ open, onClose, onApply }) {
+export default function PngInfoModal({ open, onClose, onApply, onApplyCanvas, preferCanvas = false }) {
   const inputRef = useRef(null)
   const dialogRef = useRef(null)
   const previewUrlRef = useRef('')
@@ -188,11 +189,22 @@ export default function PngInfoModal({ open, onClose, onApply }) {
                 <button
                   type="button"
                   onClick={() => inputRef.current?.click()}
-                  className="flex min-h-44 min-w-64 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-white/15 bg-black/20 text-nexus-muted transition-colors hover:border-nexus-green/45 hover:text-nexus-green"
+                  className="png-info-drop-trigger"
                 >
-                  <Upload size={24} />
-                  <span className="text-sm">选择 PNG</span>
+                  <PngInfoDropArt />
+                  <span className="text-sm font-medium text-nexus-text-light">选择 PNG</span>
+                  <span className="text-xs text-nexus-muted">拖入或点击读取提示词与生成参数</span>
                 </button>
+              )}
+              {dragging && (
+                <div className="drop-reticle-overlay" aria-hidden="true">
+                  <span className="drop-reticle-corner is-tl" />
+                  <span className="drop-reticle-corner is-tr" />
+                  <span className="drop-reticle-corner is-bl" />
+                  <span className="drop-reticle-corner is-br" />
+                  <DropTargetReticle size={28} />
+                  <span className="drop-reticle-label">松开以解析 PNG Info</span>
+                </div>
               )}
               {previewUrl && (
                 <button type="button" onClick={() => inputRef.current?.click()} className="btn btn-secondary btn-sm absolute bottom-3 left-3">
@@ -245,16 +257,28 @@ export default function PngInfoModal({ open, onClose, onApply }) {
               )}
             </aside>
 
-            <footer className="col-span-2 flex h-14 items-center border-t border-white/10 px-3">
+            <footer className="col-span-2 flex h-14 items-center gap-2 border-t border-white/10 px-3">
               <span className="font-mono text-xs uppercase text-nexus-muted">{metadata?.source || 'PNG'}</span>
-              <button
-                type="button"
-                disabled={!canApply}
-                onClick={() => { onApply(metadata); close() }}
-                className="btn btn-primary ml-auto"
-              >
-                <Send size={14} /> 发送到图片生成
-              </button>
+              <div className="ml-auto flex items-center gap-2">
+                {onApplyCanvas && (
+                  <button
+                    type="button"
+                    disabled={!canApply}
+                    onClick={() => { onApplyCanvas(metadata); close() }}
+                    className={`btn ${preferCanvas ? 'btn-primary' : 'btn-secondary'}`}
+                  >
+                    <Grid3X3 size={14} /> 发送到画布
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={!canApply}
+                  onClick={() => { onApply(metadata); close() }}
+                  className={`btn ${preferCanvas && onApplyCanvas ? 'btn-secondary' : 'btn-primary'}`}
+                >
+                  <Send size={14} /> 发送到图片生成
+                </button>
+              </div>
             </footer>
           </motion.section>
         </motion.div>

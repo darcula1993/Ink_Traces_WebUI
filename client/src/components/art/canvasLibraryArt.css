@@ -1,0 +1,365 @@
+/* UI-ART-CANVAS-LIBRARY-20261121: Micro-Ink Precision vector styling & dark subtle surfaces.
+ * Palette: neutral near-black (#0c0d0e / #121314 / #18191b), structure lines rgba(228,229,231,0.18-0.32),
+ * brand green #45c088 strictly <= 15% visual area per graphic. Respects prefers-reduced-motion / contrast / forced-colors.
+ */
+
+.ila-svg {
+  display: block;
+  flex-shrink: 0;
+  color: var(--text, #e4e5e7);
+  --ila-stroke-soft: rgba(228, 229, 231, 0.14);
+  --ila-stroke-mid: rgba(228, 229, 231, 0.24);
+  --ila-stroke-strong: rgba(228, 229, 231, 0.34);
+  --ila-fill-xs: rgba(255, 255, 255, 0.02);
+  --ila-fill-sm: rgba(255, 255, 255, 0.032);
+  --ila-fill-md: rgba(255, 255, 255, 0.048);
+  --ila-surface: var(--surface-1, #121314);
+  --ila-accent: var(--accent, #45c088);
+  --ila-accent-soft: rgba(69, 192, 136, 0.12);
+  --ila-accent-halo: rgba(69, 192, 136, 0.14);
+  --ila-audio-violet: var(--cv-port-audio, #a47cf3);
+  --ila-warn: var(--warning, #d6bd86);
+  --ila-danger: var(--danger, #df8a90);
+}
+
+.ila-svg .ila-guide { stroke: var(--ila-stroke-soft); }
+.ila-svg .ila-stroke-soft { stroke: var(--ila-stroke-soft); }
+.ila-svg .ila-stroke-mid { stroke: var(--ila-stroke-mid); }
+.ila-svg .ila-stroke-strong { stroke: var(--ila-stroke-strong); }
+.ila-svg .ila-fill-xs { fill: var(--ila-fill-xs); }
+.ila-svg .ila-fill-sm { fill: var(--ila-fill-sm); }
+.ila-svg .ila-fill-md { fill: var(--ila-fill-md); }
+.ila-svg .ila-surface-fill { fill: var(--ila-surface); }
+.ila-svg .ila-accent-stroke { stroke: var(--ila-accent); stroke-opacity: 0.85; }
+.ila-svg .ila-accent-fill { fill: var(--ila-accent); fill-opacity: 0.9; }
+.ila-svg .ila-accent-soft-fill { fill: var(--ila-accent-soft); }
+.ila-svg .ila-accent-halo { fill: var(--ila-accent-halo); }
+.ila-svg .ila-warn-stroke { stroke: var(--ila-warn); stroke-opacity: 0.82; }
+.ila-svg .ila-danger-stroke { stroke: var(--ila-danger); stroke-opacity: 0.72; }
+.ila-svg .ila-pill-text {
+  fill: var(--ila-accent);
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  letter-spacing: 0.01em;
+}
+
+/* T1-4: Empty canvas flow illustration (6s slow micro-flow dash, paused under reduced-motion) */
+.ila-canvas-empty {
+  margin: 0 auto 14px;
+  max-width: 100%;
+  height: auto;
+}
+.ila-canvas-empty .ila-flow-dash {
+  stroke: var(--ila-accent);
+  stroke-opacity: 0.85;
+  stroke-dasharray: 10 74;
+  animation: ila-ink-flow 6s linear infinite;
+}
+@keyframes ila-ink-flow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -84; }
+}
+
+/* T1-6: Organic waveform envelope (compact in canvas audio node, card in asset library) */
+.ila-waveform {
+  width: 100%;
+  height: 100%;
+}
+.ila-waveform .ila-wave-halo {
+  fill: rgba(164, 124, 243, 0.065);
+}
+.ila-waveform.is-card .ila-wave-halo {
+  fill: rgba(69, 192, 136, 0.06);
+}
+.ila-waveform .ila-wave-arcs {
+  stroke: rgba(228, 229, 231, 0.085);
+}
+.ila-waveform .ila-wave-baseline {
+  stroke: rgba(228, 229, 231, 0.12);
+}
+.ila-waveform .ila-wave-bar {
+  fill: rgba(228, 229, 231, 0.22);
+  transition: fill 120ms ease, opacity 120ms ease;
+}
+.ila-waveform .ila-wave-bar.is-violet {
+  fill: rgba(164, 124, 243, 0.44);
+}
+.ila-waveform .ila-wave-bar.is-peak {
+  fill: rgba(69, 192, 136, 0.66);
+}
+.ila-waveform .ila-wave-bar.is-played {
+  fill: rgba(69, 192, 136, 0.88);
+}
+.ila-waveform .ila-wave-playhead {
+  stroke: rgba(69, 192, 136, 0.55);
+}
+.ila-waveform.is-playing .ila-wave-bar.is-played,
+.ila-waveform.is-playing .ila-wave-bar.is-peak {
+  animation: ila-wave-breathe 1.6s ease-in-out infinite;
+  animation-delay: var(--ila-bar-delay, 0ms);
+}
+@keyframes ila-wave-breathe {
+  0%, 100% { opacity: 0.78; }
+  50% { opacity: 1; }
+}
+
+/* Canvas audio node waveform wrapper: adapts cleanly inside 112px audio node (and shrinks when references exist) */
+.canvas-studio .cv-media-player.is-audio {
+  justify-content: space-between;
+  gap: 2px;
+  padding: 5px 6px 3px;
+}
+.canvas-studio .cv-media-player-wave {
+  flex: 1 1 0;
+  min-height: 18px;
+  max-height: 42px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(12, 13, 14, 0.36);
+}
+
+/* Asset library audio card waveform container */
+.ul-audio.ul-audio-art {
+  position: relative;
+  padding: 8px 10px 22px;
+  gap: 0;
+  background: radial-gradient(circle at 50% 48%, rgba(164, 124, 243, 0.055), rgba(12, 13, 14, 0.55) 75%);
+  overflow: hidden;
+}
+.ul-audio.ul-audio-art .ila-waveform {
+  width: 100%;
+  height: 100%;
+  color: inherit;
+}
+.ul-audio.ul-audio-art .ul-audio-label {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  color: var(--text-2, #a1a4a9);
+  background: rgba(12, 13, 14, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.ul-selected .ul-audio.ul-audio-art {
+  padding: 2px;
+}
+
+/* T1-7: Waiting node viewfinder corners + glyph */
+.canvas-studio .cv-media-empty.is-waiting {
+  position: relative;
+  overflow: hidden;
+  gap: 6px;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.09);
+  background: radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.022), rgba(0, 0, 0, 0.24) 76%);
+}
+.ila-vf-corners {
+  position: absolute;
+  inset: 8px;
+  pointer-events: none;
+}
+.ila-vf-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: rgba(255, 255, 255, 0.13);
+  border-style: solid;
+  border-width: 0;
+}
+.ila-vf-corner.is-tl { top: 0; left: 0; border-top-width: 1px; border-left-width: 1px; border-top-left-radius: 2px; }
+.ila-vf-corner.is-tr { top: 0; right: 0; border-top-width: 1px; border-right-width: 1px; border-top-right-radius: 2px; }
+.ila-vf-corner.is-bl { bottom: 0; left: 0; border-bottom-width: 1px; border-left-width: 1px; border-bottom-left-radius: 2px; }
+.ila-vf-corner.is-br { bottom: 0; right: 0; border-bottom-width: 1px; border-right-width: 1px; border-bottom-right-radius: 2px; }
+
+/* Smooth LOD simplification below LOD_ZOOM */
+.canvas-studio .cv-world.is-lod-low .ila-vf-corners,
+.canvas-studio .cv-world.is-lod-low .ila-lod-detail {
+  display: none;
+}
+.canvas-studio .cv-world.is-lod-low .cv-media-empty.is-waiting .ila-waiting-glyph {
+  width: 34px;
+  height: auto;
+}
+
+/* T1-7: 45-degree subtle dark hatched placeholder for deleted / trashed items */
+.canvas-studio .cv-media-state.is-deleted,
+.ul-deleted .ul-deleted-mark {
+  background-color: rgba(12, 13, 14, 0.54);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.025) 0 1px,
+    transparent 1px 9px
+  );
+}
+.canvas-studio .cv-media-state.is-deleted:not(.is-trashed) {
+  border-color: rgba(223, 138, 144, 0.24);
+}
+.canvas-studio .cv-media-state.is-deleted.is-trashed {
+  border-color: rgba(214, 189, 134, 0.26);
+}
+.ul-deleted.is-trashed .ul-deleted-card {
+  border-color: rgba(214, 189, 134, 0.3);
+}
+.ul-deleted.is-trashed .ul-info {
+  color: var(--warning, #d6bd86);
+}
+
+/* T2-3 & T2-4: Centered empty state blocks across library, character cards, and narrow task sidebar */
+.ila-empty-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+.ila-empty-block > p {
+  margin: 0;
+  max-width: 380px;
+  line-height: 1.55;
+}
+.ila-empty-sub {
+  font-size: 12px;
+  color: var(--text-3, #6d7177);
+  max-width: 340px;
+  line-height: 1.5;
+}
+
+.cv-panel-empty.cv-panel-empty-art {
+  margin: 0;
+  padding: 28px 14px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+}
+.cv-panel-empty.cv-panel-empty-art p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--cv-secondary, var(--text-2));
+}
+
+/* T2-6: Canvas external file drag-in dark viewfinder drop overlay */
+.canvas-studio .cv-surface.is-file-dragging > .cv-empty {
+  opacity: 0.08;
+}
+.cv-file-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 13, 14, 0.72);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.cv-file-drop-frame {
+  position: absolute;
+  inset: 14px;
+  border: 1px dashed rgba(69, 192, 136, 0.55);
+  border-radius: 10px;
+}
+.cv-file-drop-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-color: var(--accent, #45c088);
+  border-style: solid;
+  border-width: 0;
+}
+.cv-file-drop-corner.is-tl { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 8px; }
+.cv-file-drop-corner.is-tr { top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 8px; }
+.cv-file-drop-corner.is-bl { bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 8px; }
+.cv-file-drop-corner.is-br { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 8px; }
+.cv-file-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 28px;
+  border-radius: 10px;
+  background: rgba(24, 25, 27, 0.92);
+  border: 1px solid rgba(69, 192, 136, 0.36);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+.cv-file-drop-card strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text, #e4e5e7);
+}
+.cv-file-drop-card span {
+  font-size: 12px;
+  color: var(--text-2, #a1a4a9);
+}
+
+/* Accessibility: reduced motion, reduced transparency, higher contrast, forced colors */
+@media (prefers-reduced-motion: reduce) {
+  .ila-canvas-empty .ila-flow-dash,
+  .ila-waveform.is-playing .ila-wave-bar.is-played,
+  .ila-waveform.is-playing .ila-wave-bar.is-peak,
+  .cv-file-drop-overlay {
+    animation: none;
+  }
+  .ila-canvas-empty .ila-flow-dash {
+    stroke-dasharray: none;
+    stroke-opacity: 0.38;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .cv-file-drop-overlay {
+    background: rgba(12, 13, 14, 0.92);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .ila-svg {
+    --ila-stroke-soft: rgba(228, 229, 231, 0.32);
+    --ila-stroke-mid: rgba(228, 229, 231, 0.48);
+    --ila-stroke-strong: rgba(228, 229, 231, 0.68);
+  }
+  .ila-vf-corner {
+    border-color: rgba(255, 255, 255, 0.34);
+  }
+}
+
+@media (forced-colors: active) {
+  .ila-svg {
+    --ila-stroke-soft: CanvasText;
+    --ila-stroke-mid: CanvasText;
+    --ila-stroke-strong: CanvasText;
+    --ila-fill-xs: Canvas;
+    --ila-fill-sm: Canvas;
+    --ila-fill-md: Canvas;
+    --ila-surface: Canvas;
+    --ila-accent: Highlight;
+    --ila-accent-soft: Canvas;
+    --ila-accent-halo: transparent;
+    --ila-warn: CanvasText;
+    --ila-danger: CanvasText;
+  }
+  .cv-file-drop-overlay {
+    background: Canvas;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .cv-file-drop-frame,
+  .cv-file-drop-corner {
+    border-color: Highlight;
+  }
+}

@@ -7,11 +7,13 @@ No Flask imports:
 the Worker (S2) calls ``register_generated`` directly.
 """
 import hashlib
+import io
 import json
 import logging
 import os
 import re
 import shutil
+import subprocess
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -74,11 +76,132 @@ def system_folder_id(key):
     return media_schema.stable_id('system', key)
 
 
+def _probe_media_meta(path, kind):
+    """Return (width, height, duration_seconds) for a local media file; missing values are None."""
+    try:
+        src = Path(path)
+        if not src.is_file():
+            return None, None, None
+    except OSError:
+        return None, None, None
+    if kind == 'image':
+        try:
+            from PIL import Image
+            with Image.open(src) as picture:
+                width, height = picture.size
+                try:
+                    orientation = picture.getexif().get(274)
+                except Exception:
+                    orientation = None
+                if orientation in (5, 6, 7, 8):
+                    width, height = height, width
+            if width and height:
+                return int(width), int(height), None
+        except Exception:
+            return None, None, None
+        return None, None, None
+    if kind not in ('video', 'audio'):
+        return None, None, None
+    ffprobe = shutil.which('ffprobe')
+    if not ffprobe:
+        return None, None, None
+    try:
+        result = subprocess.run(
+            [ffprobe, '-v', 'error', '-protocol_whitelist', 'file',
+             '-probesize', '8000000', '-analyzeduration', '2000000',
+             '-show_entries', 'stream=codec_type,width,height,duration:format=duration',
+             '-of', 'json', str(src)],
+            capture_output=True, timeout=10, check=False,
+        )
+        if result.returncode != 0 or not result.stdout:
+            return None, None, None
+        probe = json.loads(result.stdout)
+    except Exception:
+        return None, None, None
+    width = height = None
+    duration = None
+    for stream in probe.get('streams') or []:
+        if not isinstance(stream, dict):
+            continue
+        if kind == 'video' and stream.get('codec_type') == 'video' and width is None:
+            w, h = stream.get('width'), stream.get('height')
+            if isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0:
+                width, height = w, h
+        if duration is None and stream.get('duration') is not None:
+            try:
+                val = float(stream['duration'])
+                if val > 0:
+                    duration = round(val, 2)
+            except (TypeError, ValueError):
+                pass
+    fmt_dur = (probe.get('format') or {}).get('duration')
+    if fmt_dur is not None:
+        try:
+            val = float(fmt_dur)
+            if val > 0:
+                duration = round(val, 2)
+        except (TypeError, ValueError):
+            pass
+    return width, height, duration
+
+
+def _save_metadata(db, media_id, width, height, duration_seconds):
+    db.execute(
+        'INSERT OR REPLACE INTO media_metadata (media_id, width, height, duration_seconds) VALUES (?,?,?,?)',
+        (media_id, width, height, duration_seconds),
+    )
+
+
+def _enrich_rows(db, rows, *, persist=False):
+    items = [dict(r) for r in rows]
+    if not items:
+        return items
+    ids = [r['id'] for r in items]
+    marks = ','.join('?' * len(ids))
+    meta_map = {
+        r['media_id']: (r['width'], r['height'], r['duration_seconds'])
+        for r in db.execute(
+            f'SELECT media_id, width, height, duration_seconds FROM media_metadata WHERE media_id IN ({marks})',
+            ids,
+        ).fetchall()
+    }
+    to_persist = []
+    directory = None
+    for item in items:
+        mid = item['id']
+        if mid in meta_map:
+            w, h, dur = meta_map[mid]
+        else:
+            if directory is None:
+                directory = root()
+            file_path = directory / item['relpath']
+            w, h, dur = _probe_media_meta(file_path, item['kind'])
+            if persist and file_path.is_file():
+                to_persist.append((mid, w, h, dur))
+        item['width'] = w
+        item['height'] = h
+        item['duration_seconds'] = dur
+    if to_persist and not db.in_transaction:
+        try:
+            with store.write_transaction() as wdb:
+                wdb.executemany(
+                    'INSERT OR IGNORE INTO media_metadata (media_id, width, height, duration_seconds) VALUES (?,?,?,?)',
+                    to_persist,
+                )
+        except Exception:
+            pass
+    return items
+
+
 def public(row):
     row = dict(row)
+    if 'width' not in row:
+        enriched = _enrich_rows(tasks.get_db(), [row], persist=not tasks.get_db().in_transaction)
+        row = enriched[0]
     url = f"/api/canvas/media/{row['id']}"
     return {**{k: row[k] for k in ('id', 'name', 'kind', 'mime_type', 'size_bytes', 'folder_id', 'origin', 'source_task_id', 'created_at')},
-            'url': url, 'thumbnail_url': url + '/thumbnail' if row['kind'] == 'image' else None}
+            'width': row.get('width'), 'height': row.get('height'), 'duration_seconds': row.get('duration_seconds'),
+            'url': url, 'thumbnail_url': url + '/thumbnail' if row['kind'] in ('image', 'video') else None}
 
 
 # GEN-RESULT-LIFECYCLE-20261119: an item of 生成历史 shares its task's life cycle. Its linked
@@ -157,6 +280,22 @@ def get_media(media_id):
     return row
 
 
+def resolve_image_media(ref):
+    """Resolve a media id, alias or asset URL to a live image row and verified file path."""
+    if not isinstance(ref, str) or not ref.strip() or len(ref) > 600:
+        raise MediaError('源素材编号无效', 400, 'invalid_id')
+    ref = ref.strip()
+    media_id = resolve(ref)
+    if not media_id:
+        if MEDIA_ID.fullmatch(ref) or ref.startswith('/') or ':' in ref:
+            raise MediaError('素材不存在', 404, 'media_not_found')
+        raise MediaError('源素材编号无效', 400, 'invalid_id')
+    row = get_media(media_id)
+    if row['kind'] != 'image':
+        raise MediaError('图层分解源素材仅支持图片类型', 400, 'unsupported_media')
+    return row, media_path(row)
+
+
 def media_path(row):
     directory = root()
     path = directory / row['relpath']
@@ -167,6 +306,46 @@ def media_path(row):
             raise deleted_error(current)
         raise MediaError('素材文件不可读取', 409, 'file_missing')
     return path
+
+
+def video_thumbnail_path(media_id):
+    return root() / f'{_check_id(media_id)}.thumb.webp'
+
+
+def ensure_video_thumbnail(row):
+    """Extract and cache a 320px WebP cover frame for a video media row; None if unavailable."""
+    src = media_path(row)
+    thumb = video_thumbnail_path(row['id'])
+    try:
+        if thumb.is_file() and thumb.stat().st_size > 0:
+            return thumb
+    except OSError:
+        pass
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        return None
+    try:
+        result = subprocess.run(
+            [ffmpeg, '-v', 'error', '-protocol_whitelist', 'file', '-i', str(src),
+             '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1'],
+            capture_output=True, timeout=15, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not result.stdout:
+        return None
+    from PIL import Image, ImageOps
+    tmp = thumb.with_name(f'.{row["id"]}.{uuid.uuid4().hex}.thumb.webp')
+    try:
+        with Image.open(io.BytesIO(result.stdout)) as original:
+            picture = ImageOps.exif_transpose(original)
+            picture.thumbnail((320, 320))
+            picture.convert('RGB').save(tmp, format='WEBP', quality=75)
+        os.replace(tmp, thumb)
+        return thumb
+    except (OSError, ValueError, Image.DecompressionBombError):
+        tmp.unlink(missing_ok=True)
+        return None
 
 
 def task_media(task_asset_id):
@@ -346,6 +525,7 @@ def import_file(path, *, name, origin, folder_id=None, source_task_id=None, link
         raise MediaError('素材文件不可读取', 409, 'file_missing')
     name = _name(name)
     mime, extension = _detect(source)
+    width, height, duration_seconds = _probe_media_meta(source, mime.split('/')[0])
     checksum, size = _digest(source)
     if not size:
         raise MediaError('素材不能为空', 400, 'empty_file')
@@ -369,6 +549,7 @@ def import_file(path, *, name, origin, folder_id=None, source_task_id=None, link
                 temporary.unlink(missing_ok=True)
         _journal(db, media_id, target)
         _insert(db, media_id, checksum, target, name, mime, size, origin, folder_id, source_task_id, created_at)
+        _save_metadata(db, media_id, width, height, duration_seconds)
         return media_id, True
 
 
@@ -422,6 +603,7 @@ def save_upload(stream, name, *, folder_id=None, origin='upload'):
         if not size:
             raise MediaError('素材不能为空', 400, 'empty_file')
         mime, extension = _detect(staging)
+        width, height, duration_seconds = _probe_media_meta(staging, mime.split('/')[0])
         checksum = digest.hexdigest()
         with store.write_transaction() as db:
             kind = mime.split('/')[0]
@@ -437,9 +619,56 @@ def save_upload(stream, name, *, folder_id=None, origin='upload'):
             os.replace(staging, target)
             _journal(db, media_id, target)
             _insert(db, media_id, checksum, target, name, mime, size, origin, folder_id, None, None)
-            return public(db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()), False
+            _save_metadata(db, media_id, width, height, duration_seconds)
+            row = dict(db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone())
+            row.update(width=width, height=height, duration_seconds=duration_seconds)
+            return public(row), False
     finally:
         staging.unlink(missing_ok=True)
+
+
+def save_local_file(path, name, *, folder_id=None, origin='save_as', link=True):
+    """Register an existing server-side file under upload/save_as rules -> (public media, deduplicated).
+
+    Validates target folder placement (refusing 生成历史) before deduplication so invalid
+    destinations never silently succeed, and uses a hard link (with copy fallback) so the
+    caller's file and the library item have independent lifecycles.
+    """
+    if origin not in UPLOAD_ORIGINS:
+        raise MediaError('素材来源无效')
+    source = Path(path).absolute()
+    if not source.is_file():
+        raise MediaError('素材文件不可读取', 409, 'file_missing')
+    name = _name(name)
+    mime, extension = _detect(source)
+    checksum, size = _digest(source)
+    if not size:
+        raise MediaError('素材不能为空', 400, 'empty_file')
+    if size > store.MAX_ASSET_BYTES:
+        raise MediaError('素材不得超过100MiB', 413, 'file_too_large')
+    with store.write_transaction() as db:
+        kind = mime.split('/')[0]
+        folder_id = _placement(db, folder_id, kind, origin)
+        existing = _existing(db, checksum, origin)
+        if existing:
+            media_path(existing)
+            return public(existing), True
+        media_id = uuid.uuid4().hex
+        target = root() / (media_id + extension)
+        try:
+            if not link:
+                raise OSError('copy requested')
+            os.link(source, target)
+        except OSError:
+            temporary = target.with_name(target.name + '.tmp')
+            try:
+                shutil.copyfile(source, temporary)
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+        _journal(db, media_id, target)
+        _insert(db, media_id, checksum, target, name, mime, size, origin, folder_id, None, None)
+        return public(db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()), False
 
 
 # ---------------------------------------------------------------- listing / move
@@ -477,19 +706,39 @@ def _filters(folder_id=None, include_subfolders=False, kind=None, q=None, origin
     return ' WHERE ' + ' AND '.join(clauses), params
 
 
-def list_media(page=1, limit=50, **filters):
+SORT_ORDERS = {
+    'newest': 'created_at DESC, id DESC',
+    'oldest': 'created_at ASC, id ASC',
+    'name_asc': 'LOWER(name) ASC, name ASC, id ASC',
+    'name_desc': 'LOWER(name) DESC, name DESC, id DESC',
+    'size_desc': 'size_bytes DESC, created_at DESC, id DESC',
+    'size_asc': 'size_bytes ASC, created_at DESC, id ASC',
+}
+
+
+def _order_by(sort):
+    key = sort or 'newest'
+    if key not in SORT_ORDERS:
+        raise MediaError('排序参数无效', 400, 'invalid_request')
+    return SORT_ORDERS[key]
+
+
+def list_media(page=1, limit=50, sort='newest', **filters):
     if type(page) is not int or page < 1 or type(limit) is not int or not 1 <= limit <= 200:
         raise MediaError('分页参数无效')
+    order_by = _order_by(sort)
     where, params = _filters(**filters)
     db = tasks.get_db()
     total = db.execute('SELECT COUNT(*) FROM media' + where, params).fetchone()[0]
-    rows = db.execute(f'SELECT * FROM media{where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?', params + [limit, (page - 1) * limit])
-    return {'items': [public(r) for r in rows], 'total': total, 'page': page, 'limit': limit}
+    rows = db.execute(f'SELECT * FROM media{where} ORDER BY {order_by} LIMIT ? OFFSET ?', params + [limit, (page - 1) * limit]).fetchall()
+    enriched = _enrich_rows(db, rows, persist=True)
+    return {'items': [public(r) for r in enriched], 'total': total, 'page': page, 'limit': limit}
 
 
-def select_ids(**filters):
+def select_ids(sort='newest', **filters):
+    order_by = _order_by(sort)
     where, params = _filters(**filters)
-    ids = [r[0] for r in tasks.get_db().execute(f'SELECT id FROM media{where} ORDER BY created_at DESC, id DESC LIMIT ?', params + [MAX_SELECT + 1])]
+    ids = [r[0] for r in tasks.get_db().execute(f'SELECT id FROM media{where} ORDER BY {order_by} LIMIT ?', params + [MAX_SELECT + 1])]
     if len(ids) > MAX_SELECT:
         raise MediaError(f'匹配素材超过{MAX_SELECT}项，请缩小范围', 400, 'too_many')
     return {'ids': ids, 'total': len(ids)}
@@ -550,6 +799,9 @@ def _copy_item(db, row, folder_id, created_files):
     created_files.append(target)
     _insert(db, new_id, row['sha256'], target, row['name'], row['mime_type'], row['size_bytes'], row['origin'],
             folder_id, row['source_task_id'], tasks.utcnow())
+    meta = db.execute('SELECT width, height, duration_seconds FROM media_metadata WHERE media_id=?', (row['id'],)).fetchone()
+    if meta is not None:
+        _save_metadata(db, new_id, meta['width'], meta['height'], meta['duration_seconds'])
     return new_id
 
 
@@ -882,6 +1134,41 @@ def delete_preview(ids):
             db.rollback()
 
 
+def media_references(media_id):
+    """Read-only reference lookup for one library item (never deletes or modifies)."""
+    row = get_media(media_id)
+    db = tasks.get_db()
+    owns = not db.in_transaction
+    if owns:
+        db.execute('BEGIN')
+    try:
+        summary = _plan(db, [row['id']])['summary']
+        task_rows = []
+        if summary['task_ids']:
+            marks = ','.join('?' * len(summary['task_ids']))
+            for tr in db.execute(
+                f'SELECT id, type, status, created_at FROM tasks WHERE id IN ({marks}) ORDER BY id DESC',
+                summary['task_ids'],
+            ).fetchall():
+                task_rows.append(dict(tr))
+    finally:
+        if owns:
+            db.rollback()
+    workflows = summary['affected_workflows']
+    media_groups = summary['media_groups']
+    characters = summary['characters']
+    task_ids = summary['task_ids']
+    return {
+        'media': public(row),
+        'workflows': workflows,
+        'media_groups': media_groups,
+        'characters': characters,
+        'task_ids': task_ids,
+        'tasks': task_rows,
+        'total_references': len(workflows) + len(media_groups) + len(characters) + len(task_ids),
+    }
+
+
 def apply_delete(db, plan, staged, token):
     """Inside the caller's write transaction: tombstones, references, then stage the files.
 
@@ -892,6 +1179,7 @@ def apply_delete(db, plan, staged, token):
     for row in plan['rows']:
         db.execute('INSERT OR REPLACE INTO media_tombstones VALUES (?,?,?,?,?,?,?)',
                    (row['id'], row['name'], row['kind'], row['mime_type'], row['origin'], row['source_task_id'], now))
+        db.execute('DELETE FROM media_metadata WHERE media_id=?', (row['id'],))
         db.execute('DELETE FROM media WHERE id=?', (row['id'],))
     from characters import unlink_local
     unlink_local(db, sorted(plan['removed']))
@@ -926,12 +1214,17 @@ def undo_delete(staged):
 
 def finish_delete(staged):
     removed_files = 0
-    for _, pending in staged:
+    for path, pending in staged:
         try:
             pending.unlink()
             removed_files += 1
         except OSError:
             pass  # unregistered and never served; reclaimable by maintenance
+        try:
+            if MEDIA_ID.fullmatch(path.stem):
+                video_thumbnail_path(path.stem).unlink(missing_ok=True)
+        except OSError:
+            pass
     return removed_files
 
 

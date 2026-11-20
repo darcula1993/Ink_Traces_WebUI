@@ -3,6 +3,9 @@ export const CHARACTER_IMAGE_LIMIT=8
 export const CHARACTER_NAME_MAX=24
 export const CHARACTER_DESCRIPTION_MAX=300
 export const CHARACTER_VOICE_MAX_SECONDS=30
+export const CHARACTER_KINDS=[{value:'character',label:'人物'},{value:'prop',label:'物件'}]
+export const normalizeCharacterKind=kind=>kind==='prop'?'prop':'character'
+export const characterKindLabel=kind=>normalizeCharacterKind(kind)==='prop'?'物件':'人物'
 const FORBIDDEN=/[@[\]()（）]/
 export const normalizeCharacterName=name=>String(name??'').trim()
 export const characterNameKey=name=>normalizeCharacterName(name).toLowerCase()

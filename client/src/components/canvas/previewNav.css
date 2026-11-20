@@ -11,3 +11,12 @@
 .cv-preview-count{min-width:48px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums;color:var(--cv-secondary,#b5bbb8)}
 /* The themed player positions its <video> absolutely, so the preview gives it a real box (was collapsed to the bar). */
 .cv-preview-content .cv-media-player.is-video{height:min(64vh,620px);min-height:200px}
+.cv-preview-content .cv-preview-img-fit{max-width:100%;max-height:70vh;width:auto;height:auto;object-fit:contain;margin:0 auto}
+/* Wide screens (>= 1921px, e.g. 2560x1440): give media preview more horizontal and vertical breathing room. */
+@media (min-width: 1921px){
+ .cv-media-overlay .cv-media-viewer,.ul-preview-host .cv-media-overlay .cv-media-viewer{width:min(1840px,88vw);max-height:92vh}
+ .cv-media-viewer .cv-preview-content,.ul-preview-host .cv-media-viewer .cv-preview-content{max-height:78vh}
+ .cv-media-viewer .cv-preview-content .cv-preview-img-fit{max-height:76vh}
+ .cv-media-viewer .cv-preview-content .cv-media-player.is-video{height:min(72vh,960px)}
+ .cv-media-viewer .cv-preview-content video,.ul-preview-host .cv-media-viewer video{max-height:76vh}
+}

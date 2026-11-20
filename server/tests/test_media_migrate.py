@@ -56,7 +56,7 @@ class World:
         self.local('L2', 'green')
         t1, ta1 = self.task('image', 'green')
         db.execute('INSERT INTO canvas_local_sources VALUES (?,?,?)', (f'task:{ta1}', self.ids['L2'], NOW))
-        db.execute("INSERT INTO characters VALUES ('c' || ?, '阿青', 'aqing', '', ?, ?)", ('0' * 31, NOW, NOW))
+        db.execute("INSERT INTO characters (id, name, name_key, description, created_at, updated_at) VALUES ('c' || ?, '阿青', 'aqing', '', ?, ?)", ('0' * 31, NOW, NOW))
         db.execute("INSERT INTO character_media VALUES (?,?, 'image', 0, 20, 20, NULL, ?)", ('c' + '0' * 31, self.ids['L1'], NOW))
         # 3 project library asset in a folder and a project group; hidden library asset
         self.library('B1', 'blue')
@@ -250,6 +250,16 @@ def test_apply_preflight_blocks(world, tmp_path):
     stale = migrate.preflight(world.db, tasks.DB_PATH, tmp_path / 'backup', now=datetime.now(timezone.utc) + timedelta(days=2))[0]
     assert any('24小时' in b for b in stale)
     assert world.db.execute('SELECT COUNT(*) FROM media').fetchone()[0] == 0
+
+
+def test_preflight_blocks_missing_ffprobe(world, tmp_path, monkeypatch):
+    """BACKLOG-LIBRARY-SIDEBAR: migration preflight reports a clear Chinese error when ffprobe is missing."""
+    backup(tmp_path)
+    monkeypatch.setattr(migrate.shutil, 'which', lambda cmd: None if cmd == 'ffprobe' else '/usr/bin/' + cmd)
+    blockers, _, _ = migrate.preflight(world.db, tasks.DB_PATH, tmp_path / 'backup')
+    assert any('ffprobe' in b and '外部依赖' in b for b in blockers), blockers
+    with pytest.raises(migrate.MigrationError, match='ffprobe'):
+        migrate.apply(tasks.DB_PATH, tmp_path / 'backup', log=lambda _: None)
 
 
 def test_backup_snapshot_and_manifest(world, tmp_path):

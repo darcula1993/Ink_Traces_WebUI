@@ -29,14 +29,38 @@ def _param(node, key):
     return params.get(key, _MISSING) if isinstance(params, dict) else _MISSING
 
 
+def _token_prefix(token):
+    return token.rstrip('0123456789')
+
+
 def bind_reference_mentions(node, assets, text):
-    current = {item['token']: item['assetId'] for item in canvas_mention_items(node, assets)}
+    items = canvas_mention_items(node, assets)
+    current = {item['token']: item for item in items}
     mentions = node.get('referenceMentions') if isinstance(node.get('referenceMentions'), dict) else {}
+    tokens = reference_tokens(text)
     bindings = {}
-    for token in reference_tokens(text):
-        value = mentions.get(token) if _truthy(mentions.get(token)) else current.get(token)
-        if _truthy(value):
-            bindings[token] = value
+    for token in tokens:
+        saved = mentions.get(token)
+        if _truthy(saved):
+            bindings[token] = saved
+    used = set(bindings.values())
+    for token in tokens:
+        if token in bindings:
+            continue
+        target = current.get(token)
+        if not target:
+            continue
+        asset_id = target['assetId']
+        if _truthy(asset_id) and asset_id not in used:
+            bindings[token] = asset_id
+            used.add(asset_id)
+            continue
+        prefix = _token_prefix(token)
+        fallback = next((item['assetId'] for item in items
+                         if _token_prefix(item['token']) == prefix and _truthy(item['assetId']) and item['assetId'] not in used), None)
+        if _truthy(fallback):
+            bindings[token] = fallback
+            used.add(fallback)
     return bindings
 
 

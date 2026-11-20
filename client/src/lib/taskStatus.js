@@ -9,6 +9,8 @@ export const DOCUMENT_TASK_STATUSES = Object.freeze([...CANVAS_LOCAL_TASK_STATUS
 
 // In flight on the server: polled until they reach a terminal state.
 export const ACTIVE_TASK_STATUSES = Object.freeze(['pending', 'preparing', 'processing', 'cancel_requested'])
+// In-flight statuses that accept a cancel request from the canvas (excludes submitting, unknown, cancel_requested, terminals).
+export const CANCELLABLE_TASK_STATUSES = Object.freeze(['pending', 'preparing', 'processing'])
 // Shows the generating animation and disables "生成".
 export const GENERATING_TASK_STATUSES = Object.freeze(['submitting', ...ACTIVE_TASK_STATUSES])
 // Blocks delete, regenerate and batch submission (an unknown submission may already exist upstream).
@@ -21,10 +23,16 @@ export const FAILURE_TASK_STATUSES = Object.freeze(['failed', 'unknown'])
 export const CLIENT_IN_FLIGHT_TASK_STATUSES = GENERATING_TASK_STATUSES
 
 const set = values => new Set(values)
-const SERVER = set(SERVER_TASK_STATUSES), DOCUMENT = set(DOCUMENT_TASK_STATUSES), ACTIVE = set(ACTIVE_TASK_STATUSES), GENERATING = set(GENERATING_TASK_STATUSES), BUSY = set(BUSY_TASK_STATUSES), TERMINAL = set(TERMINAL_TASK_STATUSES), FAILURE = set(FAILURE_TASK_STATUSES)
+const SERVER = set(SERVER_TASK_STATUSES), DOCUMENT = set(DOCUMENT_TASK_STATUSES), ACTIVE = set(ACTIVE_TASK_STATUSES), CANCELLABLE = set(CANCELLABLE_TASK_STATUSES), GENERATING = set(GENERATING_TASK_STATUSES), BUSY = set(BUSY_TASK_STATUSES), TERMINAL = set(TERMINAL_TASK_STATUSES), FAILURE = set(FAILURE_TASK_STATUSES)
 export const isServerTaskStatus = status => SERVER.has(status)
 export const isDocumentTaskStatus = status => DOCUMENT.has(status)
 export const isActiveTaskStatus = status => ACTIVE.has(status)
+export const isCancellableTaskStatus = status => CANCELLABLE.has(status)
+export function isCancellableTask(task) {
+  if (!task || task.resultUnknown === true) return false
+  const id = Number(task.id)
+  return Number.isInteger(id) && id > 0 && CANCELLABLE.has(task.status)
+}
 export const isGeneratingTaskStatus = status => GENERATING.has(status)
 export const isBusyTaskStatus = status => BUSY.has(status)
 export const isTerminalTaskStatus = status => TERMINAL.has(status)

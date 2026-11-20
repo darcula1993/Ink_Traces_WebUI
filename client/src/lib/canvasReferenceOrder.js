@@ -73,3 +73,22 @@ export function insertNodeReferenceAt(document,nodeId,assetId,position) {
  const {assets}=resolveNodeInputs(node,document.nodes,document.edges),order=referenceOrderWithInsert(assets,assetId,position)
  return order.every((id,index)=>assets[index].id===id)?document:reorderNodeReferences(document,nodeId,order)
 }
+
+// P1-CANVAS-WORKFLOW-20261120 (P1-1): remove one reference (incoming edge(s) carrying that asset and/or direct
+// referenceAssets entry, plus referenceOrder/referenceGroups cleanup). Mentions reconcile via the normal edit path.
+export function removeNodeReference(document,nodeId,assetId) {
+ const node=document.nodes.find(item=>item.id===nodeId)
+ if(!node||!assetId)return document
+ const byId=new Map(document.nodes.map(item=>[item.id,item]))
+ const edges=document.edges.filter(edge=>!(edge.target===nodeId&&byId.get(edge.source)?.asset?.id===assetId))
+ const next={...node}
+ if(node.referenceAssets)next.referenceAssets=node.referenceAssets.filter(asset=>asset.id!==assetId)
+ if(node.referenceOrder)next.referenceOrder=node.referenceOrder.filter(id=>id!==assetId)
+ if(node.referenceGroups)next.referenceGroups=node.referenceGroups.map(group=>({...group,asset_ids:(group.asset_ids||[]).filter(id=>id!==assetId)})).filter(group=>group.asset_ids.length>0)
+ const changed=edges.length!==document.edges.length
+  ||(node.referenceAssets?.length||0)!==(next.referenceAssets?.length||0)
+  ||(node.referenceOrder?.length||0)!==(next.referenceOrder?.length||0)
+  ||(node.referenceGroups?.length||0)!==(next.referenceGroups?.length||0)
+ if(!changed)return document
+ return {...document,edges,nodes:document.nodes.map(item=>item.id===nodeId?next:item)}
+}

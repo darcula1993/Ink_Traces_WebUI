@@ -126,6 +126,7 @@ export const NODE_TOOLBAR_ACTIONS = Object.freeze([
   {id: 'edit', label: '编辑', title: '编辑（裁剪/涂抹），另存为新素材', handler: 'onEdit'},
   {id: 'rotate', label: '旋转', title: '旋转 90°，另存为新素材', handler: 'onRotate'},
   {id: 'annotate', label: '标注', title: '标注，另存为新素材', handler: 'onAnnotate'},
+  {id: 'layer', label: '在图层中分解', title: '在图层中分解（切换到图层工作台载入此图）', handler: 'onDecomposeLayer'},
   {id: 'download', label: '下载', title: '下载图片', handler: 'onDownload'},
   {id: 'preview', label: '预览', title: '预览', handler: 'onPreview'},
   {id: 'history', label: '历史版本', title: '历史版本', handler: 'onHistory'},
@@ -139,6 +140,12 @@ export const VIDEO_TOOLBAR_ACTIONS = Object.freeze([
   {id: 'download', label: '下载', title: '下载视频', handler: 'onDownload'},
   {id: 'more', label: '更多', title: '更多操作', handler: 'onMore'},
 ])
+export const AUDIO_TOOLBAR_ACTIONS = Object.freeze([
+  {id: 'preview', label: '播放预览', title: '播放／预览音频', handler: 'onPreview'},
+  {id: 'download', label: '下载', title: '下载音频', handler: 'onDownload'},
+  {id: 'history', label: '历史版本', title: '历史版本', handler: 'onHistory'},
+  {id: 'more', label: '更多', title: '更多操作', handler: 'onMore'},
+])
 export const SINGLE_VERSION_REASON = '只有 1 个版本，暂无可切换的历史版本'
 
 export function nodeHasImage(node) {
@@ -147,10 +154,17 @@ export function nodeHasImage(node) {
   return node.type === 'image' && !!node.asset?.url && (node.asset.kind == null || node.asset.kind === 'image')
 }
 
-// 'image' | 'video' | null: which toolbar the node gets (video: only a video generation node with a result).
+export function nodeHasAudio(node) {
+  if (!node) return false
+  if (node.type === 'asset') return node.asset?.kind === 'audio' && !!node.asset?.url
+  return node.type === 'audio' && !!node.asset?.url && (node.asset.kind == null || node.asset.kind === 'audio')
+}
+
+// 'image' | 'video' | 'audio' | null: which toolbar the node gets.
 export function nodeToolbarKind(node) {
   if (nodeHasImage(node)) return 'image'
   if (node?.type === 'video' && node.asset?.url && (node.asset.kind == null || node.asset.kind === 'video')) return 'video'
+  if (nodeHasAudio(node)) return 'audio'
   return null
 }
 
@@ -161,7 +175,8 @@ export function nodeToolbarVisible({node, selectedCount = 1, dragging = false, c
 
 // Actions shown for the handlers the caller supplies; `history` is disabled (with a reason) for a single version.
 export function nodeToolbarActions(node, handlers = {}) {
-  const list = nodeToolbarKind(node) === 'video' ? VIDEO_TOOLBAR_ACTIONS : NODE_TOOLBAR_ACTIONS
+  const kind = nodeToolbarKind(node)
+  const list = kind === 'video' ? VIDEO_TOOLBAR_ACTIONS : kind === 'audio' ? AUDIO_TOOLBAR_ACTIONS : NODE_TOOLBAR_ACTIONS
   return list.filter(action => typeof handlers[action.handler] === 'function').map(action => {
     if (action.id !== 'history' || (node?.candidates?.length || 0) > 1) return action
     return {...action, disabled: true, reason: SINGLE_VERSION_REASON, title: `历史版本（${SINGLE_VERSION_REASON}）`}
@@ -173,14 +188,41 @@ export function nodeScreenRect(node, view, geometry = nodeGeometry) {
   return {left: node.x * zoom + (view?.x || 0), top: node.y * zoom + (view?.y || 0), width: size.width * zoom, height: size.height * zoom}
 }
 
+// Screen rect of a node group's header bar (accounting for the CSS counter-scale below 100% zoom,
+// which uses transform-origin: left bottom so the header grows upwards from bounds.y + headerHeight).
+export function groupHeaderScreenRect(bounds, view, {headerHeight = 40, headerWidth = 0} = {}) {
+  if (!bounds) return null
+  const zoom = view?.zoom || 1
+  const scale = Math.min(5, Math.max(1, 1 / zoom))
+  const bottom = (bounds.y + headerHeight) * zoom + (view?.y || 0)
+  const height = headerHeight * scale * zoom
+  const left = bounds.x * zoom + (view?.x || 0)
+  const width = Math.max(bounds.width * zoom, headerWidth * scale * zoom)
+  return {left, top: bottom - height, width, height}
+}
+
 // Centered 8px above the node, clamped inside the surface. Not enough room above: stick to the top edge
 // (never flip below, which would cover the in-card prompt). Node fully outside the surface: null (hide).
-export function nodeToolbarPlacement(rect, surface, toolbar, {gap = 8, margin = 8} = {}) {
+// P1-CANVAS-WORKFLOW-20261120 (P1-1): when `avoid` rects (e.g. node-group header bars) overlap the default
+// position, lift the toolbar clear above the header; if the header itself sits at the very top of the
+// surface with no space above, drop just below the header so group title and buttons remain unobstructed.
+export function nodeToolbarPlacement(rect, surface, toolbar, {gap = 8, margin = 8, avoid = []} = {}) {
   if (!rect || !surface) return null
   if (rect.left + rect.width < 0 || rect.left > surface.width || rect.top + rect.height < 0 || rect.top > surface.height) return null
   const width = toolbar?.width || 0, height = toolbar?.height || 0
   const left = Math.max(margin, Math.min(surface.width - width - margin, rect.left + rect.width / 2 - width / 2))
-  const top = Math.max(margin, rect.top - gap - height)
+  let top = Math.max(margin, rect.top - gap - height)
+  const overlaps = box => box && left < box.left + box.width && left + width > box.left && top < box.top + box.height && top + height > box.top
+  for (const box of avoid || []) {
+    if (!overlaps(box)) continue
+    if (box.top - gap - height >= margin) {
+      top = box.top - gap - height
+    } else if (box.top - height >= margin) {
+      top = margin
+    } else {
+      top = Math.min(surface.height - height - margin, box.top + box.height + 4)
+    }
+  }
   return {left: Math.round(left), top: Math.round(top)}
 }
 

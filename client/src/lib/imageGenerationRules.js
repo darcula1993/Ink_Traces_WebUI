@@ -1,4 +1,4 @@
-export const isSeedream55=model=>['dola-seedream-5-5-261028','dola-seedream-5-5','seedream-5-5','seedream-5.5'].includes(model)
+export const isSeedream55=model=>typeof model==='string'&&['dola-seedream-5-5-261028','dola-seedream-5-5','seedream-5-5','seedream-5.5'].includes(model.toLowerCase())
 import {SEEDREAM_SIZE_PRESETS,validateSeedreamCustomSize,alignSeedreamDimension} from './generationSettings.js'
 // Image adapters: BytePlus Ark and Cupsy only; unknown providers report an issue.
 export const IMAGE_RATIOS={ark:['auto',...Object.keys(SEEDREAM_SIZE_PRESETS['1K']),'custom'],cupsy:['1:1','4:3','3:4','16:9','9:16','custom']}

@@ -42,3 +42,6 @@
 /* FIX-B3B: detail place column and not-billed counts. */
 .cv-ledger-place{display:inline-block;max-width:220px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
 .cv-ledger-count{color:var(--text-3);font-size:var(--fs-caption)}
+.cv-ledger-filters .cv-ledger-scope-select{min-width:220px}
+.cv-ledger-task-link{display:inline-flex;align-items:center;padding:1px 6px;margin:-1px -6px;border:1px solid transparent;border-radius:var(--r-sm);background:transparent;color:var(--accent);font:inherit;font-variant-numeric:tabular-nums;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(79,196,140,.45);text-underline-offset:2px}
+.cv-ledger-task-link:hover{background:var(--accent-soft);border-color:rgba(79,196,140,.35);text-decoration-color:var(--accent)}

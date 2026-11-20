@@ -9,3 +9,9 @@ def enabled(model=None):
     configured = {str(generation['image']['byteplus']['model'] or '')}
     model = str(model if model is not None else app.API_PROVIDERS.get('ark', {}).get('model', ''))
     return model.lower() in ALIASES or (model in configured and model.startswith('ep-'))
+
+
+def capability_model(model=None):
+    import app
+    effective = str(model if model is not None else app.API_PROVIDERS.get('ark', {}).get('model', '')) or 'seedream-5-0-pro'
+    return MODEL if enabled(effective) else effective

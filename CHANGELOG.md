@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.0 - 2026-11-21
+
+Full-site desktop IDE layout unification, unified web provider management, global aggregated task center, bidirectional Layer Studio integration, canvas workflow upgrades, and a refined visual identity.
+
+- **Full-Bleed Desktop IDE Layout**: Unified the 48px header and left rails across Canvas, Image, Layer, Video, Audio, and Global Task Center (`left: 0`, 48px Layer rail, removed legacy Liquid Glass surfaces and fragmented 2560px local zoom), aligned standalone tool forms to 36px single-column Linear controls, unified modal radii (`8px / 10px`), and fixed tooltip viewport clamping.
+- **Global Aggregated Task Center & Unified Trash**: Added a top-level Task Center aggregating image, video, audio, and layer tasks with server-side pagination, search, filters, favorites/groups, and a unified Trash view with cross-type delete preview and v2.2.0 generation-history lifecycle protection.
+- **Unified Provider Management**: Imported default `config.json` providers into database-backed provider profiles editable in the WebUI without restarts (with same-provider API key sync, safe soft-delete for custom and default profiles, image/video/audio grouping, zero-cost static configuration precheck, standalone tool profile selection, 3-decimal USD estimates, and extended `ep-` endpoint ID redaction in errors).
+- **Canvas Workflow Upgrades**: Added single-node task cancellation in canvas properties and task panel, cross-canvas copy/paste and one-click duplicate canvas, homogeneous multi-select batch parameter editing (undoable), single reference removal and lightbox preview, audio node toolbar, expanded prompt `@character` insertion, task-to-canvas node locate, ledger `#taskId` jump, blank-canvas context menu actions, and fixed floating rail resizer and full-height prompt panel list.
+- **Layer Studio ↔ Global Library & Canvas Bridge**: Pick source images directly from the global library (hard-link isolated without re-upload), send canvas image nodes directly to Layer Studio without auto-running paid decomposition, save composites or individual layers back to the global library, and replaced native `window.confirm` with in-app dialogs.
+- **Global Library, Projects & Character Cards**: Drag-and-drop media onto folders (copies from generation history while keeping originals; moves uploads), 6-way sorting with resolution/duration metadata, read-only reference inspection dialog, bulk project deletion with active-task safety and card counts/timestamps, and a redesigned Character Card profile sheet with search, kind filter, unsaved-change guard, unified save, and image lightbox.
+- **Visual Identity & Micro-Ink Precision Assets**: Added bespoke `<BrandMark />` SVG and favicon suite, subtle feathered dark ink-wash ambient texture for login, architectural fine-line empty-state SVGs, organic audio waveforms, viewfinder waiting slots and distinct trashed vs. deleted hatched placeholders, unified dark transparency checkerboard tokens, canvas file-drop overlay, and refreshed README banner and workspace screenshot.
+
 ## 2.2.0 - 2026-11-20
 
 - Results in generation history follow their tasks into and out of the trash. Permanent deletion previews affected references and removes the history entries. Copies in other folders remain available.

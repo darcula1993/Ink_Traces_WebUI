@@ -94,6 +94,12 @@ def workflow_detail(workflow_id):
     return jsonify(success=True, merged=False, workflow=saved)
 
 
+@canvas_api.route(PREFIX + '/<workflow_id>/duplicate', methods=['POST'])
+def duplicate_workflow_route(workflow_id):
+    data = body() if (request.content_length or 0) > 0 else {}
+    return jsonify(success=True, workflow=public_workflow(store.duplicate_workflow(workflow_id, data.get('title')))), 201
+
+
 @canvas_api.route(PREFIX + '/<workflow_id>/assets', methods=['POST'])
 def upload_asset(workflow_id):
     store.workflow(workflow_id)

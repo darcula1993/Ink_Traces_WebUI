@@ -465,7 +465,9 @@ def add_layer_revision(project_id, task_id, prompt, size, result, document):
 
 def create_task(task_type, prompt, params, provider=None, external_task_id=None, status='pending', retry_of=None):
     from profile_runtime import public_selection
-    params = {**(params or {}), **public_selection()}
+    merged = dict(params or {})
+    task_kind = 'image' if task_type == 'layer' else task_type
+    params = {**merged, **public_selection(kind=task_kind, adapter=provider, existing=merged)}
     from flask import has_request_context, request
     if has_request_context():
         incoming = request.form if request.mimetype == 'multipart/form-data' else (request.get_json(silent=True) or {})
@@ -514,6 +516,11 @@ def update_task(task_id, **kwargs):
     fields = {key: value for key, value in kwargs.items() if key in allowed}
     if not fields:
         return False
+    if 'status' in fields and fields['status'] != 'processing' and 'stage' not in fields:
+        fields['stage'] = None
+    if 'error' in fields and isinstance(fields['error'], str):
+        from task_public import mask_endpoint_ids
+        fields['error'] = mask_endpoint_ids(fields['error'])
     for key in ('params', 'result'):
         if key in fields and fields[key] is not None and not isinstance(fields[key], str):
             fields[key] = _json(fields[key])
@@ -541,7 +548,9 @@ def complete_task(task_id, result, output_dir=None):
 
 
 def fail_task(task_id, error, result=None):
+    from task_public import mask_endpoint_ids
     now = utcnow()
+    masked_error = mask_endpoint_ids(str(error))
     cursor = get_db().execute(
         '''UPDATE tasks
            SET status = 'failed', error = ?,
@@ -550,7 +559,7 @@ def fail_task(task_id, error, result=None):
                lease_owner = NULL, lease_until = NULL, stage = NULL
            WHERE id = ? AND deleted_at IS NULL
              AND status NOT IN ('cancel_requested', 'cancelled', 'failed', 'succeeded')''',
-        (str(error), None if result is None else 1, None if result is None else _json(result), now, now, task_id),
+        (masked_error, None if result is None else 1, None if result is None else _json(result), now, now, task_id),
     )
     get_db().commit()
     return cursor.rowcount > 0
@@ -563,9 +572,11 @@ def reschedule_task(task_id, delay_seconds, status='processing', error=None, pro
     Provider succeed and must retry the download passes ``TASK_STAGE_DOWNLOADING``;
     every other reschedule clears it.
     """
+    from task_public import mask_endpoint_ids
     now = utcnow()
     if stage not in TASK_STAGES or status != 'processing':
         stage = None
+    masked_error = None if error is None else mask_endpoint_ids(str(error))
     cursor = get_db().execute(
         '''UPDATE tasks
            SET status = ?, completed_at = NULL, next_run_at = ?, updated_at = ?,
@@ -576,7 +587,7 @@ def reschedule_task(task_id, delay_seconds, status='processing', error=None, pro
              AND status NOT IN ('cancel_requested', 'cancelled', 'failed', 'succeeded')''',
         (
             status, _future(delay_seconds), now, stage,
-            error, None if error is None else str(error),
+            error, masked_error,
             progress, None if progress is None else int(progress), task_id,
         ),
     )
@@ -629,8 +640,10 @@ def get_tasks_by_ids(task_ids):
 
 def _preview_result_sql(column='result'):
     fields = ('local_images', 'local_thumbnails', 'local_video', 'local_audio',
-              'local_last_frame', 'local_thumbnail')
+              'local_last_frame', 'local_thumbnail', 'base_image')
     expressions = ', '.join(f"'{field}', json_extract({column}, '$.{field}')" for field in fields)
+    expressions += (f", 'layer_count', CASE WHEN json_type({column}, '$.layers') = 'array' "
+                    f"THEN json_array_length({column}, '$.layers') ELSE NULL END")
     # Always a JSON boolean so clients can gate retry without loading full task detail.
     expressions += (f", 'result_unknown', CASE WHEN json_extract({column}, '$.result_unknown') "
                     "THEN json('true') ELSE json('false') END")
@@ -687,6 +700,8 @@ def _task_filters(task_type=None, status=None, favorite=None, active=False, sear
         clauses.append('t.deleted_at IS NOT NULL')
     elif deleted is False:
         clauses.append('t.deleted_at IS NULL')
+    if task_type == 'all':
+        task_type = None
     if task_type:
         clauses.append('t.type = ?')
         params.append(task_type)
@@ -971,12 +986,18 @@ def delete_task(task_id):
 TRASH_PURGE_BATCH = 50
 
 
-def list_trashed_task_ids(task_type, after_id=0, limit=None):
-    """Keyset page of trashed task ids of one type (EMPTY-TRASH-20261118)."""
-    rows = get_db().execute(
-        'SELECT id FROM tasks WHERE type = ? AND deleted_at IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
-        (task_type, after_id, limit or TRASH_PURGE_BATCH),
-    ).fetchall()
+def list_trashed_task_ids(task_type=None, after_id=0, limit=None):
+    """Keyset page of trashed task ids of one type or all types (EMPTY-TRASH-20261118 / P2-GLOBAL-TASK-CENTER)."""
+    if task_type is None or task_type == 'all':
+        rows = get_db().execute(
+            'SELECT id FROM tasks WHERE deleted_at IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
+            (after_id, limit or TRASH_PURGE_BATCH),
+        ).fetchall()
+    else:
+        rows = get_db().execute(
+            'SELECT id FROM tasks WHERE type = ? AND deleted_at IS NOT NULL AND id > ? ORDER BY id LIMIT ?',
+            (task_type, after_id, limit or TRASH_PURGE_BATCH),
+        ).fetchall()
     return [row['id'] for row in rows]
 
 
@@ -1045,8 +1066,12 @@ def set_task_favorite(task_id, favorite):
         raise
 
 
-def request_task_cancel(task_id):
-    """Request cancellation without allowing a worker to overwrite the terminal state."""
+def request_task_cancel_detail(task_id):
+    """Request cancellation without allowing a worker to overwrite the terminal state.
+
+    Returns None when the task does not exist, else a dict describing the transition:
+    ``{'status', 'previous_status', 'changed', 'already_terminal'}``.
+    """
     db = get_db()
     now = utcnow()
     try:
@@ -1055,19 +1080,32 @@ def request_task_cancel(task_id):
         if not row:
             db.rollback()
             return None
-        if row['status'] in TERMINAL_TASK_STATUSES:
+        prev_status = row['status']
+        if prev_status in TERMINAL_TASK_STATUSES:
             db.commit()
-            return row['status']
-        if row['status'] == 'cancel_requested':
+            return {
+                'status': prev_status,
+                'previous_status': prev_status,
+                'changed': False,
+                'already_terminal': True,
+            }
+        if prev_status == 'cancel_requested':
+            db.execute('UPDATE tasks SET stage = NULL WHERE id = ? AND stage IS NOT NULL', (task_id,))
             db.commit()
-            return 'cancel_requested'
+            return {
+                'status': 'cancel_requested',
+                'previous_status': 'cancel_requested',
+                'changed': False,
+                'already_terminal': False,
+            }
         waiting_for_executor = bool(row['lease_owner']) or (
-            row['type'] == 'image' and row['provider'] != 'cupsy' and row['status'] == 'processing'
+            row['type'] == 'image' and row['provider'] != 'cupsy' and prev_status == 'processing'
         )
         next_status = 'cancel_requested' if waiting_for_executor else 'cancelled'
         db.execute(
             '''UPDATE tasks SET status = ?, completed_at = ?, updated_at = ?,
-                   next_run_at = NULL, lease_owner = CASE WHEN ? THEN lease_owner ELSE NULL END,
+                   next_run_at = NULL, stage = NULL,
+                   lease_owner = CASE WHEN ? THEN lease_owner ELSE NULL END,
                    lease_until = CASE WHEN ? THEN lease_until ELSE NULL END
                WHERE id = ?''',
             (
@@ -1076,10 +1114,21 @@ def request_task_cancel(task_id):
             ),
         )
         db.commit()
-        return next_status
+        return {
+            'status': next_status,
+            'previous_status': prev_status,
+            'changed': True,
+            'already_terminal': False,
+        }
     except Exception:
         db.rollback()
         raise
+
+
+def request_task_cancel(task_id):
+    """Request cancellation without allowing a worker to overwrite the terminal state."""
+    detail = request_task_cancel_detail(task_id)
+    return None if detail is None else detail['status']
 
 
 def cancellation_requested(task_id):
@@ -1112,7 +1161,8 @@ def activate_video_task(task_id, external_task_id):
     return cursor.rowcount > 0
 
 
-def move_tasks_to_trash(task_ids):
+def move_tasks_to_trash(task_ids, task_type=None):
+    effective_type = None if task_type in (None, 'all') else task_type
     db = get_db()
     now = utcnow()
     moved = []
@@ -1124,6 +1174,8 @@ def move_tasks_to_trash(task_ids):
                 (task_id,),
             ).fetchone()
             if not row or row['deleted_at'] is not None:
+                continue
+            if effective_type and row['type'] != effective_type:
                 continue
             status = row['status']
             completed_at = None
@@ -1137,6 +1189,7 @@ def move_tasks_to_trash(task_ids):
             db.execute(
                 '''UPDATE tasks SET deleted_at = ?, status = ?,
                        completed_at = COALESCE(?, completed_at), updated_at = ?, next_run_at = NULL,
+                       stage = NULL,
                        lease_owner = CASE WHEN ? = 'cancel_requested' THEN lease_owner ELSE NULL END,
                        lease_until = CASE WHEN ? = 'cancel_requested' THEN lease_until ELSE NULL END
                    WHERE id = ?''',
@@ -1150,7 +1203,8 @@ def move_tasks_to_trash(task_ids):
         raise
 
 
-def restore_tasks(task_ids):
+def restore_tasks(task_ids, task_type=None):
+    effective_type = None if task_type in (None, 'all') else task_type
     db = get_db()
     now = utcnow()
     restored = []
@@ -1161,10 +1215,10 @@ def restore_tasks(task_ids):
             if task_restore_blocked(task_id):
                 continue
             row = db.execute(
-                'SELECT status, lease_owner, deleted_at, params FROM tasks WHERE id = ?',
+                'SELECT type, status, lease_owner, deleted_at, params FROM tasks WHERE id = ?',
                 (task_id,),
             ).fetchone()
-            if not row or json.loads(row['params'] or '{}').get('canvas_outputs_purged') or row['deleted_at'] is None or row['status'] == 'cancel_requested' or row['lease_owner']:
+            if not row or (effective_type and row['type'] != effective_type) or json.loads(row['params'] or '{}').get('canvas_outputs_purged') or row['deleted_at'] is None or row['status'] == 'cancel_requested' or row['lease_owner']:
                 continue
             db.execute(
                 'UPDATE tasks SET deleted_at = NULL, updated_at = ? WHERE id = ?',
@@ -1197,8 +1251,9 @@ def get_favorite_group(group_id):
 
 
 def list_favorite_groups(task_type=None):
-    type_clause = 'AND t.type = ?' if task_type else ''
-    params = [task_type] if task_type else []
+    effective_type = None if task_type in (None, 'all') else task_type
+    type_clause = 'AND t.type = ?' if effective_type else ''
+    params = [effective_type] if effective_type else []
     rows = get_db().execute(
         f'''SELECT fg.*, COUNT(DISTINCT t.id) AS task_count
             FROM favorite_groups fg

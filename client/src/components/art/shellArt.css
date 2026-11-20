@@ -1,0 +1,161 @@
+/* Micro-Ink Precision art components styling (Shell / Tasks / Layer / Modals) */
+
+.art-svg {
+  display: block;
+  flex-shrink: 0;
+  color: var(--text, #e4e5e7);
+  overflow: visible;
+}
+
+/* 45-degree dark subtle hatch for deleted / trashed / unavailable media placeholders */
+.art-hatch-surface {
+  background-color: #0b0c0d;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.024) 0 1px,
+    transparent 1px 9px
+  );
+}
+
+.art-hatch-surface[data-trashed="true"] {
+  background-color: #0c0d0e;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(214, 189, 134, 0.032) 0 1px,
+    transparent 1px 10px
+  );
+}
+
+/* Layer Studio isometric 3-layer hover / drag lift */
+.art-layer-explode .art-layer-mid,
+.art-layer-explode .art-layer-top {
+  transition: transform 220ms var(--ease-out, cubic-bezier(.2, .7, .3, 1));
+}
+
+.layer-studio-empty:hover .art-layer-explode .art-layer-top,
+.layer-studio-empty[data-dragging="true"] .art-layer-explode .art-layer-top {
+  transform: translateY(-4px);
+}
+
+.layer-studio-empty:hover .art-layer-explode .art-layer-mid,
+.layer-studio-empty[data-dragging="true"] .art-layer-explode .art-layer-mid {
+  transform: translateY(-1.5px);
+}
+
+/* Organic acoustic waveform stage */
+.audio-waveform-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse 68% 62% at 50% 50%, rgba(69, 192, 136, 0.06), transparent 72%),
+    #0a0b0c;
+}
+
+.audio-waveform-svg {
+  width: min(92%, 340px);
+  height: auto;
+  max-height: 78%;
+  display: block;
+}
+
+.audio-waveform-svg.is-compact {
+  width: min(92%, 250px);
+  max-height: 74%;
+}
+
+/* Unified dark viewfinder drop-target overlay (T2-6) */
+.drop-reticle-overlay {
+  position: absolute;
+  inset: 8px;
+  z-index: 20;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed rgba(69, 192, 136, 0.56);
+  border-radius: var(--r-md, 8px);
+  background: rgba(12, 13, 14, 0.76);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  color: var(--text, #e4e5e7);
+  padding: 12px;
+  text-align: center;
+}
+
+.drop-reticle-corner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-color: var(--accent, #45c088);
+  border-style: solid;
+  border-width: 0;
+}
+
+.drop-reticle-corner.is-tl { top: -1px; left: -1px; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 5px; }
+.drop-reticle-corner.is-tr { top: -1px; right: -1px; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 5px; }
+.drop-reticle-corner.is-bl { bottom: -1px; left: -1px; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 5px; }
+.drop-reticle-corner.is-br { bottom: -1px; right: -1px; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 5px; }
+
+.drop-reticle-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text, #e4e5e7);
+  letter-spacing: 0.01em;
+}
+
+/* PNG Info empty drop trigger */
+.png-info-drop-trigger {
+  display: flex;
+  min-height: 200px;
+  min-width: 280px;
+  max-width: calc(100% - 32px);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 28px;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: var(--r-lg, 8px);
+  background: rgba(18, 19, 20, 0.65);
+  color: var(--text-2, #a1a4a9);
+  transition: border-color var(--dur-fast, 120ms) ease, background-color var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
+}
+
+.png-info-drop-trigger:hover {
+  border-color: rgba(69, 192, 136, 0.48);
+  background: rgba(24, 25, 27, 0.8);
+  color: var(--text, #e4e5e7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .art-layer-explode .art-layer-mid,
+  .art-layer-explode .art-layer-top {
+    transition: none;
+  }
+
+  .layer-studio-empty:hover .art-layer-explode .art-layer-top,
+  .layer-studio-empty[data-dragging="true"] .art-layer-explode .art-layer-top,
+  .layer-studio-empty:hover .art-layer-explode .art-layer-mid,
+  .layer-studio-empty[data-dragging="true"] .art-layer-explode .art-layer-mid {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .drop-reticle-overlay {
+    background: #121314;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .art-svg {
+    forced-color-adjust: auto;
+  }
+}

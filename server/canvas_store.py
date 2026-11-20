@@ -105,7 +105,36 @@ def get_project(project_id):
 
 def list_projects():
     from canvas_cleanup import is_deleted
-    return [dict(row) for row in task_db.get_db().execute('SELECT * FROM canvas_projects ORDER BY updated_at DESC,id') if not is_deleted('project', row['id'])]
+    db = task_db.get_db()
+    has_deletions = db.execute("SELECT 1 FROM sqlite_master WHERE name='canvas_deletions'").fetchone() is not None
+    if has_deletions:
+        wf_rows = db.execute(
+            '''SELECT w.project_id, COUNT(*) AS workflow_count, MAX(w.updated_at) AS max_updated_at
+               FROM canvas_workflows w
+               LEFT JOIN canvas_deletions d ON d.scope = 'workflow' AND d.id = w.id
+               WHERE d.id IS NULL
+               GROUP BY w.project_id'''
+        ).fetchall()
+    else:
+        wf_rows = db.execute(
+            '''SELECT project_id, COUNT(*) AS workflow_count, MAX(updated_at) AS max_updated_at
+               FROM canvas_workflows
+               GROUP BY project_id'''
+        ).fetchall()
+    wf_stats = {row['project_id']: (row['workflow_count'], row['max_updated_at']) for row in wf_rows}
+    projects = []
+    for row in db.execute('SELECT * FROM canvas_projects'):
+        if is_deleted('project', row['id']):
+            continue
+        item = dict(row)
+        count, max_wf_updated = wf_stats.get(item['id'], (0, None))
+        item['workflow_count'] = int(count)
+        if max_wf_updated and (not item.get('updated_at') or max_wf_updated > item['updated_at']):
+            item['updated_at'] = max_wf_updated
+        projects.append(item)
+    projects.sort(key=lambda project: project['id'])
+    projects.sort(key=lambda project: project.get('updated_at') or '', reverse=True)
+    return projects
 
 
 def create_project(title):
@@ -141,6 +170,24 @@ def default_document():
     return {'version': 1, 'nodes': [], 'edges': [], 'viewport': {'x': 0, 'y': 0, 'zoom': 1}}
 
 
+def _mask_document_endpoint_errors(document):
+    """Mask Ark endpoint IDs in node.task.error without altering other fields."""
+    if not isinstance(document, dict) or not isinstance(document.get('nodes'), list):
+        return document
+    from task_public import mask_endpoint_ids
+    changed = False
+    nodes = []
+    for node in document['nodes']:
+        task = node.get('task') if isinstance(node, dict) else None
+        if isinstance(task, dict) and isinstance(task.get('error'), str) and task['error']:
+            masked = mask_endpoint_ids(task['error'])
+            if masked != task['error']:
+                node = {**node, 'task': {**task, 'error': masked}}
+                changed = True
+        nodes.append(node)
+    return {**document, 'nodes': nodes} if changed else document
+
+
 def workflow(workflow_id):
     from canvas_cleanup import is_deleted
     if is_deleted('workflow', workflow_id):
@@ -150,7 +197,7 @@ def workflow(workflow_id):
         raise CanvasError('画布不存在', 404)
     get_project(row['project_id'])
     result = dict(row)
-    result['document'] = json.loads(result['document'])
+    result['document'] = _mask_document_endpoint_errors(json.loads(result['document']))
     return result
 
 
@@ -533,6 +580,12 @@ def validate_document(document, workflow_id):
                 raise CanvasError('任务状态无效')
             if task.get('error') is not None and (not isinstance(task['error'], str) or len(task['error']) > 4096):
                 raise CanvasError('任务错误信息无效')
+            if isinstance(task.get('error'), str) and task['error']:
+                from task_public import mask_endpoint_ids
+                masked_err = mask_endpoint_ids(task['error'])
+                if masked_err != task['error']:
+                    task['error'] = masked_err
+                    legacy_dropped = True
     groups = document.get('groups', [])
     if not isinstance(groups, list) or len(groups) > 500:
         raise CanvasError('画布最多500个节点组')
@@ -607,6 +660,63 @@ def create_workflow(project_id, title, document=None):
         db.execute('INSERT INTO canvas_workflows VALUES (?,?,?,?,1,?,?)', (workflow_id, project_id, title, encoded, now, now))
         db.execute('UPDATE canvas_projects SET updated_at=? WHERE id=?', (now, project_id))
     return workflow(workflow_id)
+
+
+def strip_workflow_runtime(document):
+    """Deep-copy a workflow document and strip runtime task / generated output state.
+
+    Asset nodes keep their global library media references; generation nodes keep prompt,
+    parameters, providerSelection, referenceAssets/Order/Mentions/Groups, characterRefs,
+    edges and groups, while stripping task/asset/candidates/selectedCandidateId/upstreamStale.
+    """
+    cloned = copy.deepcopy(document if isinstance(document, dict) else default_document())
+    nodes = cloned.get('nodes')
+    if isinstance(nodes, list):
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            node['task'] = None
+            node.pop('upstreamStale', None)
+            if node.get('type') in ('image', 'video', 'audio'):
+                node['asset'] = None
+                node['candidates'] = []
+                node['selectedCandidateId'] = None
+    return cloned
+
+
+def duplicate_workflow_title(base_title, existing_titles):
+    """Pick a unique copy title (e.g. '原名 副本', '原名 副本 2') within the 120-char limit."""
+    base = (str(base_title or '').strip() or '未命名画布')
+    taken = {str(item or '').strip() for item in (existing_titles or ())}
+    suffix = ' 副本'
+    candidate = base[:120 - len(suffix)].rstrip() + suffix
+    if candidate not in taken:
+        return candidate
+    index = 2
+    while True:
+        numbered = f' 副本 {index}'
+        candidate = base[:120 - len(numbered)].rstrip() + numbered
+        if candidate not in taken:
+            return candidate
+        index += 1
+
+
+def duplicate_workflow(workflow_id, title=None):
+    """Atomically duplicate a workflow within its project without mutating the source."""
+    now = task_db.utcnow()
+    new_id = uuid.uuid4().hex
+    db = task_db.get_db()
+    with write_transaction():
+        source = workflow(workflow_id)
+        project_id = source['project_id']
+        existing = [row['title'] for row in list_workflows(project_id)]
+        new_title = title_value(title) if title is not None else duplicate_workflow_title(source['title'], existing)
+        cloned = strip_workflow_runtime(source['document'])
+        encoded = validate_document(cloned, new_id)
+        db.execute('INSERT INTO canvas_workflows VALUES (?,?,?,?,1,?,?)',
+                   (new_id, project_id, new_title, encoded, now, now))
+        db.execute('UPDATE canvas_projects SET updated_at=? WHERE id=?', (now, project_id))
+    return workflow(new_id)
 
 
 def update_workflow(workflow_id, title, document, revision, with_merge=False):

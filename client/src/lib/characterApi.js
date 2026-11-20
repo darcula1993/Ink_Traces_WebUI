@@ -7,7 +7,7 @@ export const characterDescription=c=>c?.[DESCRIPTION_FIELD]??''
 const one=body=>body?.character||body
 export const listCharacters=async signal=>{const body=await data(axios.get(base,{signal}));return Array.isArray(body)?body:body.characters||[]}
 export const getCharacter=async id=>one(await data(axios.get(`${base}/${id}`)))
-export const createCharacter=async({name,description=''})=>one(await data(axios.post(base,{name,[DESCRIPTION_FIELD]:description})))
+export const createCharacter=async({name,description='',kind='character'})=>one(await data(axios.post(base,{name,[DESCRIPTION_FIELD]:description,...(kind&&kind!=='character'?{kind}:{})})))
 export const updateCharacter=async(id,patch)=>{const body={...patch};if('description' in body){body[DESCRIPTION_FIELD]=body.description;if(DESCRIPTION_FIELD!=='description')delete body.description}return one(await data(axios.patch(`${base}/${id}`,body)))}
 export const deleteCharacter=id=>data(axios.delete(`${base}/${id}`))
 export async function uploadCharacterImage(id,file){const body=new FormData();body.append('file',file);return data(axios.post(`${base}/${id}/images`,body))}

@@ -1,0 +1,115 @@
+/* P1-PROVIDER-CARDS-20261120: project overview card metadata & high-contrast multi-select checkbox. */
+.cv-project-brand-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cv-project-brand-eyebrow .brand-mark-sm {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.cv-project-overview .cv-project-tile {
+  position: relative;
+  overflow: hidden;
+  min-height: 132px;
+  height: auto;
+  gap: 10px;
+}
+
+.cv-project-corner-art {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 0;
+  pointer-events: none;
+  color: var(--text, #e4e5e7);
+  opacity: 0.06;
+  transition: opacity var(--dur-fast, 120ms) var(--ease-out, ease), color var(--dur-fast, 120ms) var(--ease-out, ease);
+}
+
+.cv-project-overview .cv-project-tile:hover:not(:disabled) .cv-project-corner-art {
+  opacity: 0.11;
+}
+
+.cv-project-overview .cv-project-tile[aria-current="page"] .cv-project-corner-art,
+.cv-project-overview .cv-project-tile.is-selected .cv-project-corner-art {
+  color: var(--accent, #45c088);
+  opacity: 0.14;
+}
+
+.cv-project-tile-top {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.cv-project-tile-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-caption, 12px);
+  line-height: 1.4;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-project-tile-meta-sep {
+  color: var(--text-3);
+}
+
+.cv-project-tile-status {
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+}
+
+.cv-project-empty-state {
+  display: flex;
+  min-height: 260px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.cv-project-empty-state .cv-project-empty {
+  margin: 0;
+  font-size: var(--fs-body, 14px);
+  color: var(--text-2);
+}
+
+.cv-project-overview .cv-project-checkbox {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border: 2px solid rgba(255, 255, 255, .48);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, .38);
+  color: #05130b;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+.cv-project-overview .cv-project-tile.is-selectable:hover:not(:disabled) .cv-project-checkbox:not(.is-checked) {
+  border-color: rgba(255, 255, 255, .78);
+  background: rgba(255, 255, 255, .08);
+}
+
+.cv-project-overview .cv-project-checkbox.is-checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #05130b;
+  box-shadow: 0 0 0 1px rgba(53, 208, 138, .35);
+}

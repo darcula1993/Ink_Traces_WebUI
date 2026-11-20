@@ -16,6 +16,7 @@ from logging_config import configure_logging
 import storage
 import tasks as task_db
 import profile_runtime
+import provider_profiles
 
 
 LOG = logging.getLogger('nanobanana.worker')
@@ -59,6 +60,8 @@ class Worker:
     def run(self):
         signal.signal(signal.SIGTERM, self.request_stop)
         signal.signal(signal.SIGINT, self.request_stop)
+        if 'providers' in application.config and 'generation' in application.config:
+            provider_profiles.sync_config_profiles(application.config)
         recovered = task_db.recover_dead_worker_leases()
         LOG.info('worker_started id=%s', self.worker_id)
         if recovered:

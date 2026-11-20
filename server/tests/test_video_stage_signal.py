@@ -315,3 +315,48 @@ def test_summary_list_includes_stage_and_old_database_gains_column(tmp_path):
     legacy = task_db.get_task(1)
     assert legacy['status'] == 'succeeded' and legacy['stage'] is None
     assert os.path.exists(old)
+
+
+def test_cancel_trash_result_unknown_clear_db_stage_column(billing_env):
+    # 1. request_task_cancel on leased processing task (cancel_requested) clears raw DB stage.
+    leased_id = _ark_video_task()
+    _claim()
+    assert task_db.set_task_stage(leased_id, task_db.TASK_STAGE_DOWNLOADING)
+    assert task_db.request_task_cancel(leased_id) == 'cancel_requested'
+    assert task_db.get_task(leased_id)['stage'] is None
+    task_db.finalize_task_cancel(leased_id)
+    assert task_db.get_task(leased_id)['stage'] is None
+
+    # 2. request_task_cancel on unleased processing task (immediate cancelled) clears raw DB stage.
+    unleased_id = task_db.create_task('video', 'stage', {'provider': 'ark'}, provider='ark',
+                                      external_task_id='cgt-stage-2', status='processing')
+    assert task_db.set_task_stage(unleased_id, task_db.TASK_STAGE_DOWNLOADING)
+    assert task_db.request_task_cancel(unleased_id) == 'cancelled'
+    assert task_db.get_task(unleased_id)['stage'] is None
+
+    # 3. move_tasks_to_trash on both leased and unleased tasks clears raw DB stage.
+    trash_leased = task_db.create_task('video', 'stage', {'provider': 'ark'}, provider='ark',
+                                       external_task_id='cgt-stage-3', status='processing')
+    _claim()
+    assert task_db.set_task_stage(trash_leased, task_db.TASK_STAGE_DOWNLOADING)
+    assert task_db.move_tasks_to_trash([trash_leased]) == [trash_leased]
+    assert task_db.get_task(trash_leased)['stage'] is None
+
+    trash_unleased = task_db.create_task('video', 'stage', {'provider': 'ark'}, provider='ark',
+                                         external_task_id='cgt-stage-4', status='processing')
+    assert task_db.set_task_stage(trash_unleased, task_db.TASK_STAGE_DOWNLOADING)
+    assert task_db.move_tasks_to_trash([trash_unleased]) == [trash_unleased]
+    assert task_db.get_task(trash_unleased)['stage'] is None
+
+    # 4. fail_task_result_unknown and update_task(status='failed') clear raw DB stage.
+    unk_id = task_db.create_task('video', 'stage', {'provider': 'ark'}, provider='ark',
+                                 external_task_id='cgt-stage-5', status='processing')
+    assert task_db.set_task_stage(unk_id, task_db.TASK_STAGE_DOWNLOADING)
+    assert task_db.fail_task_result_unknown(unk_id, 'poll timeout', 'upstream_timeout')
+    assert task_db.get_task(unk_id)['stage'] is None
+
+    upd_id = task_db.create_task('video', 'stage', {'provider': 'ark'}, provider='ark',
+                                 external_task_id='cgt-stage-6', status='processing')
+    assert task_db.set_task_stage(upd_id, task_db.TASK_STAGE_DOWNLOADING)
+    assert task_db.update_task(upd_id, status='failed')
+    assert task_db.get_task(upd_id)['stage'] is None

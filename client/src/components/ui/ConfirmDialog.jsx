@@ -17,7 +17,7 @@ export default function ConfirmDialog({ title, children, confirmLabel = '确认'
   }
   function keydown(event) {
     event.stopPropagation()
-    if (event.key === 'Escape' && !busy) { event.preventDefault(); onClose(); return }
+    if (event.key === 'Escape' && !busy) { event.preventDefault(); event.nativeEvent?.stopImmediatePropagation?.(); onClose(); return }
     if (event.key !== 'Tab') return
     const items = [...ref.current.querySelectorAll('button:not(:disabled)')]
     if (!items.length) return

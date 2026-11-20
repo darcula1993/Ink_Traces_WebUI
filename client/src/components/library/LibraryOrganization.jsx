@@ -2,7 +2,7 @@ import React,{useEffect,useState} from 'react'
 import axios from 'axios'
 import LibraryDialog from './LibraryDialog'
 import Select from '../ui/Select'
-import {createMediaFolder,updateMediaFolder,deleteMediaFolder,previewMediaDelete,deleteMedia,listMediaGroups,createMediaGroup,updateMediaGroup,deleteMediaGroup} from '../../lib/libraryApi'
+import {createMediaFolder,updateMediaFolder,deleteMediaFolder,previewMediaDelete,deleteMedia,getMediaReferences,listMediaGroups,createMediaGroup,updateMediaGroup,deleteMediaGroup} from '../../lib/libraryApi'
 import {FOLDER_ICONS,userFolderOptions,descendants,deletePlanLines,folderNameIssue,libraryErrorText} from './mediaLibrary'
 // LIBRARY-GLOBAL-20261116 S4a: folder, group and delete dialogs of the global library (no projects, no tags).
 const GROUP_LIMIT=100,MEDIA_NAME_MAX=240
@@ -11,11 +11,12 @@ export const renameMedia=async(id,name)=>(await axios.patch(`/api/canvas/media/$
 export default function LibraryOrganization({action,folders,selection,onClose,onDone,onBeforeDelete,onDeleted}){
  const kind=action.kind,item=action.item
  const [name,setName]=useState(kind==='newFolder'?'':kind==='renameMedia'?item?.name||'':item?.title||''),[parent,setParent]=useState(item?.parent_id||''),[icon,setIcon]=useState(item?.icon||'folder'),[busy,setBusy]=useState(false),[error,setError]=useState('')
- const [plan,setPlan]=useState(null),[groups,setGroups]=useState(null),[groupMode,setGroupMode]=useState('new'),[groupId,setGroupId]=useState('')
+ const [plan,setPlan]=useState(null),[refs,setRefs]=useState(null),[groups,setGroups]=useState(null),[groupMode,setGroupMode]=useState('new'),[groupId,setGroupId]=useState('')
  const ids=selection.map(i=>i.media_id||i.id)
  useEffect(()=>{if(kind!=='remove'||!ids.length)return;let alive=true;previewMediaDelete(ids).then(v=>{if(alive)setPlan(v)}).catch(e=>{if(alive)setError(libraryErrorText(e))});return()=>{alive=false}},[kind])
+ useEffect(()=>{if(kind!=='references'||!item?.id)return;let alive=true;getMediaReferences(item.id).then(v=>{if(alive)setRefs(v)}).catch(e=>{if(alive)setError(libraryErrorText(e))});return()=>{alive=false}},[kind,item?.id])
  useEffect(()=>{if(kind!=='group')return;let alive=true;listMediaGroups().then(v=>{if(alive)setGroups(v)}).catch(e=>{if(alive)setError(libraryErrorText(e))});return()=>{alive=false}},[kind])
- const title={folder:'文件夹属性',newFolder:'新建文件夹',deleteFolder:'删除文件夹',remove:'删除素材',group:'加入素材组',groupEdit:'重命名素材组',renameMedia:'重命名素材',deleteGroup:'删除素材组'}[kind]
+ const title={folder:'文件夹属性',newFolder:'新建文件夹',deleteFolder:'删除文件夹',remove:'删除素材',references:'查看引用位置',group:'加入素材组',groupEdit:'重命名素材组',renameMedia:'重命名素材',deleteGroup:'删除素材组'}[kind]
  const blocked=kind==='folder'?descendants(folders,item.id).add(item.id):new Set()
  const parentOptions=userFolderOptions(folders,{exclude:blocked})
  // E3: folder names never contain “/” and are unique among siblings (checked again by the server).
@@ -36,9 +37,11 @@ export default function LibraryOrganization({action,folders,selection,onClose,on
   onDone(result)
  }catch(e){setError(libraryErrorText(e))}finally{setBusy(false)}}
  const needsName=['folder','newFolder','groupEdit','renameMedia'].includes(kind)||kind==='group'&&groupMode==='new'
- return <LibraryDialog title={title} busy={busy} error={error} onClose={onClose} onConfirm={run} danger={['remove','deleteFolder','deleteGroup'].includes(kind)}
+ const readOnly=kind==='references'
+ return <LibraryDialog title={title} busy={busy} error={error} onClose={onClose} onConfirm={readOnly?null:run} cancelLabel={readOnly?'关闭':'取消'} danger={['remove','deleteFolder','deleteGroup'].includes(kind)}
   disabled={(kind==='remove'&&!plan)||(needsName&&!name.trim())||!!nameIssue||(kind==='group'&&(!groups||groupMode==='existing'&&!groupId||overLimit))}
   confirmLabel={kind==='remove'?'确认删除':kind==='deleteFolder'?'删除文件夹':kind==='deleteGroup'?'删除素材组':kind==='group'?(groupMode==='new'?'新建素材组':'加入素材组'):kind==='newFolder'?'创建文件夹':'确认保存'}>
+  {kind==='references'&&(refs?<ReferencesView item={item} refs={refs}/>:!error&&<p role="status">正在查询引用位置…</p>)}
   {kind==='group'&&<><p>将所选 {ids.length} 项加入素材组。素材组是全局的，只记录对库内素材的引用，不复制文件；所有项目都可以引用。</p><div className="ul-segment" role="radiogroup" aria-label="加入方式"><label><input type="radio" name="group-mode" checked={groupMode==='new'} onChange={()=>setGroupMode('new')}/>新建素材组</label><label><input type="radio" name="group-mode" checked={groupMode==='existing'} disabled={!groups?.length} onChange={()=>setGroupMode('existing')}/>加入已有素材组</label></div>
    {groupMode==='existing'&&<label>素材组<Select ariaLabel="已有素材组" disabled={busy} value={groupId} options={[{value:'',label:'请选择素材组'},...(groups||[]).map(g=>({value:g.id,label:`${g.title}（${g.member_count} 项）`}))]} onChange={setGroupId}/></label>}
    {overLimit&&<p role="alert" className="ul-error">每个素材组最多 {GROUP_LIMIT} 个素材</p>}</>}
@@ -59,5 +62,19 @@ function DeletePlan({plan}){
   {plan.affected_workflows.length>0&&<ul className="ul-delete-workflows" aria-label="受影响的画布">{plan.affected_workflows.map(w=><li key={w.workflow_id} data-workflow-id={w.workflow_id}><b>{w.project_title||'项目已删除'}</b> / <b>{w.workflow_title||w.workflow_id}</b>：{w.placeholder_nodes||0} 个“已删除”占位，{w.stripped_nodes||0} 个节点移除引用</li>)}</ul>}
   <p className="ul-muted">“已删除”：节点保留原位置和名称并显示为“已删除”，可重新选择素材替换；归档的画布不改写。</p>
   <p><strong>此操作不可恢复。</strong>Cupsy 远端素材不受影响。</p>
+ </div>
+}
+
+const TASK_TYPE_LABELS={image:'图片',video:'视频',audio:'音频',layer:'图层'}
+function ReferencesView({item,refs}){
+ const workflows=refs.workflows||[],groups=refs.media_groups||[],characters=refs.characters||[],tasks=refs.tasks||[],taskIds=refs.task_ids||[]
+ const noAssetRefs=!workflows.length&&!groups.length&&!characters.length
+ return <div className="ul-ref-view" data-testid="media-references-view">
+  <p className="ul-ref-subject">素材：<strong>{item?.name||refs.media?.name||'素材'}</strong>（只读查询，不会执行删除）</p>
+  {noAssetRefs&&<p className="ul-muted" data-testid="media-refs-empty">当前未被画布、素材组或角色卡引用</p>}
+  {workflows.length>0&&<div className="ul-ref-section"><h4>画布（{workflows.length}）</h4><ul className="ul-delete-workflows" aria-label="引用此素材的画布">{workflows.map(w=><li key={w.workflow_id} data-workflow-id={w.workflow_id}><b>{w.project_title||'项目已删除'}</b> / <b>{w.workflow_title||w.workflow_id}</b>（{w.placeholder_nodes||0} 个节点展示，{w.stripped_nodes||0} 个节点参考）</li>)}</ul></div>}
+  {groups.length>0&&<div className="ul-ref-section"><h4>素材组（{groups.length}）</h4><ul className="ul-ref-list" aria-label="包含此素材的素材组">{groups.map(g=><li key={g.id}>{g.title}</li>)}</ul></div>}
+  {characters.length>0&&<div className="ul-ref-section"><h4>角色卡（{characters.length}）</h4><ul className="ul-ref-list" aria-label="引用此素材的角色卡">{characters.map(c=><li key={c.id}>{c.name}</li>)}</ul></div>}
+  {(tasks.length>0||taskIds.length>0)&&<div className="ul-ref-section"><h4>关联任务（{tasks.length||taskIds.length}）</h4><ul className="ul-ref-list" aria-label="关联此素材的任务">{tasks.length>0?tasks.map(t=><li key={t.id}>#{t.id}（{TASK_TYPE_LABELS[t.type]||t.type}）</li>):taskIds.map(id=><li key={id}>#{id}</li>)}</ul></div>}
  </div>
 }

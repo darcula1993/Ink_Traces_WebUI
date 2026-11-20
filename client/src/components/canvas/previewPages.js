@@ -12,6 +12,16 @@ export function previewItems(node,doc){
  const members=group?unique(group.nodeIds.map(id=>{const member=doc.nodes?.find(item=>item.id===id);return withKind(member?.asset,member)})):[]
  return members.length>1?members:[withKind(node?.asset,node)].filter(Boolean)
 }
+export function listPreviewItems(assets){
+ return [...new Map((assets||[]).filter(playable).map(item=>[item.id||item.url,item])).values()]
+}
+export function withPreviewPages(asset,list){
+ if(!asset)return null
+ const items=listPreviewItems(list)
+ if(!items.length)return asset
+ const hasCurrent=items.some(item=>item.id===asset.id&&item.url===asset.url)
+ return {...asset,items:hasCurrent?items:listPreviewItems([asset,...items])}
+}
 // Download only from this site's own storage path, never a remote or signed (query-string) address.
 export function localDownloadPath(url,origin=globalThis.location?.origin){
  try{const parsed=new URL(url,origin);return origin&&parsed.origin===origin&&!parsed.search?parsed.pathname:null}catch{return null}

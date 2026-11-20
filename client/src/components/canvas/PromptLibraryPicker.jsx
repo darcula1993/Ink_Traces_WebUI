@@ -18,7 +18,50 @@ export function usePromptLibrary() {
       else setStatus('提示词库同步失败')
     } catch { setStatus('无法加载提示词库') } finally { setLoading(false) }
   }
-  return { prompts, status, setStatus, loading, load }
+  const createPrompt = async text => {
+    const trimmed = String(text || '').trim()
+    if (!trimmed) return { ok: false, error: '请输入提示词内容' }
+    setLoading(true); setStatus('')
+    try {
+      const response = await axios.post('/api/prompts', { text: trimmed })
+      if (!response.data?.success) throw new Error('保存失败')
+      await load()
+      setStatus('已存入提示词库')
+      return { ok: true, prompt: response.data.prompt || null }
+    } catch {
+      setStatus('存入失败')
+      return { ok: false, error: '存入失败' }
+    } finally { setLoading(false) }
+  }
+  const updatePrompt = async (id, text) => {
+    const trimmed = String(text || '').trim()
+    if (!trimmed) return { ok: false, error: '提示词不能为空' }
+    setLoading(true); setStatus('')
+    try {
+      const response = await axios.put(`/api/prompts/${id}`, { text: trimmed })
+      if (!response.data?.success) throw new Error('更新失败')
+      await load()
+      setStatus('已更新提示词')
+      return { ok: true }
+    } catch {
+      setStatus('保存修改失败')
+      return { ok: false, error: '保存修改失败' }
+    } finally { setLoading(false) }
+  }
+  const deletePrompt = async id => {
+    setLoading(true); setStatus('')
+    try {
+      const response = await axios.delete(`/api/prompts/${id}`)
+      if (!response.data?.success) throw new Error('删除失败')
+      await load()
+      setStatus('已删除提示词')
+      return { ok: true }
+    } catch {
+      setStatus('删除失败')
+      return { ok: false, error: '删除失败' }
+    } finally { setLoading(false) }
+  }
+  return { prompts, status, setStatus, loading, load, createPrompt, updatePrompt, deletePrompt }
 }
 
 // Inserts at the given (or the textarea's own) selection with native undo; falls back to `onFallback(next)`.

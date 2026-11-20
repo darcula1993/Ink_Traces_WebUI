@@ -9,7 +9,7 @@
 .canvas-studio .cv-node-echo-task:hover { border-color: var(--cv-green); color: var(--cv-green); }
 .canvas-studio .cv-node-echo-task:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 1px; }
 .canvas-studio .cv-node:not(.cv-node-sized) .cv-node-echo { max-width: 100%; margin-top: 4px; }
-.canvas-studio .cv-world.is-lod-low .cv-node .cv-node-echo { visibility: hidden; }
+.canvas-studio .cv-world.is-echo-hidden .cv-node .cv-node-echo { visibility: hidden; }
 .canvas-studio .cv-media-state-actions { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
 .canvas-studio .cv-task-failure-hint { color: var(--cv-text); }
 .canvas-studio .cv-task-failure-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }

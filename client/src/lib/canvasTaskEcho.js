@@ -11,6 +11,15 @@ export const FAILURE_ACTION_LABELS = Object.freeze({
   edit_params: '修改参数',
   check_task: '到任务中心核查',
 })
+// Hide node footer echo below 60% zoom so footer text stays legible at working zoom levels.
+export const ECHO_HIDE_ZOOM = 0.6
+export const shouldHideTaskEcho = zoom => Number(zoom) < ECHO_HIDE_ZOOM
+
+// Localize raw English task error tokens shown in canvas echoes and failure panels.
+export function formatTaskError(error) {
+  if (typeof error !== 'string') return ''
+  return error.replace(/\bpoll\s+timeout\b/gi, '轮询超时')
+}
 
 // Server times are ISO strings; a value without an offset is UTC (tasks.utcnow / legacy rows).
 export function parseServerTime(raw) {

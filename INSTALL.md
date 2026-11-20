@@ -45,7 +45,7 @@ See the [README](README.md) and [Cupsy notes](doc/cupsy_compatibility.md) for de
 ./stop.sh
 ```
 
-Open `http://localhost:4545`. For frontend hot reload use `NANOBANANA_FRONTEND_MODE=dev ./start.sh`. Check for active generation tasks before stopping or restarting; interrupted paid requests are not replayed automatically. Set `NANOBANANA_SKIP_PUBLIC_SOURCE_DEPLOY=1` to skip public-source (Nginx/Certbot) automation on start.
+Open `http://localhost:4545`. For frontend hot reload use `NANOBANANA_FRONTEND_MODE=dev ./start.sh`. Before stopping or restarting, check that generation tasks and node-group runs have finished. On shared hosts, verify which processes and ports belong to this installation and stop only those processes. Set `NANOBANANA_SKIP_PUBLIC_SOURCE_DEPLOY=1` to skip public-source (Nginx/Certbot) automation on start.
 
 ## 5. Optional: HTTPS for public sources
 
@@ -59,7 +59,18 @@ sudo ./deploy/configure-public-source.sh        # apply (Nginx + Certbot)
 
 Port 80 must be reachable for HTTP-01 validation and firewall rules are your responsibility. To run behind systemd, `deploy/restart_with_https.py --service nanobanana.service --dry-run` shows what it would change; it needs root to apply. The Nginx and Certbot templates are in [`deploy/nginx/`](deploy/nginx/) and [`deploy/certbot/`](deploy/certbot/).
 
-## 6. Upgrading from 1.x to 2.0
+## 6. Upgrade an existing 2.x installation to 2.2
+
+On the first start, v2.2 updates the SQLite media table to support independent copies of a result. Existing library IDs and files stay in place. A task in the trash now hides its generation history results. Permanent task deletion removes those history items after showing the references affected. Copies in other folders remain available.
+
+1. Confirm there are no active generation tasks or node-group runs. Stop the API and the Worker.
+2. Take a consistent SQLite backup of the current database and check it with `PRAGMA integrity_check` (expected result: `ok`). For a full rollback point, also keep snapshots of the library files and task output directory. Store backups privately: the database can contain provider credentials.
+3. Check out the v2.2 release and start the API, Worker and frontend. The schema update runs during startup. The [1.x library migration](#7-upgrade-from-1x-to-20) is for older installations with per-project libraries.
+4. Check `/api/health`, `/api/ready` and the homepage. Sign in and check that the existing library, task history and canvas references are readable before resuming work.
+
+A code rollback to v2.1.0 was tested with the updated schema. Its earlier rules apply while it runs: results from trashed tasks become visible again, and permanent task deletion leaves library results behind. If a deletion was interrupted, let v2.2 finish library recovery before switching back. To restore the exact pre-upgrade state, use the matching database and file snapshots together. Restoring them discards changes made since the backup.
+
+## 7. Upgrade from 1.x to 2.0
 
 2.0 replaces the per-project libraries, tags and per-canvas copies with one global library and migrates existing data once (see [CHANGELOG](CHANGELOG.md)). Run the steps below from the 2.0 checkout, next to the existing `tasks.db`; `canvas_assets/` and `output/` are expected beside it (otherwise pass `--asset-root` / `--output-dir`).
 
@@ -74,7 +85,7 @@ Copies held only by already-deleted canvases or projects are removed during the 
 
 To roll back: stop the services, export what changed after the migration with `--new-since <apply finish time> --export-dir <new-empty-dir>` (new files plus a `changes.json` of moves, renames, deletions, folders and groups), restore `tasks.db` from the backup directory and `canvas_assets/` / `output/` from its snapshot (for example `cp -al`), and go back to the 1.x code.
 
-## 7. Run the tests (mock providers, no paid requests)
+## 8. Run the tests (mock providers, no paid requests)
 
 Backend tests use mocked providers. Run them from a checkout that has **no** `config.json` (the test session refuses to start when one exists):
 
@@ -90,7 +101,7 @@ Browser (Playwright) tests depend on an isolated fixture setup that is not part 
 cd client && npm install && npm run build
 ```
 
-## 8. Maintenance
+## 9. Maintenance
 
 With services stopped: `python3 server/maintenance.py all --grace-hours 24` removes expired task media (results kept in the library are not touched), compacts legacy data and vacuums SQLite. `./clean.sh` removes regenerable caches.
 Back up `tasks.db`, `canvas_assets/` (library files) and `output/` together.

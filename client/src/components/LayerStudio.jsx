@@ -7,14 +7,19 @@ import {isSeedream55} from '../lib/imageGenerationRules'
 import LayerCostEstimate from './LayerCostEstimate'
 import { Group, Image as KonvaImage, Layer, Stage, Transformer } from 'react-konva'
 import {
-  BoxSelect, Download, Eye, EyeOff, FolderOpen, GripVertical, ImagePlus,
-  Lock, LockOpen, Maximize, MousePointer2, Plus, Redo2, RotateCcw,
+  Download, Eye, EyeOff, FolderOpen, GripVertical, Layers3,
+  Library, Lock, LockOpen, Maximize, MousePointer2, Plus, Redo2, RotateCcw,
   Save, Sparkles, Trash2, Undo2, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import CodeRainCanvas from './CodeRainCanvas'
+import { LayerExplodeArt } from './art/ShellEmptyArt'
 import IconButton from './ui/IconButton'
 import Select from './ui/Select'
+import askConfirm from './ui/askConfirm'
+import UnifiedAssetLibrary from './library/UnifiedAssetLibrary'
+import LayerSaveToLibraryDialog from './LayerSaveToLibraryDialog'
 import { CLIENT_IN_FLIGHT_TASK_STATUSES } from '../lib/taskStatus.js'
+import { LAYER_OPEN_SOURCE_EVENT, takePendingLayerSource } from '../lib/canvasBridge.js'
 
 // Server in-flight statuses plus the optimistic local "submitting" placeholder.
 const ACTIVE_STATUSES = new Set(CLIENT_IN_FLIGHT_TASK_STATUSES)
@@ -95,6 +100,12 @@ export default function LayerStudio({ notify }) {
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [viewport, setViewport] = useState({ width: 900, height: 600 })
   const [draggedLayerId, setDraggedLayerId] = useState(null)
+  const [sourceDragging, setSourceDragging] = useState(false)
+  const sourceDragDepthRef = useRef(0)
+  const [showLibraryPicker, setShowLibraryPicker] = useState(false)
+  const [saveToLibraryMode, setSaveToLibraryMode] = useState(null)
+  const [locateLibrary, setLocateLibrary] = useState(null)
+  const fileInputRef = useRef(null)
   const viewportRef = useRef(null)
   const stageRef = useRef(null)
   const transformerRef = useRef(null)
@@ -227,6 +238,52 @@ export default function LayerStudio({ notify }) {
 
   // Loading a source stores it as a project right away (no task, no provider call),
   // so it is listed and shown at once; decomposition is queued only on the button.
+  const loadLibrarySource = useCallback(async (sourceRef, name = '', fromCanvas = false) => {
+    if (!sourceRef) return false
+    setBusy(true)
+    try {
+      const payload = { source_media_id: sourceRef, decompose: false }
+      const trimmedName = String(name || '').replace(/\.[^.]+$/, '').trim()
+      if (trimmedName) payload.name = trimmedName
+      const response = await axios.post('/api/layer/projects', payload)
+      await openProject(response.data.project_id, true)
+      history.current = []
+      future.current = []
+      setDirty(false)
+      setSaveState('saved')
+      setSourceFile(null)
+      setSourcePreview('')
+      await loadProjects()
+      notify?.(fromCanvas ? '已载入画布图片，可调整参数后点击“分解图层”' : '已从素材库载入源图')
+      return true
+    } catch (error) {
+      const msg = error.response?.data?.error || error.message || '从素材库载入源图失败'
+      notify?.(msg, 'error')
+      throw new Error(msg)
+    } finally {
+      setBusy(false)
+    }
+  }, [loadProjects, notify, openProject])
+
+  useEffect(() => {
+    const consumePending = () => {
+      const pending = takePendingLayerSource()
+      if (!pending?.ref) return
+      loadLibrarySource(pending.ref, pending.name, true).catch(() => {})
+    }
+    consumePending()
+    window.addEventListener(LAYER_OPEN_SOURCE_EVENT, consumePending)
+    return () => window.removeEventListener(LAYER_OPEN_SOURCE_EVENT, consumePending)
+  }, [loadLibrarySource])
+
+  const handleApplyLibrarySource = async items => {
+    const chosen = items?.[0]
+    const mediaId = chosen?.media_id || chosen?.asset?.id
+    if (!mediaId) throw new Error('请选择一张图片素材')
+    await loadLibrarySource(mediaId, chosen?.asset?.name || '', false)
+    setShowLibraryPicker(false)
+  }
+
   const chooseSource = async file => {
     if (!file || !String(file.type).startsWith('image/') || busy) return
     if (sourcePreview?.startsWith('blob:')) URL.revokeObjectURL(sourcePreview)
@@ -273,11 +330,24 @@ export default function LayerStudio({ notify }) {
   }
 
   const deleteProject = async () => {
-    if (!project?.id || !window.confirm(`删除项目“${project.name}”？`)) return
-    await axios.delete(`/api/layer/projects/${project.id}`)
-    setProject(null)
-    setDocumentState(EMPTY_DOCUMENT)
-    await loadProjects()
+    if (!project?.id) return
+    const confirmed = await askConfirm({
+      title: '删除图层项目',
+      message: `确定删除项目“${project.name}”？此操作会移除该项目及其分解结果，不会删除全局素材库中的原图或已另存的素材。`,
+      confirmLabel: '确认删除',
+      cancelLabel: '取消',
+      danger: true,
+    })
+    if (!confirmed) return
+    try {
+      await axios.delete(`/api/layer/projects/${project.id}`)
+      setProject(null)
+      setDocumentState(EMPTY_DOCUMENT)
+      await loadProjects()
+      notify?.(`已删除项目“${project.name}”`)
+    } catch (error) {
+      notify?.(error.response?.data?.error || '删除项目失败', 'error')
+    }
   }
 
   const exportCanvas = async format => {
@@ -313,7 +383,7 @@ export default function LayerStudio({ notify }) {
     <section className="layer-studio" data-testid="layer-studio">
       <header className="layer-studio-commandbar liquid-glass">
         <div className="layer-project-identity">
-          <BoxSelect size={16} className="text-nexus-cyan" />
+          <Layers3 size={16} className="text-nexus-green" aria-hidden="true" />
           <strong>{project?.name || '图层工作室'}</strong>
           {project && <span className={`layer-save-state state-${saveState}`}><Save size={11} />{saveState === 'saving' ? '保存中' : saveState === 'error' ? '保存失败' : '已保存'}</span>}
         </div>
@@ -327,6 +397,7 @@ export default function LayerStudio({ notify }) {
           <IconButton label="适应画布" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}><Maximize size={15} /></IconButton>
         </div>
         <div className="layer-export-actions">
+          <button type="button" className="btn btn-secondary btn-sm" data-testid="layer-save-composite-to-library" disabled={exporting || !documentState.layers.length} onClick={() => setSaveToLibraryMode('composite')}><Library size={14} /> 存到素材库</button>
           <button type="button" className="btn btn-secondary btn-sm" disabled={exporting||(!project?.document?.layers?.length && !documentState.layers.length)} onClick={() => exportCanvas('png')}><Download size={14} /> PNG</button>
           <button type="button" className="btn btn-secondary btn-sm" disabled={exporting||!documentState.layers.length} onClick={() => exportCanvas('jpeg')}><Download size={14} /> JPEG</button>
           <a className={`btn btn-primary btn-sm ${!documentState.layers.length ? 'pointer-events-none opacity-40' : ''}`} href={project ? `/api/layer/projects/${project.id}/layers.zip` : '#'}><Download size={14} /> 图层包</a>
@@ -334,7 +405,13 @@ export default function LayerStudio({ notify }) {
       </header>
 
       <aside className="layer-studio-left liquid-glass">
-        <div className="layer-panel-heading"><FolderOpen size={14} />项目<button type="button" onClick={() => { setProject(null); setSourceFile(null); setSourcePreview(''); setDocumentState(EMPTY_DOCUMENT) }} title="新建项目"><Plus size={14} /></button></div>
+        <div className="layer-panel-heading">
+          <FolderOpen size={14} />项目
+          <span className="layer-heading-actions">
+            <button type="button" data-testid="layer-sidebar-pick-library" onClick={() => setShowLibraryPicker(true)} title="从素材库选择源图" aria-label="从素材库选择源图"><Library size={14} /></button>
+            <button type="button" onClick={() => { setProject(null); setSourceFile(null); setSourcePreview(''); setDocumentState(EMPTY_DOCUMENT) }} title="新建项目" aria-label="新建项目"><Plus size={14} /></button>
+          </span>
+        </div>
         <div className="layer-project-list custom-scrollbar">
           {projects.map(item => (
             <button key={item.id} type="button" className={project?.id === item.id ? 'active' : ''} onClick={() => openProject(item.id)}>
@@ -370,8 +447,27 @@ export default function LayerStudio({ notify }) {
         className="layer-studio-canvas"
         data-pan-x={pan.x}
         data-pan-y={pan.y}
+        onDragEnter={event => {
+          if (project) return
+          event.preventDefault()
+          sourceDragDepthRef.current += 1
+          setSourceDragging(true)
+        }}
         onDragOver={event => { if (!project) event.preventDefault() }}
-        onDrop={event => { if (!project) { event.preventDefault(); chooseSource(event.dataTransfer.files?.[0]) } }}
+        onDragLeave={event => {
+          if (project) return
+          event.preventDefault()
+          sourceDragDepthRef.current = Math.max(0, sourceDragDepthRef.current - 1)
+          if (sourceDragDepthRef.current === 0) setSourceDragging(false)
+        }}
+        onDrop={event => {
+          if (!project) {
+            event.preventDefault()
+            sourceDragDepthRef.current = 0
+            setSourceDragging(false)
+            chooseSource(event.dataTransfer.files?.[0])
+          }
+        }}
       >
         {!project && sourcePreview ? (
           <div className="layer-source-stage" data-testid="layer-source-stage">
@@ -379,12 +475,21 @@ export default function LayerStudio({ notify }) {
             <div className="layer-source-status" role="status">正在载入源图…</div>
           </div>
         ) : !project ? (
-          <label className="layer-studio-empty" data-testid="layer-source-drop-zone">
-            <ImagePlus size={34} />
+          <div
+            className="layer-studio-empty"
+            data-testid="layer-source-drop-zone"
+            data-dragging={sourceDragging ? 'true' : undefined}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <LayerExplodeArt />
             <strong>添加一张源图片</strong>
             <span>PNG / JPEG · 512×512 至 6000×6000</span>
-            <input type="file" accept="image/png,image/jpeg" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = '' }} />
-          </label>
+            <div className="layer-empty-actions" onClick={event => event.stopPropagation()}>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => fileInputRef.current?.click()}>选择本地图片</button>
+              <button type="button" className="btn btn-primary btn-sm" data-testid="layer-pick-from-library" disabled={busy} onClick={() => setShowLibraryPicker(true)}><Library size={14} />从素材库选择</button>
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/png,image/jpeg" onChange={event => { chooseSource(event.target.files?.[0]); event.target.value = '' }} />
+          </div>
         ) : !currentTask && documentState.layers.length === 0 ? (
           <div className="layer-source-stage" data-testid="layer-source-stage">
             <img src={`/api/layer/projects/${project.id}/source`} alt={`源图 ${project.source_name || project.name}`} />
@@ -470,7 +575,18 @@ export default function LayerStudio({ notify }) {
             </div>
             <LayerOcrDetails value={selectedLayer.text_recognition} notify={notify}/>
             {selectedLayer.description && <p>{selectedLayer.description}</p>}
-            {!selectedLayer.locked && <button type="button" className="btn btn-ghost btn-danger layer-property-delete" onClick={() => commit(current => ({ ...current, layers: current.layers.filter(layer => layer.id !== selectedLayer.id), selected_layer_id: null }))}><Trash2 size={13} />删除图层</button>}
+            <div className="layer-property-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                data-testid="layer-save-layer-to-library"
+                disabled={busy}
+                onClick={() => setSaveToLibraryMode('layer')}
+              >
+                <Library size={13} />存此图层到素材库
+              </button>
+              {!selectedLayer.locked && <button type="button" className="btn btn-ghost btn-danger layer-property-delete" onClick={() => commit(current => ({ ...current, layers: current.layers.filter(layer => layer.id !== selectedLayer.id), selected_layer_id: null }))}><Trash2 size={13} />删除图层</button>}
+            </div>
           </> : <div className="layer-properties-empty">选择一个图层</div>}
         </div>
       </aside>
@@ -487,6 +603,40 @@ export default function LayerStudio({ notify }) {
           <LayerCostEstimate modern={modern} modelKnown={modelKnown} size={size} />
         </div>
       </footer>
+
+      {showLibraryPicker && (
+        <UnifiedAssetLibrary
+          title="从素材库选择源图"
+          applyLabel="载入为源图"
+          allowedKinds={['image']}
+          initialKind="image"
+          selectionLimit={1}
+          onApply={handleApplyLibrarySource}
+          onClose={() => setShowLibraryPicker(false)}
+        />
+      )}
+      {saveToLibraryMode && project && (
+        <LayerSaveToLibraryDialog
+          project={project}
+          documentState={documentState}
+          selectedLayer={selectedLayer}
+          initialTarget={saveToLibraryMode}
+          onClose={() => setSaveToLibraryMode(null)}
+          onLocate={media => {
+            setSaveToLibraryMode(null)
+            setLocateLibrary({ folderId: media.folder_id || 'root', mediaId: media.id })
+          }}
+          notify={notify}
+        />
+      )}
+      {locateLibrary && (
+        <UnifiedAssetLibrary
+          browseOnly
+          initialFolderId={locateLibrary.folderId}
+          focusMediaIds={[locateLibrary.mediaId]}
+          onClose={() => setLocateLibrary(null)}
+        />
+      )}
     </section>
   )
 }

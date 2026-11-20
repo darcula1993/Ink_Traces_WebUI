@@ -1,5 +1,6 @@
 import {nodeGeometry} from '../components/canvas/canvasGeometry.js'
 import {groupBounds} from './canvasGroups.js'
+export {freeNodePosition, freeNodePositionInView, freeAssetNodePosition, occupiedRects} from './canvasPlacement.js'
 
 // Collapse groups first, then rank strongly connected components. This remains
 // deterministic for cycles and imported graphs without changing their edges.

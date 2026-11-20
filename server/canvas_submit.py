@@ -163,7 +163,11 @@ def _video_label(model):
 def capabilities_from_sources(image_info, video_info, audio_info, profiles):
     """Port of getCanvasCapabilities: the four GET payloads -> {kind: [provider option]}."""
     def available(info):
-        return [(key, value) for key, value in (_get(info, 'providers') or {}).items() if _get(value, 'available')]
+        return [
+            (key, value)
+            for key, value in (_get(info, 'providers') or {}).items()
+            if _get(value, 'available') and not _get(value, 'managed_by_profiles')
+        ]
     image_providers = _get(image_info, 'providers') or {}
     video_providers = _get(video_info, 'providers') or {}
     legacy = {
@@ -186,20 +190,32 @@ def capabilities_from_sources(image_info, video_info, audio_info, profiles):
             adapter, settings = p.get('adapter'), p.get('settings') or {}
             model_setting = settings.get('model')
             ark = _get(image_providers, 'ark')
+            image_default = 'seedream-5.0-pro' if adapter == 'cupsy' else 'seedream-5-0-pro'
+            if p.get('capability_model') is not None:
+                capability_model = p.get('capability_model')
+            elif adapter == 'ark' and _truthy(model_setting) and model_setting == _get(ark, 'model'):
+                capability_model = _get(ark, 'capability_model')
+            elif kind == 'image':
+                capability_model = _or(model_setting, image_default)
+            else:
+                capability_model = model_setting
             option = {
                 'id': f"profile:{p.get('id')}", 'provider': adapter, 'profile_id': p.get('id'), 'is_default': bool(p.get('is_default')),
                 'name': f"{p.get('name')}{' · 默认' if p.get('is_default') else ''}", 'revision': p.get('revision'),
-                'capability_model': _get(ark, 'capability_model') if adapter == 'ark' and model_setting == _get(ark, 'model') else model_setting,
+                'capability_model': capability_model,
             }
+            if p.get('source_key'):
+                option['source_key'] = p.get('source_key')
             if kind == 'video':
                 option['model'] = _or(model_setting, SEEDANCE_25) if adapter == 'cupsy' else SEEDANCE_20
                 models = _get(_get(video_providers, adapter), 'models') or (
                     [SEEDANCE_25, SEEDANCE_25_MODERATED] if adapter == 'cupsy' else [SEEDANCE_20, SEEDANCE_25])
                 option['models'] = [{'id': m, 'name': _video_label(m)} for m in models]
             else:
-                option['model'] = _or(model_setting, CUPSY_AUDIO_MODEL if kind == 'audio' else _get(_get(image_providers, adapter), 'model'))
+                option['model'] = _or(model_setting, CUPSY_AUDIO_MODEL if kind == 'audio' else image_default)
             options.append(option)
-        result[kind] = options + legacy[kind]
+        imported_adapters = {o['provider'] for o in options if o.get('source_key') == f"config:{kind}:{o['provider']}"}
+        result[kind] = options + [item for item in legacy[kind] if item['provider'] not in imported_adapters]
     return result
 
 
@@ -219,9 +235,15 @@ def _selection_key(choice):
 def selected_provider(capabilities, choice, kind):
     if not choice:
         return None
-    for option in _get(capabilities, kind) or []:
+    options = _get(capabilities, kind) or []
+    for option in options:
         if option.get('provider') == choice.get('provider') and (option.get('profile_id') or None) == (choice.get('profile_id') or None):
             return option
+    if not choice.get('profile_id'):
+        expected_key = f"config:{kind}:{choice.get('provider')}"
+        for option in options:
+            if option.get('provider') == choice.get('provider') and option.get('source_key') == expected_key:
+                return option
     return None
 
 
@@ -349,7 +371,7 @@ def resolve_node_inputs(node, nodes, edges):
 # ---------- imageGenerationRules.js ----------
 
 def is_seedream55(model):
-    return model in SEEDREAM_55_MODELS
+    return isinstance(model, str) and model.lower() in SEEDREAM_55_MODELS
 
 
 def _image_capabilities(provider, model=None):
@@ -537,7 +559,7 @@ def build_request(workflow, node_id, capabilities, *, read_metadata=None, resolv
     if _truthy(node.get('title')):
         fields['result_name'] = js_string(node['title'])
     fields.update(canvas_workflow_revision=workflow['revision'], provider=adapter)
-    if _truthy(provider.get('profile_id')):
+    if _truthy(node['providerSelection'].get('profile_id')) and _truthy(provider.get('profile_id')):
         fields['profile_id'] = provider['profile_id']
     node_type = node.get('type')
     capability_model = _or(provider.get('capability_model'), provider.get('model'))

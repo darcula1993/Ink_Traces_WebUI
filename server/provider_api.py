@@ -70,7 +70,8 @@ def body():
 def collection():
     if request.method == 'GET':
         return jsonify(success=True, profiles=profiles.list_profiles(request.args.get('kind')))
-    return jsonify(success=True, profile=profiles.save_profile(body())), 201
+    saved, synced_ids = profiles.save_profile(body(), return_synced=True)
+    return jsonify(success=True, profile=saved, synced_profile_ids=synced_ids), 201
 
 
 @provider_api.route('/api/provider-profiles/<profile_id>', methods=['GET', 'PATCH', 'DELETE'])
@@ -80,6 +81,20 @@ def item(profile_id):
     data = body()
     if request.method == 'DELETE':
         if set(data) != {'revision'}:
-            raise profiles.ProfileError('停用配置需要当前revision')
-        data['enabled'] = False
-    return jsonify(success=True, profile=profiles.save_profile(data, profile_id))
+            raise profiles.ProfileError('删除配置需要当前revision')
+        deleted = profiles.delete_profile(profile_id, data['revision'])
+        return jsonify(success=True, deleted=True, profile=deleted)
+    saved, synced_ids = profiles.save_profile(data, profile_id, return_synced=True)
+    return jsonify(success=True, profile=saved, synced_profile_ids=synced_ids)
+
+
+@provider_api.route('/api/provider-profiles/check', methods=['POST'])
+def check_draft():
+    report = profiles.check_profile(None, body())
+    return jsonify(success=True, **report)
+
+
+@provider_api.route('/api/provider-profiles/<profile_id>/check', methods=['POST'])
+def check_item(profile_id):
+    report = profiles.check_profile(profile_id, body())
+    return jsonify(success=True, **report)

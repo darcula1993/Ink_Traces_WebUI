@@ -23,7 +23,26 @@ export function freeNodePosition(document, node, start, { gap = GAP, columns = 1
     const point = { x: start.x + column * stepX, y: start.y + row * stepY }
     if (!blocked(point)) return point
   }
-  return { x: start.x, y: start.y }
+  const rightEdge = rects.length ? Math.max(...rects.map(rect => rect.x + rect.width)) + gap : start.x
+  return { x: Math.max(start.x, Math.round(rightEdge)), y: start.y }
+}
+
+// V2-REAL-USE F9: place a newly added asset node without overlapping any existing node OR node group.
+export function freeAssetNodePosition(document, nodes, candidate, origin, { target = false, gap = 24 } = {}) {
+  const size = nodeGeometry(candidate)
+  const rects = [
+    ...nodes.map(node => ({ x: node.x, y: node.y, ...nodeGeometry(node) })),
+    ...(document?.groups || []).map(group => groupBounds(group, nodes)).filter(Boolean),
+  ]
+  const findBlocker = (x, y) => rects.find(rect => intersects({ x: x - gap / 2, y: y - gap / 2, width: size.width + gap, height: size.height + gap }, rect))
+  let x = origin.x, y = origin.y
+  for (let guard = 0; guard < 600; guard++) {
+    const blocker = findBlocker(x, y)
+    if (!blocker) return { x, y }
+    if (target) y = blocker.y + blocker.height + gap
+    else x = blocker.x + blocker.width + gap
+  }
+  return freeNodePosition({ nodes, groups: document?.groups || [] }, candidate, { x, y }, { gap })
 }
 
 // FIX-B2-20261114 #3: a node added from the toolbar must land inside the visible area. Search free slots

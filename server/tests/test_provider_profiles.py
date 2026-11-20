@@ -215,3 +215,182 @@ def test_cupsy_asset_token_ttl_matches_signing_policy(client, ttl, accepted):
     else:
         assert '至少7200秒' in response.json['error']
         assert client.get('/api/provider-profiles').json['profiles'] == []
+
+
+def test_logical_delete_frees_name_preserves_history_and_isolates_sync(client):
+    first = create(client, name='可删除账号', is_default=True, api_key='test-key-first')
+    peer = create(client, name='同适配器留存账号', kind='video', adapter='ark', api_key='test-key-peer')
+    rev1_snapshot = profiles.load_profile(first['id'], 1)
+
+    # Extra or missing fields rejected with 400; stale/invalid revision rejected with 409.
+    assert client.delete(f"/api/provider-profiles/{first['id']}", json={}).status_code == 400
+    assert client.delete(f"/api/provider-profiles/{first['id']}", json={'revision': 1, 'extra': 1}).status_code == 400
+    for bad_rev in (0, -1, 2, True, '1'):
+        res = client.delete(f"/api/provider-profiles/{first['id']}", json={'revision': bad_rev})
+        assert res.status_code == 409 and '重新载入' in res.json['error']
+
+    # Valid logical delete.
+    deleted = client.delete(f"/api/provider-profiles/{first['id']}", json={'revision': 1})
+    assert deleted.status_code == 200
+    body = deleted.json
+    assert body['success'] is True and body['deleted'] is True
+    assert body['profile']['enabled'] is False
+    assert body['profile']['is_default'] is False
+    assert body['profile']['deleted'] is True
+    assert body['profile']['deleted_at']
+    assert body['profile']['name'] == '可删除账号'
+    assert body['profile']['has_api_key'] is False
+    assert 'test-key-first' not in deleted.get_data(as_text=True)
+
+    # Disappears from list; GET/PATCH/DELETE return 404; require_enabled returns 409.
+    listed_ids = [item['id'] for item in client.get('/api/provider-profiles').json['profiles']]
+    assert first['id'] not in listed_ids
+    assert client.get('/api/provider-profiles?kind=image').json['profiles'] == []
+    assert client.get(f"/api/provider-profiles/{first['id']}").status_code == 404
+    assert client.patch(f"/api/provider-profiles/{first['id']}", json={'revision': 2, 'name': '复活'}).status_code == 404
+    assert client.delete(f"/api/provider-profiles/{first['id']}", json={'revision': 2}).status_code == 404
+    with pytest.raises(profiles.ProfileError, match='停用') as exc_info:
+        profiles.load_profile(first['id'], kind='image', require_enabled=True)
+    assert exc_info.value.status == 409
+
+    # Immutable historical revision still loads for in-flight tasks/retries/Cupsy assets.
+    assert profiles.load_profile(first['id'], 1) == rev1_snapshot
+    tombstone = profiles.load_profile(first['id'], allow_deleted=True)
+    assert tombstone['revision'] == 2 and tombstone['api_key'] == '' and tombstone['deleted_at']
+
+    # Original (kind, name) and default slot are freed immediately.
+    recreated = create(client, name='可删除账号', is_default=True, api_key='test-key-recreated')
+    assert recreated['id'] != first['id'] and recreated['name'] == '可删除账号' and recreated['is_default'] is True
+
+    # Same-adapter API key sync must skip deleted profiles.
+    synced = client.patch(
+        f"/api/provider-profiles/{peer['id']}",
+        json={'revision': peer['revision'], 'api_key': 'test-key-synced', 'sync_adapter_api_key': True},
+    )
+    assert synced.status_code == 200
+    assert first['id'] not in synced.json['synced_profile_ids']
+    assert recreated['id'] in synced.json['synced_profile_ids']
+    tombstone_after = profiles.load_profile(first['id'], allow_deleted=True)
+    assert tombstone_after['revision'] == 2 and tombstone_after['api_key'] == ''
+
+
+def test_delete_system_default_profiles_no_reimport_no_fallback_and_custom_default(isolated_backend, monkeypatch):
+    import copy
+    import app as application
+    import canvas_submit
+    import config_v2
+    import profile_runtime
+
+    cfg = copy.deepcopy(config_v2.DEFAULTS)
+    cfg['providers']['byteplus']['api_key'] = 'cfg-ark-secret'
+    cfg['providers']['byteplus']['endpoint'] = 'https://ark.cfg.invalid/'
+    cfg['providers']['byteplus']['endpoint_ids']['seedance_2_5'] = 'ep-cfg-seedance25'
+    cfg['providers']['cupsy']['api_key'] = 'cfg-cupsy-secret'
+    cfg['providers']['cupsy']['endpoint'] = 'https://cupsy.cfg.invalid/'
+    cfg['generation']['image']['byteplus']['model'] = 'dola-seedream-5-5-261028'
+    cfg['generation']['video']['byteplus']['model'] = 'ep-cfg-v20'
+
+    # Give fallback configs real-looking keys to prove deleting config:* NEVER falls back to config.json.
+    monkeypatch.setitem(application.API_PROVIDERS, 'ark', profile_runtime.ProfileConfig(
+        {'api_key': 'fallback-ark-key', 'endpoint': 'https://fallback-ark.invalid', 'model': 'seedream-5-0-pro'},
+        'ark', kind='image',
+    ))
+    monkeypatch.setattr(application, 'ARK_VIDEO_CONFIG', profile_runtime.ProfileConfig(
+        {'api_key': 'fallback-ark-key', 'endpoint': 'https://fallback-ark.invalid',
+         'model': 'ep-fallback', 'seedance_2_5_model': 'ep-fallback-25'},
+        'ark', kind='video',
+    ))
+    monkeypatch.setitem(application.config['providers']['byteplus']['endpoint_ids'], 'seedance_2_5', 'ep-fallback-25')
+
+    profiles.sync_config_profiles(cfg)
+    app_client = application.app.test_client()
+    by_key = {p['source_key']: p for p in profiles.list_profiles() if p.get('source_key')}
+    img_ark = by_key['config:image:ark']
+    vid_ark = by_key['config:video:ark']
+
+    assert app_client.get('/api/provider').get_json()['providers']['ark']['available'] is True
+    assert app_client.get('/api/video/provider').get_json()['providers']['ark']['available'] is True
+    assert app_client.get('/api/video/provider').get_json()['providers']['ark']['seedance_2_5_configured'] is True
+
+    # Delete both config:image:ark and config:video:ark.
+    for target in (img_ark, vid_ark):
+        res = app_client.delete(f"/api/provider-profiles/{target['id']}", json={'revision': target['revision']})
+        assert res.status_code == 200
+        assert res.json['deleted'] is True and res.json['profile']['deleted'] is True
+        # Historical revision remains readable for in-flight tasks/retries.
+        assert profiles.load_profile(target['id'], 1)['api_key'] == 'cfg-ark-secret'
+
+    # Restart / sync_config_profiles must NEVER re-import deleted config:* rows.
+    assert profiles.sync_config_profiles(cfg) == []
+    remaining_keys = {p['source_key'] for p in profiles.list_profiles() if p.get('source_key')}
+    assert 'config:image:ark' not in remaining_keys and 'config:video:ark' not in remaining_keys
+
+    # Runtime endpoints must NOT fall back to config.json; both Ark endpoints become unavailable.
+    img_info = app_client.get('/api/provider').get_json()
+    vid_info = app_client.get('/api/video/provider').get_json()
+    assert img_info['providers']['ark']['available'] is False
+    assert img_info['providers']['ark']['managed_by_profiles'] is True
+    assert vid_info['providers']['ark']['available'] is False
+    assert vid_info['providers']['ark']['seedance_2_5_configured'] is False
+    assert vid_info['providers']['ark']['managed_by_profiles'] is True
+    assert application.deployment_seedance_25_endpoint() == ''
+    with application.app.test_request_context():
+        caps = canvas_submit.live_capabilities()
+        assert all(o['provider'] != 'ark' for o in caps['image'])
+        assert all(o['provider'] != 'ark' for o in caps['video'])
+
+    # User can immediately recreate profiles with the exact same names and set them as default.
+    new_img = app_client.post('/api/provider-profiles', json={
+        'name': img_ark['name'], 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'is_default': True,
+        'settings': {'endpoint': 'https://custom-ark.invalid', 'model': 'dola-seedream-5-5-261028'},
+        'api_key': 'test-key-custom-img',
+    })
+    assert new_img.status_code == 201
+    new_vid = app_client.post('/api/provider-profiles', json={
+        'name': vid_ark['name'], 'kind': 'video', 'adapter': 'ark', 'enabled': True, 'is_default': True,
+        'settings': {'endpoint': 'https://custom-ark.invalid', 'model': 'ep-custom-v20', 'seedance_2_5_model': 'ep-custom-25'},
+        'api_key': 'test-key-custom-vid',
+    })
+    assert new_vid.status_code == 201
+
+    assert application.API_PROVIDERS['ark']['api_key'] == 'test-key-custom-img'
+    assert app_client.get('/api/provider').get_json()['providers']['ark']['available'] is True
+    vid_info2 = app_client.get('/api/video/provider').get_json()
+    assert vid_info2['providers']['ark']['available'] is True
+    assert vid_info2['providers']['ark']['seedance_2_5_configured'] is True
+    assert application.deployment_seedance_25_endpoint() == 'ep-custom-25'
+    # Canvas capabilities show ONLY the user's custom profiles and NEVER resurrect "（原配置）".
+    with application.app.test_request_context():
+        caps2 = canvas_submit.live_capabilities()
+        img_arks = [o for o in caps2['image'] if o['provider'] == 'ark']
+        vid_arks = [o for o in caps2['video'] if o['provider'] == 'ark']
+        assert [o['id'] for o in img_arks] == [f"profile:{new_img.json['profile']['id']}"]
+        assert [o['id'] for o in vid_arks] == [f"profile:{new_vid.json['profile']['id']}"]
+
+
+def test_init_profiles_db_adds_deleted_at_to_legacy_table(client):
+    import tasks as task_db
+    db = task_db.get_db()
+    db.executescript('''
+        DROP TABLE IF EXISTS provider_profile_revisions;
+        DROP TABLE IF EXISTS provider_profiles;
+        CREATE TABLE provider_profiles (
+            id TEXT PRIMARY KEY, revision INTEGER NOT NULL, kind TEXT NOT NULL,
+            adapter TEXT NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL,
+            is_default INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            source_key TEXT,
+            UNIQUE(kind, name)
+        );
+        CREATE TABLE provider_profile_revisions (
+            profile_id TEXT NOT NULL, revision INTEGER NOT NULL, private_document TEXT NOT NULL,
+            PRIMARY KEY(profile_id, revision),
+            FOREIGN KEY(profile_id) REFERENCES provider_profiles(id) ON DELETE RESTRICT
+        );
+    ''')
+    db.commit()
+    profiles.init_profiles_db()
+    cols = {row['name'] for row in db.execute('PRAGMA table_info(provider_profiles)').fetchall()}
+    assert 'deleted_at' in cols
+    created = create(client, name='旧库迁移测试')
+    assert client.delete(f"/api/provider-profiles/{created['id']}", json={'revision': 1}).status_code == 200
+    assert profiles.load_profile(created['id'], 1)['name'] == '旧库迁移测试'

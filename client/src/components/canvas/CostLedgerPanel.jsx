@@ -1,7 +1,9 @@
-import React,{useEffect,useRef,useState} from 'react'
+import React,{useEffect,useMemo,useRef,useState} from 'react'
 import {createPortal} from 'react-dom'
 import {X,RefreshCw} from 'lucide-react'
 import {fetchCostLedger,describeBucket,describeNotBilled,ledgerTaskAmount,taskTime,placeIndex,taskPlace,NOT_BILLED_BUCKETS,basisLabel,typeLabel,BUCKET_ORDER,BUCKET_LABELS,LEDGER_DISCLAIMER,UNASSIGNED_PROJECT,REASON_LABELS,taskAmount,basisTitle} from '../../lib/costLedger'
+import {requestTaskCenter,TASK_CENTER_MODES} from '../../lib/taskCenterLink'
+import Select from '../ui/Select'
 import './costLedger.css'
 
 const VIEWS=[['canvas','按画布'],['type','按类型'],['date','按日期'],['tasks','明细']]
@@ -37,10 +39,21 @@ export default function CostLedgerPanel({projectId,projectTitle,workflowId,workf
  const keys=event=>{event.stopPropagation();if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s')event.preventDefault();if(event.key==='Escape'){event.preventDefault();onClose()}if(event.key==='Tab'){const items=[...ref.current.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled)')];if(!items.length)return;if(event.shiftKey&&[ref.current,items[0]].includes(document.activeElement)){event.preventDefault();items.at(-1).focus()}else if(!event.shiftKey&&document.activeElement===items.at(-1)){event.preventDefault();items[0].focus()}}}
  const data=state.data,totals=data?.totals
  const main=describeBucket(totals?.billable),places=placeIndex(data)
+ const scopeOptions=useMemo(()=>[
+  ...(projectId?[{value:'project',label:`本项目${projectTitle?`：${projectTitle}`:''}`}]:[]),
+  ...(workflowId?[{value:'workflow',label:`当前画布${workflowTitle?`：${workflowTitle}`:''}`}]:[]),
+  {value:'unassigned',label:'未归属项目（旧工具任务）'},
+  {value:'all',label:'全部任务'},
+ ],[projectId,projectTitle,workflowId,workflowTitle])
+ const openLedgerTask=task=>{
+  if(!TASK_CENTER_MODES.includes(task?.type))return
+  onClose?.()
+  requestTaskCenter({taskId:task.id,type:task.type})
+ }
  return createPortal(<div className="cv-ledger-backdrop"><section className="cv-ledger" role="dialog" aria-modal="true" aria-labelledby="cv-ledger-title" aria-describedby="cv-ledger-note" ref={ref} tabIndex={-1} onKeyDown={keys}>
   <header className="cv-ledger-header"><div><h1 id="cv-ledger-title">费用账本</h1><p id="cv-ledger-note" className="cv-ledger-note" data-testid="cost-ledger-disclaimer"><strong>{LEDGER_DISCLAIMER}</strong>。图像、图层、视频按 BytePlus 价格表估算（Cupsy 同价）；音频暂无价格资料，记为“未知”（不当作零），未知不计入合计。</p></div><button className="btn btn-icon btn-outlined btn-lg" aria-label="关闭费用账本" title="关闭" onClick={onClose}><X size={18}/></button></header>
   <div className="cv-ledger-filters">
-   <label>范围<select aria-label="统计范围" value={scope} onChange={e=>setScope(e.target.value)}>{projectId&&<option value="project">本项目{projectTitle?`：${projectTitle}`:''}</option>}{workflowId&&<option value="workflow">当前画布{workflowTitle?`：${workflowTitle}`:''}</option>}<option value="unassigned">未归属项目（旧工具任务）</option><option value="all">全部任务</option></select></label>
+   <label>范围<Select ariaLabel="统计范围" className="cv-ledger-scope-select" value={scope} onChange={setScope} options={scopeOptions}/></label>
    <label>开始日期<input type="date" aria-label="开始日期" value={from} max={to||undefined} onChange={e=>setFrom(e.target.value)}/></label>
    <label>结束日期<input type="date" aria-label="结束日期" value={to} min={from||undefined} onChange={e=>setTo(e.target.value)}/></label>
    <button className="btn btn-outlined btn-sm" onClick={()=>setReload(n=>n+1)} disabled={state.loading} aria-label="刷新费用"><RefreshCw size={14}/>刷新</button>
@@ -59,7 +72,7 @@ export default function CostLedgerPanel({projectId,projectTitle,workflowId,workf
     {data.tasks_total>0&&view==='canvas'&&<GroupTable caption="按项目、画布、节点分组">{data.projects.flatMap(p=>[<Row key={p.id} name={p.title} totals={p.totals} meta={p.deleted?'已删除':''}/>,...p.workflows.flatMap(w=>[<Row key={`${p.id}/${w.id}`} level={1} name={w.title} totals={w.totals} meta={w.deleted?'已删除':''}/>,...w.nodes.map(n=><Row key={`${w.id}/${n.node_id||''}`} level={2} name={n.node_id?(n.title||`${typeLabel(n.type)}节点`):'节点未知'} totals={n.totals} meta={`${typeLabel(n.type)}${n.missing?' · 已移除':''}`}/>)])])}</GroupTable>}
     {data.tasks_total>0&&view==='type'&&<GroupTable caption="按任务类型分组">{data.types.map(t=><Row key={t.type} name={typeLabel(t.type)} totals={t.totals}/>)}</GroupTable>}
     {data.tasks_total>0&&view==='date'&&<GroupTable caption="按日期分组">{data.dates.map(d=><Row key={d.date} name={d.date} totals={d.totals}/>)}</GroupTable>}
-    {data.tasks_total>0&&view==='tasks'&&<div className="cv-ledger-table-wrap"><table className="cv-ledger-table is-tasks"><caption className="cv-ledger-sr">任务明细</caption><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">项目 / 画布</th><th scope="col">接口 / 模型</th><th scope="col">状态</th><th scope="col">估算</th><th scope="col">提交时间</th></tr></thead><tbody>{data.tasks.map(t=><tr key={t.id} data-task-id={t.id}><th scope="row">#{t.id}</th><td>{typeLabel(t.type)}</td><td><span className="cv-ledger-place" title={taskPlace(t,places)}>{taskPlace(t,places)}</span></td><td>{[t.provider,t.model].filter(Boolean).join(' / ')||'—'}</td><td><span className={`cv-ledger-status is-${t.bucket}`} title={BUCKET_LABELS[t.bucket]}>{STATUS_LABELS[t.status]||t.status}{t.bucket==='result_unknown'?' · 结果未知':''}</span></td><td><span className={NOT_BILLED_BUCKETS.includes(t.bucket)?'cv-ledger-muted':t.estimate_usd?'':'cv-ledger-unknown'}>{ledgerTaskAmount(t)}</span>{basisLabel(t)&&<span className="cv-ledger-tag" title={basisTitle(t)||undefined}>{basisLabel(t)}</span>}</td><td><time dateTime={t.created_at||t.date}>{taskTime(t)}</time></td></tr>)}</tbody></table>{data.tasks_truncated&&<p className="cv-ledger-muted">仅显示最近 {data.tasks.length} 条，合计覆盖全部 {data.tasks_total} 条。</p>}</div>}
+    {data.tasks_total>0&&view==='tasks'&&<div className="cv-ledger-table-wrap"><table className="cv-ledger-table is-tasks"><caption className="cv-ledger-sr">任务明细</caption><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">项目 / 画布</th><th scope="col">接口 / 模型</th><th scope="col">状态</th><th scope="col">估算</th><th scope="col">提交时间</th></tr></thead><tbody>{data.tasks.map(t=><tr key={t.id} data-task-id={t.id}><th scope="row">{TASK_CENTER_MODES.includes(t.type)?<button type="button" className="cv-ledger-task-link" data-testid={`ledger-task-link-${t.id}`} aria-label={`在${typeLabel(t.type)}任务中心查看任务 #${t.id}`} title={`跳转到${typeLabel(t.type)}任务中心查看 #${t.id}`} onClick={()=>openLedgerTask(t)}>#{t.id}</button>:`#${t.id}`}</th><td>{typeLabel(t.type)}</td><td><span className="cv-ledger-place" title={taskPlace(t,places)}>{taskPlace(t,places)}</span></td><td>{[t.provider,t.model].filter(Boolean).join(' / ')||'—'}</td><td><span className={`cv-ledger-status is-${t.bucket}`} title={BUCKET_LABELS[t.bucket]}>{STATUS_LABELS[t.status]||t.status}{t.bucket==='result_unknown'?' · 结果未知':''}</span></td><td><span className={NOT_BILLED_BUCKETS.includes(t.bucket)?'cv-ledger-muted':t.estimate_usd?'':'cv-ledger-unknown'}>{ledgerTaskAmount(t)}</span>{basisLabel(t)&&<span className="cv-ledger-tag" title={basisTitle(t)||undefined}>{basisLabel(t)}</span>}</td><td><time dateTime={t.created_at||t.date}>{taskTime(t)}</time></td></tr>)}</tbody></table>{data.tasks_truncated&&<p className="cv-ledger-muted">仅显示最近 {data.tasks.length} 条，合计覆盖全部 {data.tasks_total} 条。</p>}</div>}
    </div>
   </>}
  </section></div>,document.body)

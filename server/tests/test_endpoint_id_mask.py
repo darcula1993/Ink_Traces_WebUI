@@ -134,12 +134,16 @@ def test_async_poll_failures_are_masked(billing_env, monkeypatch, provider, kind
 
 def test_legacy_task_rows_are_masked_on_output_only():
     task_id = task_db.create_task('video', 'legacy', {'model': 'seedance'})
-    task_db.fail_task(task_id, f'{ARK_404} {SIGNED}', {'error_details': {'message': ARK_404}})
+    task_db.fail_task(task_id, 'placeholder', {'error_details': {'message': ARK_404}})
+    # Simulate a legacy DB row written before fail_task began masking ep- IDs at persistence.
+    raw_error = f'{ARK_404} {SIGNED}'
+    task_db.get_db().execute('UPDATE tasks SET error = ? WHERE id = ?', (raw_error, task_id))
+    task_db.get_db().commit()
     detail, status = _public_views(task_id, 'video')
     assert detail['error'].startswith('The model or endpoint ep-*** does not exist')
     assert detail['result']['error_details']['message'] == ARK_404.replace(FAKE_EP, 'ep-***')
     assert status['error'] == detail['error']
-    assert FAKE_EP in task_db.get_task(task_id)['error']  # database not rewritten
+    assert FAKE_EP in task_db.get_task(task_id)['error']  # legacy row not rewritten on read
 
 
 def _canvas_with_task(monkeypatch, tmp_path, task_error):

@@ -8,7 +8,7 @@
 .canvas-studio .cv-properties.is-collapsed .btn { width: 20px; height: 24px; padding: 0; }
 .canvas-studio .cv-properties-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
 .canvas-studio .cv-properties-resize:hover, .canvas-studio .cv-properties-resize:focus-visible, .canvas-studio .cv-properties.is-resizing .cv-properties-resize { background: var(--accent-soft); outline: none; }
-.canvas-studio .cv-properties-head { display: flex; align-items: center; gap: 6px; min-height: 48px; padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--cv-border); flex: 0 0 auto; }
+.canvas-studio .cv-properties-head { display: flex; align-items: center; gap: 6px; height: 44px; min-height: 44px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--cv-border); flex: 0 0 auto; }
 .canvas-studio .cv-properties-head .cv-panel-title { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--cv-text); font-size: 14px; font-weight: 600; }
 .canvas-studio .cv-properties-head .cv-panel-title:hover { border-color: var(--cv-border); }
 .canvas-studio .cv-properties-head .cv-panel-title:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: var(--ring-focus); }
@@ -30,15 +30,20 @@
 .canvas-studio .cv-prop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .canvas-studio .cv-prop-actions .btn { display: inline-flex; align-items: center; gap: 4px; }
 .canvas-studio .cv-prop-hint { margin: 8px 0 0; font-size: 12px; color: var(--text-2); }
-.canvas-studio .cv-prop-stats { margin: 8px 0 0; display: grid; gap: 4px; }
-.canvas-studio .cv-prop-stats > div, .canvas-studio dl.cv-prop-stats > div { display: flex; justify-content: space-between; gap: 8px; }
+.canvas-studio .cv-prop-stats { margin: 12px 0 0; padding: 10px 12px; display: grid; gap: 6px; border: 1px solid var(--cv-border); border-radius: var(--r-md); background: var(--field); }
+.canvas-studio .cv-prop-stats > div, .canvas-studio dl.cv-prop-stats > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; line-height: 20px; }
 .canvas-studio .cv-prop-stats dt { color: var(--text-2); }
 .canvas-studio .cv-prop-stats dd { margin: 0; font-variant-numeric: tabular-nums; }
+.canvas-studio .cv-prop-stats + .cv-prop-actions { margin-top: 10px; }
 .canvas-studio .cv-prop-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .canvas-studio .cv-prop-list li { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; min-width: 0; }
 .canvas-studio .cv-prop-list li span { color: var(--text-2); text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .canvas-studio .cv-prop-link { border: 0; background: transparent; color: var(--cv-text); padding: 0; min-height: 0; text-decoration: underline; text-decoration-color: var(--cv-border-strong); text-underline-offset: 2px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-studio .cv-prop-link:focus-visible { outline: none; box-shadow: var(--ring-focus); border-radius: 4px; }
+.canvas-studio .cv-properties .cv-task-active { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--cv-border); border-radius: 6px; background: var(--surface-2, rgba(255, 255, 255, .03)); }
+.canvas-studio .cv-properties .cv-task-active-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.canvas-studio .cv-properties .cv-task-active-meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.canvas-studio .cv-properties .cv-task-active-note { margin: 0; font-size: 12px; color: var(--text-2); }
 .canvas-studio .cv-properties .cv-task-failure { display: flex; flex-direction: column; gap: 4px; }
 .canvas-studio .cv-properties .cv-task-failure p { margin: 0; overflow-wrap: anywhere; }
 .canvas-studio .cv-properties .cv-task-failure-actions { display: flex; flex-wrap: wrap; gap: 6px; }

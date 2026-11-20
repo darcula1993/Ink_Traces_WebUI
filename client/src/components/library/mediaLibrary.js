@@ -12,13 +12,83 @@ export const FOLDER_ICONS={folder:'文件夹',music:'音效',character:'角色',
 export const isSystemFolder=folder=>!!folder?.system_key
 export const GENERATED='generated'
 export const generatedKindKey=kind=>`generated_${kind}`
+export const LIBRARY_MEDIA_DRAG='application/x-ink-library-move'
 
-// Children map keyed by parent id ('' = root); order follows the server (system first, then creation).
-export function folderChildren(folders){const map=new Map();for(const f of folders){const key=f.parent_id||'';if(!map.has(key))map.set(key,[]);map.get(key).push(f)}return map}
+export const MEDIA_SORT_OPTIONS=[
+ {value:'newest',label:'时间：最新优先'},
+ {value:'oldest',label:'时间：最早优先'},
+ {value:'name_asc',label:'名称：A–Z'},
+ {value:'name_desc',label:'名称：Z–A'},
+ {value:'size_desc',label:'大小：从大到小'},
+ {value:'size_asc',label:'大小：从小到大'},
+]
+
+export function formatMediaDimensions(asset){
+ const w=Number(asset?.width),h=Number(asset?.height)
+ return Number.isInteger(w)&&w>0&&Number.isInteger(h)&&h>0?`${w}×${h}`:''
+}
+
+export function formatMediaDuration(seconds){
+ const value=Number(seconds)
+ if(!Number.isFinite(value)||value<=0)return ''
+ if(value<60){
+  const rounded=value<10?Number(value.toFixed(1)):Math.round(value)
+  return `${rounded}s`
+ }
+ const total=Math.round(value),mins=Math.floor(total/60),secs=total%60
+ return `${mins}:${String(secs).padStart(2,'0')}`
+}
+
+export function formatFileSize(bytes){
+ const n=Number(bytes)
+ if(!Number.isFinite(n)||n<0)return ''
+ if(n<1024)return `${Math.round(n)} B`
+ if(n<1024*1024)return `${(n/1024).toFixed(n<10*1024?1:0)} KB`
+ if(n<1024*1024*1024)return `${(n/(1024*1024)).toFixed(n<10*1024*1024?1:0)} MB`
+ return `${(n/(1024*1024*1024)).toFixed(2)} GB`
+}
+
+export function formatMediaSpec(asset){
+ if(!asset)return ''
+ const dims=asset.kind==='image'||asset.kind==='video'?formatMediaDimensions(asset):''
+ const dur=asset.kind==='video'||asset.kind==='audio'?formatMediaDuration(asset.duration_seconds):''
+ return [dims,dur].filter(Boolean).join(' · ')
+}
+
+// P1-TASK-LIBRARY-FLOW-20261120: drag-to-folder transfer plan enforcing 2026-11-19 lifecycle rules.
+export function validateDragDrop(folders,items,targetFolder){
+ if(!Array.isArray(items)||!items.length)return {allowed:false,code:'empty',message:'没有可移动的素材'}
+ if(targetFolder?.system_key){
+  return {allowed:false,code:'folder_generated_only',message:'生成历史只接收新生成的结果，上传素材不可移入生成历史'}
+ }
+ const targetId=targetFolder?targetFolder.id:null
+ const targetName=targetFolder?targetFolder.title:'根目录'
+ const movable=items.filter(item=>(mediaFolderId(item)||null)!==targetId)
+ if(!movable.length){
+  return {allowed:true,noop:true,targetId,targetName,message:`所选素材已在「${targetName}」中`}
+ }
+ const mode=transferMode(folders,movable)
+ return {allowed:true,noop:false,mode,items:movable,targetId,targetName}
+}
+
+export function formatDragDropNotice(plan,moved=[]){
+ const sourceIds=new Set((plan.items||[]).map(item=>item.id))
+ const copied=moved.filter(item=>!sourceIds.has(item.id)).length
+ if(plan.mode==='copy'||(moved.length>0&&copied===moved.length)){
+  return `已复制到「${plan.targetName}」（生成历史原项保留）`
+ }
+ if(copied>0){
+  return `已整理 ${moved.length} 项到「${plan.targetName}」（其中 ${copied} 项生成结果为复制，生成历史原项保留）`
+ }
+ return `已移动到「${plan.targetName}」`
+}
+
+// Children map keyed by parent id ('' = root); orphans (missing parent) attach to root; order follows the server (system first, then creation).
+export function folderChildren(folders){const ids=new Set(folders.map(f=>f.id)),map=new Map();for(const f of folders){const key=f.parent_id&&ids.has(f.parent_id)?f.parent_id:'';if(!map.has(key))map.set(key,[]);map.get(key).push(f)}return map}
 export function folderPath(folders,id){const byId=new Map(folders.map(f=>[f.id,f])),path=[],seen=new Set();let current=byId.get(id);while(current&&!seen.has(current.id)){seen.add(current.id);path.unshift(current);current=byId.get(current.parent_id)}return path}
 export function descendants(folders,id){const children=folderChildren(folders),out=new Set(),stack=[id];while(stack.length){for(const c of children.get(stack.pop())||[])if(!out.has(c.id)){out.add(c.id);stack.push(c.id)}}return out}
-// Depth-first list with depth, for indented pickers.
-export function flattenFolders(folders,{filter=()=>true}={}){const children=folderChildren(folders),out=[],walk=(parent,depth)=>{for(const f of children.get(parent)||[]){if(!filter(f))continue;out.push({...f,depth});walk(f.id,depth+1)}};walk('',0);return out}
+// Depth-first list with depth, for indented pickers (stable hierarchy order, cycle-safe).
+export function flattenFolders(folders,{filter=()=>true}={}){const children=folderChildren(folders),out=[],seen=new Set(),walk=(parent,depth)=>{for(const f of children.get(parent)||[]){if(seen.has(f.id)||!filter(f))continue;seen.add(f.id);out.push({...f,depth});walk(f.id,depth+1)}};walk('',0);return out}
 // Count shown beside a folder: its own items, plus the subfolders for the locked “生成历史”.
 export function folderCount(folders,folder){if(folder.system_key!==GENERATED)return folder.media_count||0;return (folder.media_count||0)+folders.filter(f=>f.parent_id===folder.id).reduce((n,f)=>n+(f.media_count||0),0)}
 
@@ -36,9 +106,10 @@ export function moveFolderOptions(folders,kinds){
  if(unique.length===1){const system=folders.find(f=>f.system_key===generatedKindKey(unique[0]));if(system)options.push({value:system.id,label:`${folderPathLabel(folders,system.id)}（只接收新生成的结果）`,disabled:true})}
  return options
 }
-// GEN-RESULT-LIFECYCLE-20261119: items of “生成历史” are copied, other items moved.
+// GEN-RESULT-LIFECYCLE-20261119: items of “生成历史” (or task results whose folder is unknown) are copied, other items moved.
 export const generatedFolderIds=folders=>new Set(folders.filter(f=>f.system_key?.startsWith(GENERATED+'_')).map(f=>f.id))
-export function transferMode(folders,media){const gen=generatedFolderIds(folders),n=media.filter(m=>gen.has(m.folder_id)).length;return !n?'move':n===media.length?'copy':'mixed'}
+export const mediaFolderId=item=>item&&('folder_id' in item?item.folder_id:item.folderId)
+export function transferMode(folders,media){const gen=generatedFolderIds(folders),n=media.filter(m=>{const fid=mediaFolderId(m);return fid===undefined||gen.has(fid)}).length;return !n?'move':n===media.length?'copy':'mixed'}
 export const TRANSFER_TITLES={move:'移动到文件夹',copy:'复制到文件夹',mixed:'移动/复制到文件夹'}
 export const transferLabel=(folders,media)=>TRANSFER_TITLES[transferMode(folders,media)]
 // Client-side mirror of the server folder-name rules (E3, new folders and renames only): no “/”, unique among siblings
@@ -54,8 +125,8 @@ export function folderNameIssue(folders,title,parentId,selfId=null){
 // Chinese text for library API errors: the server message when present, else a fallback by error code.
 const ERROR_CODES={folder_generated_only:'生成历史只接收生成结果，上传素材不能移入',folder_target_invalid:'生成历史下的图片/视频/音频只接收对应类型的生成结果',folder_name_conflict:'同一位置已有同名文件夹',invalid_name:'名称无效',folder_cycle:'文件夹不能移动到自身或子文件夹中',folder_not_empty:'文件夹非空，请先移出素材和子文件夹'}
 export function libraryErrorText(e,fallback='操作失败'){const data=e?.response?.data;if(data?.error)return data.error;if(data?.code&&ERROR_CODES[data.code])return ERROR_CODES[data.code];if(e?.response?.status===409)return fallback;return e?.message||fallback}
-// The folder every item is in now ('' = root); null when they are in different folders (V2-FIX F7).
-export function currentFolderOf(media){const own=[...new Set(media.map(m=>m.folder_id||''))];return own.length===1?own[0]:null}
+// The folder every item is in now ('' = root); null when they are in different folders or unknown (V2-FIX F7).
+export function currentFolderOf(media){if(!media.length||media.some(m=>mediaFolderId(m)===undefined))return null;const own=[...new Set(media.map(m=>mediaFolderId(m)||''))];return own.length===1?own[0]:null}
 // Where an upload lands when started from the current view: the current user folder, otherwise root.
 export function uploadTargetFor(folders,place){const folder=folders.find(f=>f.id===place);return folder&&!folder.system_key?folder.id:''}
 // List filters for a navigation place: 'all' | 'root' | folder id. “生成历史” lists its three subfolders flat.

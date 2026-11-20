@@ -25,20 +25,36 @@ _SIGNED_QUERY = re.compile(
     r'\?[^\s\'"<>]*(?:signature|credential|token|x-tos-|x-amz-|expires|sig=|key=)[^\s\'"<>]*',
     re.IGNORECASE,
 )
-# EP-MASK-20261115: Ark/BytePlus endpoint (接入点) IDs such as
-# ``ep-<14 digit timestamp>-<suffix>`` (and the ``ep-m-`` model-endpoint form)
-# echo back in Provider error texts.  They identify the account's deployment and
-# are reduced to ``ep-***``.  Requiring 8+ digits keeps words like "step-2" or a
-# prompt's "ep-1" untouched.
-_ENDPOINT_ID = re.compile(r'(?<![A-Za-z0-9_-])ep-(?:m-)?[0-9]{8,}-[A-Za-z0-9]+', re.IGNORECASE)
+# EP-MASK-20261115 / P1-PROVIDER-CARDS-20261120: Ark/BytePlus endpoint (接入点) IDs
+# such as ``ep-<14 digit timestamp>-<suffix>`` (and ``ep-m-``) echo back in Provider
+# error texts, sometimes prefixed with ``_`` / ``-`` or percent-encoded in URLs/logs.
+# Requiring 8+ digits keeps words like "step-2", "ep-1", "deep-20990101000000-abc"
+# untouched while masking plain, ``_ep-``, ``-ep-``, and URL-encoded forms.
+_PCT_DELIM = r'%(?:2[0-9A-Fa-f]|3[AaBbCcDdEeFf]|40|5[BbCcDdEeFf]|60|7[BbCcDdEe])'
+_EP_E = r'(?:[eE]|%(?:65|45))'
+_EP_P = r'(?:[pP]|%(?:70|50))'
+_EP_DASH = r'(?:-|%(?:2[dD]))'
+_EP_M = r'(?:[mM]|%(?:6[dD]|4[dD]))'
+_ENDPOINT_BODY = rf'{_EP_E}{_EP_P}{_EP_DASH}(?:{_EP_M}{_EP_DASH})?[0-9]{{8,}}{_EP_DASH}[A-Za-z0-9]+'
+_ENDPOINT_ID = re.compile(
+    rf'(?P<delim>{_PCT_DELIM})(?P<id>{_ENDPOINT_BODY})|(?<![A-Za-z0-9])(?P<bare>{_ENDPOINT_BODY})'
+)
 ENDPOINT_MASK = 'ep-***'
 
 
+def _replace_endpoint_id(match):
+    delim = match.group('delim')
+    return f'{delim}{ENDPOINT_MASK}' if delim else ENDPOINT_MASK
+
+
 def mask_endpoint_ids(value):
-    """Replace Ark endpoint IDs in a string; non-strings are returned unchanged."""
-    if not isinstance(value, str) or 'ep-' not in value.lower():
+    """Replace Ark endpoint IDs (plain, _/- prefixed, or URL-encoded); non-strings stay unchanged."""
+    if not isinstance(value, str):
         return value
-    return _ENDPOINT_ID.sub(ENDPOINT_MASK, value)
+    lower = value.lower()
+    if 'ep' not in lower and '%65' not in lower and '%45' not in lower and '%70' not in lower and '%50' not in lower:
+        return value
+    return _ENDPOINT_ID.sub(_replace_endpoint_id, value)
 
 
 def mask_url(value):
@@ -71,7 +87,7 @@ def _mask_tree(value):
         return [_mask_tree(item) for item in value]
     if isinstance(value, str):
         if re.match(r'https?://', value, re.IGNORECASE):
-            return mask_url(value)
+            return mask_endpoint_ids(mask_url(value))
         # Text fields (e.g. error_details.message) may embed a remote address
         # or an Ark endpoint ID.
         return mask_endpoint_ids(_URL_IN_TEXT.sub(lambda match: mask_url(match.group(0)), value))

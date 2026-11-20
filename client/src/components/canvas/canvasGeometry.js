@@ -6,6 +6,8 @@ export const NODE_PORT_Y = 120
 export const LOCATE_ZOOM = 1
 export const FIT_MIN_ZOOM = .2
 export const LOD_ZOOM = 10/12
+// V2-REAL-USE D2: below 60% zoom, hide non-essential node bottom-bar controls so titles and previews stay legible.
+export const COMPACT_ZOOM = .6
 // UI-ITER-R2A #2: image/video nodes take the shape of their media. The media box follows the measured
 // result aspect (runtime cache), else the selected output ratio, within per-kind bounds; text keeps the
 // legacy 290×240 card. Derived only from the node, so old documents need no migration.
@@ -76,6 +78,11 @@ export function scaleForSize(node,width,height){
 // node only keeps the node itself inside the visible surface (above the bottom tool bar); no room is reserved
 // for a panel any more. Locating (center) frames the node at a readable 100% (or less when it does not fit).
 export const SURFACE_BOTTOM_BAR=72
+export function sameViewport(a,b) {
+ if(a===b)return true
+ if(!a||!b)return false
+ return Math.abs((a.x??0)-(b.x??0))<1e-4&&Math.abs((a.y??0)-(b.y??0))<1e-4&&Math.abs((a.zoom??1)-(b.zoom??1))<1e-6
+}
 export function nodeEditorViewport(node,view,size,center=false) {
  // Same framing as before minus the reserved panel: locating an asset centres it at 100% in the whole surface;
  // everything else stays above the bottom bars and only zooms out when the node itself does not fit.
@@ -85,7 +92,8 @@ export function nodeEditorViewport(node,view,size,center=false) {
  const width=geometry.width*zoom,height=geometry.height*zoom
  let left=node.x*zoom+view.x,top=node.y*zoom+view.y
  if(center){left=(size.width-width)/2;top=(size.height-bottom-height)/2}else{left=Math.max(margin,Math.min(size.width-margin-width,left));top=Math.max(margin,Math.min(size.height-bottom-height,top))}
- return {...view,zoom,x:left-node.x*zoom,y:top-node.y*zoom}
+ const next={...view,zoom,x:left-node.x*zoom,y:top-node.y*zoom}
+ return sameViewport(view,next)?view:next
 }
 export function overlapsNode(position,node,padding=20) {
  const a=nodeGeometry(position),b=nodeGeometry(node)

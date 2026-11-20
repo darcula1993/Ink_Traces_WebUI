@@ -36,7 +36,7 @@ from canvas_api import canvas_api
 from canvas_store import init_canvas_db
 import profile_runtime
 import config_v2
-from provider_profiles import init_profiles_db
+from provider_profiles import init_profiles_db, sync_config_profiles
 from provider_api import provider_api
 
 configure_logging()
@@ -190,6 +190,7 @@ def get_cors_origins(cfg):
     return origins
 
 config = load_config()
+sync_config_profiles(config)
 from media_library import recover_staged_deletes
 recover_staged_deletes()
 CORS(app, supports_credentials=True, origins=get_cors_origins(config))
@@ -281,7 +282,7 @@ API_PROVIDERS = {
     'cupsy': config_v2.image_cupsy(config),
     'ark': config_v2.image_byteplus(config),
 }
-API_PROVIDERS = {key: profile_runtime.ProfileConfig(value, key) for key, value in API_PROVIDERS.items()}
+API_PROVIDERS = {key: profile_runtime.ProfileConfig(value, key, kind='image') for key, value in API_PROVIDERS.items()}
 UNSUPPORTED_RETRY_ERROR = '该任务使用的接入不受支持，请改选 BytePlus 或 Cupsy 后重新生成'
 CURRENT_PROVIDER = 'cupsy' if config['generation']['image']['default'] == 'cupsy' else 'ark'
 
@@ -309,7 +310,11 @@ def get_layer_provider_config():
 
 def get_provider_key(provider, provider_config):
     if provider == 'cupsy':
-        return _cupsy_settings()['api_key']
+        if profile_runtime.current_profile() is not None or (
+            isinstance(provider_config, profile_runtime.ProfileConfig) and provider_config.has_db_source()
+        ):
+            return provider_config.get('api_key', '')
+        return provider_config.get('api_key', '') or _cupsy_settings()['api_key']
     return provider_config.get('api_key', '')
 
 
@@ -617,12 +622,14 @@ def get_provider():
                 'name': 'Cupsy',
                 'model': 'seedream-5.0-pro',
                 'available': bool(get_provider_key('cupsy', API_PROVIDERS['cupsy'])),
+                'managed_by_profiles': isinstance(API_PROVIDERS['cupsy'], profile_runtime.ProfileConfig) and API_PROVIDERS['cupsy'].has_db_source(),
             },
             'ark': {
                 'name': 'BytePlus Ark',
                 'model': API_PROVIDERS['ark'].get('model', ''),
                 'capability_model': seedream55_capabilities.MODEL if seedream55_capabilities.enabled() else API_PROVIDERS['ark'].get('model', ''),
-                'available': bool(API_PROVIDERS['ark'].get('api_key'))
+                'available': bool(API_PROVIDERS['ark'].get('api_key')),
+                'managed_by_profiles': isinstance(API_PROVIDERS['ark'], profile_runtime.ProfileConfig) and API_PROVIDERS['ark'].has_db_source(),
             }
         }
     })
@@ -1008,7 +1015,7 @@ def _save_generated_image(source, output_dir, stem):
         if isinstance(source, str) and source.startswith('data:'):
             storage.save_data_url(source, temporary)
         elif isinstance(source, dict) and source.get('url'):
-            headers = _cupsy_headers() if source.get('cupsy_authenticated') else {}
+            headers = _cupsy_headers(settings=_cupsy_image_settings()) if source.get('cupsy_authenticated') else {}
             with HTTP.get(source['url'], headers=headers, timeout=(10, profile_runtime.setting('download_timeout_seconds', DOWNLOAD_TIMEOUT)), stream=True) as download:
                 download.raise_for_status()
                 storage.stream_response_to_file(download, temporary)
@@ -1302,6 +1309,58 @@ def _validate_layer_source(metadata, size_bytes):
         raise ValueError('图层分解源图片宽高比必须在 1:16 到 16:1 之间')
 
 
+def _media_error_response(error):
+    payload = {'success': False, 'error': str(error), 'code': error.code}
+    if hasattr(error, 'media'):
+        payload['media'] = error.media
+    return jsonify(payload), error.status
+
+
+def _snapshot_layer_source(src_path, target_path):
+    """Create an isolated snapshot (hard link for PNG, normalized PNG copy for JPEG) atomically.
+
+    Always replaces via a temp path so an existing hard-linked inode in the media library
+    is never modified in place.
+    """
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    temp_path = f'{target_path}.{uuid.uuid4().hex}.tmp'
+    try:
+        if os.path.splitext(src_path)[1].lower() == '.png':
+            try:
+                os.link(src_path, temp_path)
+            except OSError:
+                shutil.copy2(src_path, temp_path)
+        else:
+            storage.save_image_file(src_path, temp_path)
+        os.replace(temp_path, target_path)
+        return target_path
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _resolve_layer_media_source(source_media_id):
+    import media_library
+    media_row, src_path = media_library.resolve_image_media(source_media_id)
+    size_bytes = src_path.stat().st_size
+    metadata = storage.inspect_image(str(src_path))
+    _validate_layer_source(metadata, size_bytes)
+    return media_row, src_path, metadata, size_bytes
+
+
+def _sanitize_library_filename(name, default_stem, default_ext='.png'):
+    raw = str(name or '').strip()
+    cleaned = re.sub(r'[/\\\x00-\x1f]+', '_', raw).strip(' .')
+    if not cleaned:
+        cleaned = re.sub(r'[/\\\x00-\x1f]+', '_', str(default_stem or 'layer')).strip(' .') or 'layer'
+    if not os.path.splitext(cleaned)[1]:
+        cleaned = f'{cleaned}{default_ext}'
+    return cleaned[:240]
+
+
 def _queue_layer_task(project, prompt, size, options_data=None):
     normalized_size = 'auto' if str(size).lower() == 'auto' else str(size).upper()
     if normalized_size not in {'auto', '1K', '1.5K', '2K'}:
@@ -1441,7 +1500,7 @@ def generate():
         if provider == 'cupsy' and output_format not in {'png', 'jpeg'}:
             return jsonify({'success': False, 'error': 'Cupsy 图片格式仅支持 PNG 或 JPEG'}), 400
         if provider == 'cupsy':
-            if (request.files.getlist('images') or image_urls) and not _cupsy_source_ready():
+            if (request.files.getlist('images') or image_urls) and not _cupsy_source_ready(_cupsy_image_settings()):
                 return jsonify({'success': False, 'error': 'Cupsy 参考图片需要配置公网 HTTP(S) 素材源'}), 400
         model_id = get_provider_default_model(provider, provider_config)
         from canvas_image_params import validate_submission
@@ -1547,11 +1606,11 @@ def generate():
 # Video Generation (Seedance 2.0 / 2.5 via BytePlus Ark)
 # ============================================================
 
-ARK_VIDEO_CONFIG = profile_runtime.ProfileConfig(config_v2.video_byteplus(config), 'ark')
-CUPSY_VIDEO_CONFIG = profile_runtime.ProfileConfig(config_v2.video_cupsy(config), 'cupsy')
-CUPSY_AUDIO_CONFIG = profile_runtime.ProfileConfig(config_v2.audio_cupsy(config), 'cupsy')
-VIDEO_CONFIG = profile_runtime.ProfileConfig(config_v2.polling(config, 'video'), None)
-AUDIO_CONFIG = profile_runtime.ProfileConfig(config_v2.polling(config, 'audio'), None)
+ARK_VIDEO_CONFIG = profile_runtime.ProfileConfig(config_v2.video_byteplus(config), 'ark', kind='video')
+CUPSY_VIDEO_CONFIG = profile_runtime.ProfileConfig(config_v2.video_cupsy(config), 'cupsy', kind='video')
+CUPSY_AUDIO_CONFIG = profile_runtime.ProfileConfig(config_v2.audio_cupsy(config), 'cupsy', kind='audio')
+VIDEO_CONFIG = profile_runtime.ProfileConfig(config_v2.polling(config, 'video'), None, kind='video')
+AUDIO_CONFIG = profile_runtime.ProfileConfig(config_v2.polling(config, 'audio'), None, kind='audio')
 SEEDANCE_20 = 'seedance-2.0'
 SEEDANCE_25 = 'seedance-2.5'
 SEEDANCE_25_MODERATED = 'seedance-2.5-moderated'
@@ -1572,7 +1631,11 @@ is_placeholder_endpoint_id = config_v2.is_placeholder_endpoint_id
 
 
 def deployment_seedance_25_endpoint():
-    """Deployment-wide Seedance 2.5 endpoint ID (providers.byteplus.endpoint_ids.seedance_2_5)."""
+    """Deployment-wide Seedance 2.5 endpoint ID (DB config:video:ark when imported, else config.json)."""
+    from provider_profiles import load_source_profile
+    source = load_source_profile('video', 'ark')
+    if source is not None:
+        return source['settings'].get('seedance_2_5_model', '') if source['enabled'] else ''
     return config['providers']['byteplus']['endpoint_ids']['seedance_2_5']
 VIDEO_MODEL_SPECS = {
     SEEDANCE_20: {
@@ -1656,19 +1719,42 @@ def _cupsy_settings():
     }
 
 
+def _cupsy_image_settings():
+    cfg = API_PROVIDERS.get('cupsy', {})
+    if profile_runtime.current_profile() is not None or (
+        isinstance(cfg, profile_runtime.ProfileConfig) and cfg.has_db_source()
+    ):
+        return {
+            **cfg,
+            'api_key': cfg.get('api_key', ''),
+            'source_base_url': cfg.get('source_base_url', '').rstrip('/'),
+        }
+    return _cupsy_settings()
+
+
 def _cupsy_audio_settings():
+    if profile_runtime.current_profile() is not None or (
+        isinstance(CUPSY_AUDIO_CONFIG, profile_runtime.ProfileConfig) and CUPSY_AUDIO_CONFIG.has_db_source()
+    ):
+        return {
+            **CUPSY_AUDIO_CONFIG,
+            'api_key': CUPSY_AUDIO_CONFIG.get('api_key', ''),
+            'endpoint': CUPSY_AUDIO_CONFIG.get('endpoint') or 'https://cupsy.io',
+            'model': CUPSY_AUDIO_CONFIG.get('model') or CUPSY_AUDIO_MODEL,
+            'source_base_url': CUPSY_AUDIO_CONFIG.get('source_base_url', '').rstrip('/'),
+        }
     shared = _cupsy_settings()
     return {
         **shared,
         **CUPSY_AUDIO_CONFIG,
-        'api_key': shared['api_key'],
+        'api_key': CUPSY_AUDIO_CONFIG.get('api_key') or shared['api_key'],
         'endpoint': CUPSY_AUDIO_CONFIG.get('endpoint') or shared.get('endpoint', 'https://cupsy.io'),
         'model': CUPSY_AUDIO_CONFIG.get('model') or CUPSY_AUDIO_MODEL,
     }
 
 
-def _cupsy_headers(idempotency_key=None):
-    settings = _cupsy_settings()
+def _cupsy_headers(idempotency_key=None, settings=None):
+    settings = settings if settings is not None else _cupsy_settings()
     headers = {
         'Authorization': f'Bearer {settings["api_key"]}',
         'Content-Type': 'application/json',
@@ -1682,7 +1768,7 @@ def _generate_cupsy_image(task):
     """Replay the frozen image request after 202 or transport errors, never a new job."""
     task_id = task['id']
     params = dict(task.get('params') or {})
-    settings = _cupsy_settings()
+    settings = _cupsy_image_settings()
     endpoint = settings.get('endpoint', 'https://cupsy.io').rstrip('/')
     body = params.get('_cupsy_request')
     if body is None:
@@ -1706,7 +1792,7 @@ def _generate_cupsy_image(task):
     try:
         response = HTTP.post(
             f'{endpoint}/v1/images/generations', json=body,
-            headers=_cupsy_headers(params['_cupsy_idempotency_key']),
+            headers=_cupsy_headers(params['_cupsy_idempotency_key'], settings=settings),
             timeout=(profile_runtime.setting('upload_timeout_seconds', 30), API_PROVIDERS['cupsy'].get('request_timeout_seconds', 120)),
         )
         if response.status_code == 202:
@@ -1963,9 +2049,19 @@ def cupsy_assets():
     upload = request.files.get('file')
     if not upload or not upload.filename:
         return jsonify({'success': False, 'error': '请选择素材文件'}), 400
+    selected_profile = None
+    profile_id = request.form.get('profile_id') or None
+    if profile_id:
+        from provider_profiles import load_profile, ProfileError
+        try:
+            selected_profile = load_profile(profile_id, require_enabled=True)
+        except ProfileError as error:
+            return jsonify({'success': False, 'error': str(error)}), error.status
+        if selected_profile.get('adapter') != 'cupsy':
+            return jsonify({'success': False, 'error': '该接口配置不支持 Cupsy 素材上传'}), 400
     try:
         from local_uploads import capture_user_upload
-        with capture_user_upload(upload):
+        with profile_runtime.profile_scope(selected_profile), capture_user_upload(upload):
             asset = create_cupsy_asset_from_upload(upload, request.form.get('kind') or None)
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
@@ -2135,12 +2231,14 @@ def get_video_provider_info():
         'providers': {
             'ark': {
                 'available': bool(ARK_VIDEO_CONFIG.get('api_key')), 'models': [SEEDANCE_20, SEEDANCE_25],
+                'managed_by_profiles': isinstance(ARK_VIDEO_CONFIG, profile_runtime.ProfileConfig) and ARK_VIDEO_CONFIG.has_db_source(),
                 # False while only the repository placeholder is present: Seedance 2.5 submissions return 400.
                 'seedance_2_5_configured': not is_placeholder_endpoint_id(
                     ARK_VIDEO_CONFIG.get('seedance_2_5_model') or deployment_seedance_25_endpoint()),
             },
             'cupsy': {
                 'available': bool(cupsy['api_key']),
+                'managed_by_profiles': isinstance(CUPSY_VIDEO_CONFIG, profile_runtime.ProfileConfig) and CUPSY_VIDEO_CONFIG.has_db_source(),
                 'source_ready': _cupsy_source_ready(cupsy),
                 'models': [SEEDANCE_25, SEEDANCE_25_MODERATED],
             },
@@ -2157,6 +2255,7 @@ def get_audio_provider_info():
         'providers': {
             'cupsy': {
                 'available': bool(settings['api_key']),
+                'managed_by_profiles': isinstance(CUPSY_AUDIO_CONFIG, profile_runtime.ProfileConfig) and CUPSY_AUDIO_CONFIG.has_db_source(),
                 'source_ready': _cupsy_source_ready(settings),
                 'models': [CUPSY_AUDIO_MODEL],
             },
@@ -2242,7 +2341,8 @@ def generate_audio():
             asset = None
         if (
             reference_mode == 'none' or not asset or asset.get('deleted_at')
-            or asset.get('provider') != profile_runtime.asset_provider() or asset.get('kind') != expected_kind
+            or not profile_runtime.asset_provider_matches(asset.get('provider'), explicit_profile=bool(data.get('profile_id')))
+            or asset.get('kind') != expected_kind
         ):
             return jsonify({'success': False, 'error': 'Cupsy 音频参考素材无效或类型不匹配'}), 400
         pending_links.append((asset, f'reference_{expected_kind}', position))
@@ -2533,7 +2633,8 @@ def _queue_cupsy_video(
             asset = None
         if (
             role not in allowed_roles or not asset or asset.get('deleted_at')
-            or asset.get('provider') != profile_runtime.asset_provider() or asset.get('kind') != allowed_roles[role]
+            or not profile_runtime.asset_provider_matches(asset.get('provider'), explicit_profile=bool(data.get('profile_id')))
+            or asset.get('kind') != allowed_roles[role]
         ):
             return jsonify({'success': False, 'error': 'Cupsy 素材引用或角色无效'}), 400
         pending_links.append((asset, role, position))
@@ -3005,11 +3106,33 @@ WORKSPACE_STATE_KEYS = {
 }
 
 
+def _terminal_cancel_error(task):
+    status = task.get('status') if isinstance(task, dict) else None
+    result = task.get('result') if isinstance(task, dict) and isinstance(task.get('result'), dict) else {}
+    if status == 'succeeded':
+        return '任务已完成，无法取消'
+    if status == 'failed' and result.get('result_unknown'):
+        return '任务结果未知（可能已计费），已结束，无法取消'
+    if status == 'failed':
+        return '任务已失败，无法取消'
+    return '任务已取消'
+
+
 @app.route('/api/tasks/<int:task_id>/cancel', methods=['POST'])
 @profile_runtime.task_context
 def api_cancel_task(task_id):
     task = task_db.get_task(task_id)
-    if task and task.get('provider') == 'cupsy' and task.get('type') in {'audio', 'video'} and task.get('external_task_id'):
+    if not task:
+        return jsonify({'success': False, 'error': '任务不存在'}), 404
+    if task.get('status') in task_db.TERMINAL_TASK_STATUSES:
+        return jsonify({
+            'success': False,
+            'code': 'task_terminal',
+            'status': task['status'],
+            'error': _terminal_cancel_error(task),
+            'task': public_task(task),
+        }), 409
+    if task.get('provider') == 'cupsy' and task.get('type') in {'audio', 'video'} and task.get('external_task_id'):
         settings = _cupsy_audio_settings() if task.get('type') == 'audio' else _cupsy_settings()
         resource_path = (
             f'/v1/audio/generations/{task["external_task_id"]}'
@@ -3020,7 +3143,7 @@ def api_cancel_task(task_id):
             try:
                 response = HTTP.delete(
                     f'{settings.get("endpoint", "https://cupsy.io").rstrip("/")}{resource_path}',
-                    headers=_cupsy_headers(), timeout=(10, profile_runtime.setting('request_timeout_seconds', 30)),
+                    headers=_cupsy_headers(settings=settings), timeout=(10, profile_runtime.setting('request_timeout_seconds', 30)),
                 )
                 if response.status_code not in {200, 202, 204, 404, 409}:
                     app.logger.warning(
@@ -3028,10 +3151,33 @@ def api_cancel_task(task_id):
                     )
             except requests.RequestException:
                 app.logger.warning('cupsy_video_cancel_request_failed task_id=%s', task_id)
-    status = task_db.request_task_cancel(task_id)
-    if status is None:
+    outcome = task_db.request_task_cancel_detail(task_id)
+    if outcome is None:
         return jsonify({'success': False, 'error': '任务不存在'}), 404
-    return jsonify({'success': True, 'status': status, 'task': public_task(task_db.get_task(task_id))})
+    fresh = task_db.get_task(task_id)
+    if outcome['already_terminal']:
+        return jsonify({
+            'success': False,
+            'code': 'task_terminal',
+            'status': outcome['status'],
+            'error': _terminal_cancel_error(fresh or {'status': outcome['status']}),
+            'task': public_task(fresh),
+        }), 409
+    # When cancellation completes immediately without a worker lease (e.g. pending or unleased
+    # polling task), the worker will never claim it again: run canvas write-back and group-run
+    # advancement right away so downstream branches block and finished runs finalize cleanly.
+    if outcome['status'] == 'cancelled' and outcome['changed']:
+        try:
+            import canvas_writeback
+            canvas_writeback.apply_task_result_safely(task_id)
+        except Exception:
+            app.logger.exception('canvas_cancel_writeback_failed task_id=%s', task_id)
+        try:
+            import canvas_group_run
+            canvas_group_run.on_task_terminal(task_id)
+        except Exception:
+            app.logger.exception('canvas_cancel_group_run_failed task_id=%s', task_id)
+    return jsonify({'success': True, 'status': outcome['status'], 'task': public_task(fresh)})
 
 
 @app.route('/api/tasks/<int:task_id>/retry', methods=['POST'])
@@ -3076,10 +3222,11 @@ def api_retry_task(task_id):
     )
     output_dir, _ = storage.clone_image_inputs(task_id, retry_id)
     if task.get('provider') == 'cupsy':
-        for index, asset in enumerate(task_db.list_assets(retry_id)):
-            if asset['kind'] == 'input_image':
-                imported = create_cupsy_asset_from_path(asset['path'], 'image')
-                task_db.link_task_provider_asset(retry_id, imported['id'], 'reference_image', index)
+        with profile_runtime.profile_scope(profile_runtime.load_selection(retry_params)):
+            for index, asset in enumerate(task_db.list_assets(retry_id)):
+                if asset['kind'] == 'input_image':
+                    imported = create_cupsy_asset_from_path(asset['path'], 'image')
+                    task_db.link_task_provider_asset(retry_id, imported['id'], 'reference_image', index)
     task_db.update_task(
         retry_id, output_dir=output_dir, status='pending', next_run_at=task_db.utcnow(),
     )
@@ -3108,46 +3255,73 @@ def api_inspect_image():
 def api_layer_projects():
     if request.method == 'GET':
         return jsonify({'success': True, 'projects': [public_layer_project(item) for item in task_db.list_layer_projects()]})
-    upload = request.files.get('image')
-    if not upload or not upload.filename:
+    import media_library
+    if request.is_json:
+        fields = request.get_json(silent=True)
+        if not isinstance(fields, dict):
+            return jsonify({'success': False, 'error': '请求体须为 JSON 对象'}), 400
+        upload = None
+    else:
+        fields = request.form
+        upload = request.files.get('image')
+    source_media_id = fields.get('source_media_id')
+    if not source_media_id and (not upload or not upload.filename):
         return jsonify({'success': False, 'error': '请选择需要分解的 PNG 或 JPEG 图片'}), 400
     # decompose=0 only stores the source as a project (listed immediately, no task);
     # the studio then queues decomposition through /decompose when the user asks.
-    decompose = str(request.form.get('decompose', '1')).strip().lower() not in {'0', 'false', 'no'}
+    raw_decompose = fields.get('decompose', '1')
+    decompose = raw_decompose if isinstance(raw_decompose, bool) else str(raw_decompose).strip().lower() not in {'0', 'false', 'no'}
     try:
-        requested_size = 'auto' if request.form.get('size', 'auto').lower() == 'auto' else request.form.get('size', 'auto').upper()
+        raw_size = str(fields.get('size', 'auto') or 'auto')
+        requested_size = 'auto' if raw_size.lower() == 'auto' else raw_size.upper()
         if requested_size not in {'auto', '1K', '1.5K', '2K'}:
             raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
         if decompose:
             provider, provider_config = get_layer_provider_config()
             if not get_provider_key(provider, provider_config):
                 raise ValueError('Ark 未配置 API Key')
-            layer_options.options(request.form, get_provider_default_model(provider, provider_config))
-        upload.stream.seek(0, os.SEEK_END)
-        size_bytes = upload.stream.tell()
-        upload.stream.seek(0)
-        metadata = storage.inspect_uploaded_image(upload)
-        _validate_layer_source(metadata, size_bytes)
-        name = (request.form.get('name') or os.path.splitext(upload.filename)[0] or '未命名项目').strip()[:120]
-        project_id = task_db.create_layer_project(name, upload.filename, None, metadata)
-        project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
-        source_path = os.path.join(project_dir, 'source.png')
-        storage.save_uploaded_image(upload, source_path)
-        stored_metadata = storage.inspect_image(source_path)
-        stored_metadata['original_format'] = metadata['format']
-        stored_metadata['size_bytes'] = size_bytes
-        task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
+            layer_options.options(fields, get_provider_default_model(provider, provider_config))
+        if source_media_id:
+            media_row, src_path, metadata, size_bytes = _resolve_layer_media_source(source_media_id)
+            source_name = media_row['name']
+            name = (str(fields.get('name') or '').strip() or os.path.splitext(source_name)[0] or '未命名项目')[:120]
+            project_id = task_db.create_layer_project(name, source_name, None, metadata)
+            project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
+            source_path = os.path.join(project_dir, 'source.png')
+            _snapshot_layer_source(str(src_path), source_path)
+            stored_metadata = storage.inspect_image(source_path)
+            stored_metadata['original_format'] = metadata['format']
+            stored_metadata['size_bytes'] = size_bytes
+            stored_metadata['source_media_id'] = media_row['id']
+            task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
+        else:
+            upload.stream.seek(0, os.SEEK_END)
+            size_bytes = upload.stream.tell()
+            upload.stream.seek(0)
+            metadata = storage.inspect_uploaded_image(upload)
+            _validate_layer_source(metadata, size_bytes)
+            name = (str(fields.get('name') or '').strip() or os.path.splitext(upload.filename)[0] or '未命名项目')[:120]
+            project_id = task_db.create_layer_project(name, upload.filename, None, metadata)
+            project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
+            source_path = os.path.join(project_dir, 'source.png')
+            storage.save_uploaded_image(upload, source_path)
+            stored_metadata = storage.inspect_image(source_path)
+            stored_metadata['original_format'] = metadata['format']
+            stored_metadata['size_bytes'] = size_bytes
+            task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
         project = task_db.get_layer_project(project_id)
         if not decompose:
             return jsonify({
                 'success': True, 'project_id': project_id, 'task_id': None,
                 'project': public_layer_project(project),
             }), 201
-        task_id = _queue_layer_task(project, normalize_newlines(request.form.get('prompt', '')), requested_size, request.form)
+        task_id = _queue_layer_task(project, normalize_newlines(fields.get('prompt', '')), requested_size, fields)
         return jsonify({
             'success': True, 'project_id': project_id, 'task_id': task_id,
             'project': public_layer_project(task_db.get_layer_project(project_id)),
         }), 202
+    except media_library.MediaError as error:
+        return _media_error_response(error)
     except (OSError, ValueError, UnidentifiedImageError) as error:
         return jsonify({'success': False, 'error': str(error)}), 400
 
@@ -3190,12 +3364,40 @@ def api_layer_project(project_id):
     return jsonify({'success': True, 'project': public_layer_project(updated)})
 
 
-@app.route('/api/layer/projects/<int:project_id>/source', methods=['GET'])
+@app.route('/api/layer/projects/<int:project_id>/source', methods=['GET', 'POST', 'PUT'])
 def api_layer_project_source(project_id):
     project = task_db.get_layer_project(project_id)
-    if not project or not project.get('source_path') or not os.path.isfile(project['source_path']):
-        return jsonify({'success': False, 'error': '源图片不存在'}), 404
-    return send_file(project['source_path'], conditional=True, max_age=3600)
+    if request.method == 'GET':
+        if not project or not project.get('source_path') or not os.path.isfile(project['source_path']):
+            return jsonify({'success': False, 'error': '源图片不存在'}), 404
+        return send_file(project['source_path'], conditional=True, max_age=3600)
+    if not project:
+        return jsonify({'success': False, 'error': '图层项目不存在'}), 404
+    current = project.get('current_task') or {}
+    if current.get('status') in task_db.ACTIVE_TASK_STATUSES:
+        return jsonify({'success': False, 'error': '当前项目已有分解任务正在执行，暂不能更换源图'}), 409
+    import media_library
+    data = request.get_json(silent=True) or {}
+    source_media_id = data.get('source_media_id') if isinstance(data, dict) else None
+    if not source_media_id:
+        return jsonify({'success': False, 'error': '请提供有效的源素材编号'}), 400
+    try:
+        media_row, src_path, metadata, size_bytes = _resolve_layer_media_source(source_media_id)
+        project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
+        source_path = os.path.join(project_dir, 'source.png')
+        _snapshot_layer_source(str(src_path), source_path)
+        stored_metadata = storage.inspect_image(source_path)
+        stored_metadata['original_format'] = metadata['format']
+        stored_metadata['size_bytes'] = size_bytes
+        stored_metadata['source_media_id'] = media_row['id']
+        task_db.update_layer_project(
+            project_id, source_name=media_row['name'], source_path=source_path, source_metadata=stored_metadata,
+        )
+        return jsonify({'success': True, 'project': public_layer_project(task_db.get_layer_project(project_id))})
+    except media_library.MediaError as error:
+        return _media_error_response(error)
+    except (OSError, ValueError, UnidentifiedImageError) as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
 
 
 @app.route('/api/layer/projects/<int:project_id>/decompose', methods=['POST'])
@@ -3206,11 +3408,84 @@ def api_decompose_layer_project(project_id):
     current = project.get('current_task') or {}
     if current.get('status') in task_db.ACTIVE_TASK_STATUSES:
         return jsonify({'success': False, 'error': '当前项目已有分解任务正在执行'}), 409
+    import media_library
     data = request.get_json(silent=True) or {}
     try:
+        if data.get('source_media_id'):
+            media_row, src_path, metadata, size_bytes = _resolve_layer_media_source(data.get('source_media_id'))
+            normalized_size = 'auto' if str(data.get('size', 'auto')).lower() == 'auto' else str(data.get('size', 'auto')).upper()
+            if normalized_size not in {'auto', '1K', '1.5K', '2K'}:
+                raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
+            provider, provider_config = get_layer_provider_config()
+            if not get_provider_key(provider, provider_config):
+                raise ValueError('Ark 未配置 API Key')
+            layer_options.options(data, get_provider_default_model(provider, provider_config))
+            project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
+            source_path = os.path.join(project_dir, 'source.png')
+            _snapshot_layer_source(str(src_path), source_path)
+            stored_metadata = storage.inspect_image(source_path)
+            stored_metadata['original_format'] = metadata['format']
+            stored_metadata['size_bytes'] = size_bytes
+            stored_metadata['source_media_id'] = media_row['id']
+            task_db.update_layer_project(
+                project_id, source_name=media_row['name'], source_path=source_path, source_metadata=stored_metadata,
+            )
+            project = task_db.get_layer_project(project_id)
         task_id = _queue_layer_task(project, normalize_newlines(data.get('prompt', '')), data.get('size', 'auto'), data)
         return jsonify({'success': True, 'task_id': task_id, 'project_id': project_id}), 202
-    except ValueError as error:
+    except media_library.MediaError as error:
+        return _media_error_response(error)
+    except (OSError, ValueError, UnidentifiedImageError) as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+
+
+@app.route('/api/layer/projects/<int:project_id>/save-to-library', methods=['POST'])
+def api_save_layer_to_library(project_id):
+    project = task_db.get_layer_project(project_id)
+    if not project:
+        return jsonify({'success': False, 'error': '图层项目不存在'}), 404
+    import media_library
+    try:
+        upload = request.files.get('file') if not request.is_json else None
+        if upload and upload.filename:
+            folder_id = (request.form.get('folder_id') or '').strip() or None
+            filename = _sanitize_library_filename(
+                request.form.get('name') or upload.filename, f"{project['name']}-合成", '.png',
+            )
+            media_item, deduplicated = media_library.save_upload(
+                upload.stream, filename, folder_id=folder_id, origin='save_as',
+            )
+            return jsonify({'success': True, 'media': media_item, 'deduplicated': deduplicated}), (200 if deduplicated else 201)
+
+        data = request.get_json(silent=True) if request.is_json else request.form
+        if not isinstance(data, dict) and not hasattr(data, 'get'):
+            return jsonify({'success': False, 'error': '请提供需要保存的图层或合成图'}), 400
+        layer_id = data.get('layer_id')
+        if not layer_id:
+            return jsonify({'success': False, 'error': '请指定要保存的图层或上传合成图'}), 400
+        layers = (project.get('document') or {}).get('layers') or []
+        layer = next((item for item in layers if str(item.get('id')) == str(layer_id)), None)
+        if not layer:
+            return jsonify({'success': False, 'error': '指定图层不存在'}), 404
+        local_url = layer.get('local_url') or ''
+        match = re.match(r'^/api/tasks/(\d+)/file/([^/]+)$', local_url)
+        task = task_db.get_task(int(match.group(1))) if match else None
+        output_dir = os.path.abspath(task['output_dir']) if task and task.get('output_dir') else None
+        path = os.path.abspath(os.path.join(output_dir, match.group(2))) if output_dir else None
+        if not output_dir or not path or os.path.commonpath([output_dir, path]) != output_dir or not os.path.isfile(path):
+            return jsonify({'success': False, 'error': '图层文件不存在或不可读取'}), 404
+        ext = os.path.splitext(path)[1].lower() or '.png'
+        folder_id = (str(data.get('folder_id') or '')).strip() or None
+        filename = _sanitize_library_filename(
+            data.get('name'), f"{project['name']}-{layer.get('name') or 'layer'}", ext,
+        )
+        media_item, deduplicated = media_library.save_local_file(
+            path, filename, folder_id=folder_id, origin='save_as', link=True,
+        )
+        return jsonify({'success': True, 'media': media_item, 'deduplicated': deduplicated}), (200 if deduplicated else 201)
+    except media_library.MediaError as error:
+        return _media_error_response(error)
+    except (OSError, ValueError) as error:
         return jsonify({'success': False, 'error': str(error)}), 400
 
 
@@ -3470,7 +3745,7 @@ def _download_cupsy_output(payload, endpoint, output_kind, fallback_path, path):
     )
     try:
         with HTTP.get(
-            url, headers=_cupsy_headers() if authenticated else {},
+            url, headers=_cupsy_headers(settings=_cupsy_audio_settings() if output_kind == 'audio' else _cupsy_settings()) if authenticated else {},
             timeout=(10, profile_runtime.setting('download_timeout_seconds', DOWNLOAD_TIMEOUT)), stream=True,
         ) as download:
             if download.status_code >= 400:
@@ -3654,7 +3929,7 @@ def _poll_cupsy_audio_task(task):
         try:
             response = HTTP.post(
                 f'{endpoint}/v1/audio/generations',
-                headers=_cupsy_headers(f'nanobanana-audio-{task_id}'),
+                headers=_cupsy_headers(f'nanobanana-audio-{task_id}', settings=settings),
                 json=body, timeout=(profile_runtime.setting('upload_timeout_seconds', 10), profile_runtime.setting('request_timeout_seconds', 120)),
             )
         except requests.RequestException as error:
@@ -3680,7 +3955,7 @@ def _poll_cupsy_audio_task(task):
     try:
         response = HTTP.get(
             f'{endpoint}/v1/audio/generations/{external_id}',
-            headers=_cupsy_headers(), timeout=(10, profile_runtime.setting('poll_timeout_seconds', POLL_TIMEOUT)),
+            headers=_cupsy_headers(settings=settings), timeout=(10, profile_runtime.setting('poll_timeout_seconds', POLL_TIMEOUT)),
         )
     except requests.RequestException as error:
         return {'state': 'retry', 'error': str(error)}

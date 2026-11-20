@@ -183,7 +183,7 @@ def test_preview_by_type_covers_the_whole_trash():
     tasks.move_tasks_to_trash(ids[:2])
     preview = c.post('/api/tasks/delete-preview', json={'type': 'image'}).json
     assert sorted(preview['task_ids']) == ids[:2] and preview['media']['count'] == 2
-    assert c.post('/api/tasks/delete-preview', json={'type': 'layer'}).status_code == 400
+    assert c.post('/api/tasks/delete-preview', json={'type': 'unknown'}).status_code == 400
     assert c.post('/api/tasks/delete-preview', json={'ids': []}).status_code == 400
 
 

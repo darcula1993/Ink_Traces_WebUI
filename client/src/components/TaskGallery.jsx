@@ -6,6 +6,7 @@ import IconButton from './ui/IconButton'
 import { useWorkspaceState } from '../lib/useWorkspaceState'
 import { ACTIVE_STATUSES, TASK_PAGE_SIZE, STATUS_BATCH_SIZE, STATUS_POLL_DELAY, sameValue, mergeTaskStatus, DEFAULT_GALLERY_PREFERENCES, CARD_SIZE_OPTIONS, CARD_DETAIL_OPTIONS, SORT_OPTIONS, DEFAULT_TASK_FILTERS, STATUS_FILTER_OPTIONS, DATE_FILTER_OPTIONS, GROUP_COLORS, EMPTY_NAVIGATION, providerLabel, createdAfterForRange, serverItem, revealTarget, taskTypeLabel, needsRetryConfirmation } from './gallery/taskModel.js'
 import { TaskTypeIcon } from './gallery/TaskPreview.jsx'
+import { TaskEmptyArt } from './art/ShellEmptyArt'
 import { TaskCardList } from './gallery/TaskCards.jsx'
 import { TaskCompareModal, TaskDetailModal } from './gallery/TaskModals.jsx'
 import ConfirmDialog from './ui/ConfirmDialog'
@@ -14,9 +15,10 @@ import TaskDeletePlan from './gallery/TaskDeletePlan'
 import { previewTaskDelete, announceMediaStatusChange } from './gallery/taskDeletePreview.js'
 import { takeTaskCenterFocus } from '../lib/taskCenterLink.js'
 import ToolAssetLibrary from './library/ToolAssetLibrary'
-import MoveToFolderDialog from './gallery/MoveToFolderDialog.jsx'
+import MoveToFolderDialog from './library/MoveToFolderDialog.jsx'
 import EmptyTrashButton from './gallery/EmptyTrashButton.jsx'
 import { collectMedia, listMediaFolders, systemFolderId } from './gallery/taskLibrary.js'
+import { notifyLibraryChanged } from '../lib/librarySync.js'
 
 function useLiveCallback(callback) {
   const ref = useRef(callback)
@@ -26,6 +28,7 @@ function useLiveCallback(callback) {
 
 function TaskGallery({
   mode,
+  showTypeBadge = false,
   refreshToken,
   onReuseTask,
 }) {
@@ -358,6 +361,14 @@ function TaskGallery({
     setNavigation(EMPTY_NAVIGATION)
   }, [cardSort, debouncedQuery, favoriteGroup, filters, mode, view])
 
+  useEffect(() => {
+    setSelectedKeys(new Set())
+    setSelectionUniverse(new Set())
+    setSelectionMode(false)
+    setBulkDownloadMenuOpen(false)
+    setBulkGroupMenuOpen(false)
+  }, [mode, view])
+
   const loadNavigation = useCallback(async taskId => {
     navigationRequestRef.current.controller?.abort()
     const controller = new AbortController()
@@ -531,6 +542,9 @@ function TaskGallery({
         }
         const terminal = observed.some(task => ACTIVE_STATUSES.has(task.status) &&
           updates.has(Number(task.id)) && !ACTIVE_STATUSES.has(updates.get(Number(task.id)).status))
+        const newlySucceeded = observed.some(task => ACTIVE_STATUSES.has(task.status) &&
+          updates.get(Number(task.id))?.status === 'succeeded')
+        if (newlySucceeded) notifyLibraryChanged({ source: 'task_gallery_succeeded', mode })
         const membershipChanged = missing.size > 0 || observed.some(task => {
           const update = updates.get(Number(task.id))
           return update && (
@@ -996,6 +1010,15 @@ function TaskGallery({
   }, [view])
 
   const hasSearchOrFilters = Boolean(query.trim() || activeFilters.length)
+  const emptyArtKind = hasSearchOrFilters
+    ? 'empty-search'
+    : view === 'trash'
+      ? 'empty-trash'
+      : view === 'favorite'
+        ? 'empty-favorites'
+        : view === 'active'
+          ? 'empty-active'
+          : 'empty-tasks'
   const emptyTitle = hasSearchOrFilters
     ? '没有匹配的任务'
     : view === 'active'
@@ -1004,7 +1027,15 @@ function TaskGallery({
         ? '当前收藏为空'
         : view === 'trash'
           ? '回收站为空'
-          : mode === 'video' ? '还没有视频任务' : mode === 'audio' ? '还没有音频任务' : '还没有图片任务'
+          : mode === 'all'
+            ? '还没有生成任务'
+            : mode === 'video'
+              ? '还没有视频任务'
+              : mode === 'audio'
+                ? '还没有音频任务'
+                : mode === 'layer'
+                  ? '还没有图层任务'
+                  : '还没有图片任务'
 
   return (
     <div
@@ -1012,19 +1043,19 @@ function TaskGallery({
       data-card-size={cardSize}
       data-card-details={cardDetails}
     >
-      <div className={`task-gallery-toolbar liquid-glass flex h-13 shrink-0 items-center gap-2 px-3 ${selectionMode ? 'task-gallery-toolbar-selection' : ''}`}>
-        <div className="task-gallery-title flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
+      <div className={`task-gallery-toolbar liquid-glass flex min-h-[52px] shrink-0 flex-wrap items-center gap-2 px-3 py-1.5 ${selectionMode ? 'task-gallery-toolbar-selection' : ''}`}>
+        <div className="task-gallery-title flex shrink-0 items-center gap-2 text-sm font-semibold text-nexus-text-light">
           <TaskTypeIcon type={mode} />
           {taskTypeLabel(mode)}任务
           <span className="task-gallery-count font-mono text-xs font-normal">{categoryTotal}</span>
         </div>
         {selectionMode ? (
-          <div data-testid="selection-summary" className="task-selection-summary ml-3 font-mono text-xs text-nexus-text">
+          <div data-testid="selection-summary" className="task-selection-summary ml-3 shrink-0 font-mono text-xs text-nexus-text">
             已选 <span className="text-nexus-green">{selectedKeys.size}</span>
             <span className="ml-2 text-xs text-nexus-muted">共 {categoryTotal}</span>
           </div>
         ) : (
-          <div className="task-view-segment ml-3 flex items-center gap-1" role="group" aria-label="任务视图">
+          <div className="task-view-segment ml-1 flex shrink-0 items-center gap-1" role="group" aria-label="任务视图">
             <button type="button" aria-pressed={view === 'all'} onClick={() => changeView('all')} className={`task-view-button ${view === 'all' ? 'task-view-button-active' : ''}`}>全部</button>
             <button type="button" aria-pressed={view === 'favorite'} onClick={() => changeView('favorite')} className={`task-view-button ${view === 'favorite' ? 'task-view-button-active' : ''}`}><Heart size={12} /> 收藏</button>
             <button type="button" aria-pressed={view === 'active'} onClick={() => changeView('active')} className={`task-view-button ${view === 'active' ? 'task-view-button-active' : ''}`}><LoaderCircle size={12} /> 进行中</button>
@@ -1125,15 +1156,15 @@ function TaskGallery({
             </AnimatePresence>
           </div>
         )}
-        {!selectionMode && view === 'trash' && <EmptyTrashButton key={mode} mode={mode} revision={total} onEmptied={fetchTasks} />}
+        <div className="task-gallery-toolbar-right ml-auto flex max-w-full shrink-0 items-center justify-end gap-1.5">
         {!selectionMode && (
-          <div className="relative ml-auto w-48">
-            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-nexus-muted" />
-            <input value={query} onChange={event => setQuery(event.target.value)} aria-label="搜索任务画廊" placeholder="搜索任务、ID、端点" className="glass-input h-8 w-full pl-8 pr-2 text-xs outline-none" />
+          <div className="task-gallery-search relative w-[152px] min-w-[128px] shrink-0">
+            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 z-10 -translate-y-1/2 text-nexus-muted" />
+            <input value={query} onChange={event => setQuery(event.target.value)} aria-label="搜索任务画廊" placeholder="搜索任务 / ID" className="glass-input h-8 w-full pl-8 pr-2 text-xs outline-none" />
           </div>
         )}
         {!selectionMode && (
-          <div ref={filterMenuRef} className="relative">
+          <div ref={filterMenuRef} className="relative shrink-0">
             <IconButton
               label="筛选任务"
               aria-haspopup="menu"
@@ -1190,7 +1221,7 @@ function TaskGallery({
             </AnimatePresence>
           </div>
         )}
-        <div ref={layoutMenuRef} className={`relative ${selectionMode ? 'ml-auto' : ''}`}>
+        <div ref={layoutMenuRef} className="relative shrink-0">
           <IconButton
             label="任务卡片布局"
             aria-haspopup="menu"
@@ -1262,7 +1293,7 @@ function TaskGallery({
           label={selectionMode ? '退出批量选择' : '批量选择任务'}
           aria-pressed={selectionMode}
           onClick={toggleSelectionMode}
-          className={selectionMode ? 'text-nexus-green' : ''}
+          className={`shrink-0 ${selectionMode ? 'text-nexus-green' : ''}`}
         >
           {selectionMode ? <X size={15} /> : <ListChecks size={15} />}
         </IconButton>
@@ -1379,9 +1410,28 @@ function TaskGallery({
             </IconButton>
           </>
         ) : (
-          <IconButton label="刷新任务" onClick={() => fetchTasks()}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></IconButton>
+          <IconButton label="刷新任务" className="shrink-0" onClick={() => fetchTasks()}><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></IconButton>
         )}
+        </div>
       </div>
+
+      {!selectionMode && view === 'trash' && (
+        <div
+          className="task-trash-strip flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1.5"
+          data-testid="task-trash-strip"
+          role="region"
+          aria-label="回收站操作"
+        >
+          <span className="text-xs text-nexus-muted">
+            {mode === 'all'
+              ? '当前显示全部类型回收站；回收站中任务的「生成历史」结果已隐藏，恢复任务可重新可见。'
+              : '回收站中任务的「生成历史」结果已隐藏，恢复任务可重新可见。'}
+          </span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <EmptyTrashButton key={mode} mode={mode} revision={total} onEmptied={fetchTasks} />
+          </div>
+        </div>
+      )}
 
       {!selectionMode && activeFilters.length > 0 && (
         <div className="task-filter-strip flex h-10 shrink-0 items-center gap-2 px-3" aria-label="已应用筛选">
@@ -1410,13 +1460,21 @@ function TaskGallery({
         {libraryNotice && (
           <div role="status" className="mb-3 flex min-h-9 items-center gap-2 rounded border border-white/10 bg-white/5 px-3 text-xs text-nexus-text-light" data-testid="task-library-notice">
             {libraryNotice}
-            <button type="button" aria-label="关闭提示" title="关闭提示" onClick={() => setLibraryNotice('')} className="ml-auto text-nexus-muted hover:text-nexus-text-light"><X size={12} /></button>
+            <button type="button" aria-label="关闭提示" title="关闭提示" onClick={event => {
+              const container = event.currentTarget.closest('section, aside, .flex.h-full') || document
+              setLibraryNotice('')
+              requestAnimationFrame(() => {
+                const target = container.querySelector('button[aria-label="刷新任务"]:not(:disabled), button[aria-label="批量选择任务"]:not(:disabled), button:not(:disabled)')
+                target?.focus({ preventScroll: true })
+              })
+            }} className="ml-auto text-nexus-muted hover:text-nexus-text-light"><X size={12} /></button>
           </div>
         )}
         <TaskCardList
           items={visibleItems}
           loading={loading}
           detailed={cardDetails === 'detailed'}
+          showTypeBadge={showTypeBadge}
           selectionMode={selectionMode}
           selectedKeys={selectedKeys}
           onOpen={openItem}
@@ -1424,15 +1482,16 @@ function TaskGallery({
           onFavorite={toggleFavorite}
           onCancel={cancelTask}
           onDelete={deleteTask}
+          onRestore={restoreTask}
           onReveal={revealTaskResults}
           onMove={moveTaskResults}
           trash={view === 'trash'}
         />
         {!loading && visibleItems.length === 0 && (
-          <div className="task-empty-state">
-            <div className="task-empty-icon"><TaskTypeIcon type={mode} size={22} /></div>
+          <div className="task-empty-state" data-empty-kind={emptyArtKind}>
+            <TaskEmptyArt kind={emptyArtKind} className="mb-1" />
             <div className="text-sm font-medium text-nexus-text-light">{emptyTitle}</div>
-            <div className="font-mono text-xs text-nexus-muted">{hasSearchOrFilters ? '筛选结果 0 条' : `${({ image: '图片', video: '视频', audio: '音频' })[mode] || ''}任务 0 条`}</div>
+            <div className="font-mono text-xs text-nexus-muted">{hasSearchOrFilters ? '筛选结果 0 条' : `${mode === 'all' ? '全部' : ({ image: '图片', video: '视频', audio: '音频', layer: '图层' })[mode] || ''}任务 0 条`}</div>
             {hasSearchOrFilters && (
               <button type="button" onClick={clearSearchAndFilters} className="btn btn-secondary btn-sm mt-2">清除筛选</button>
             )}
@@ -1479,6 +1538,8 @@ function TaskGallery({
       {moveMedia && (
         <MoveToFolderDialog
           media={moveMedia}
+          overlay
+          showOutcome
           onClose={() => setMoveMedia(null)}
           onDone={summary => {
             setLibraryNotice(summary.text)
@@ -1525,7 +1586,7 @@ function TaskGallery({
 
 const MemoTaskGallery = React.memo(TaskGallery)
 
-export default function TaskGalleryBoundary({ mode, refreshToken, onReuseTask }) {
+export default function TaskGalleryBoundary({ mode, showTypeBadge = false, refreshToken, onReuseTask }) {
   const reuseTask = useLiveCallback(onReuseTask)
-  return <MemoTaskGallery mode={mode} refreshToken={refreshToken} onReuseTask={reuseTask} />
+  return <MemoTaskGallery mode={mode} showTypeBadge={showTypeBadge} refreshToken={refreshToken} onReuseTask={reuseTask} />
 }

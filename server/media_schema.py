@@ -58,6 +58,12 @@ def create(db, ensure_columns):
         );
         CREATE INDEX IF NOT EXISTS idx_media_group_members_media ON media_group_members(media_id);
         CREATE TABLE IF NOT EXISTS media_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS media_metadata (
+            media_id TEXT PRIMARY KEY,
+            width INTEGER,
+            height INTEGER,
+            duration_seconds REAL
+        );
     ''')
     _drop_sha256_unique(db)
     ensure_columns(db, 'task_assets', {'media_id': 'TEXT'})

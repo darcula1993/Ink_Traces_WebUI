@@ -26,7 +26,7 @@ def trashed(task_type, **fields):
     return tid
 
 
-@pytest.mark.parametrize('body', [None, {}, {'type': ''}, {'type': 'layer'}, {'type': 'IMAGE'}, {'type': ['image']}, ['image']])
+@pytest.mark.parametrize('body', [None, {}, {'type': ''}, {'type': 'unknown'}, {'type': 'IMAGE'}, {'type': ['image']}, ['image']])
 def test_type_is_required_and_validated(body):
     tid = trashed('image')
     r = client().post('/api/tasks/trash/empty', json=body) if body is not None else client().post('/api/tasks/trash/empty')

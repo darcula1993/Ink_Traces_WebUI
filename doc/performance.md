@@ -46,6 +46,12 @@ less-than-16.7-ms target or performance on other hardware. The
 `canvas-drag-perf.spec.js` probe records timing separately from correctness
 checks for saves, reference ports and generation requests.
 
+On the subsequent 100-node run, memoized node cards rendered 151 times across
+150 pointer moves (previously 15,100). Stable event delegates use the latest
+committed props. A scoped CSS rule now sets the five zoom-sensitive controls'
+non-inherited value, including newly mounted controls. Zoom interval p95 was
+16.8 ms. The annotation dialog now loads Konva on first use. Cold canvas
+resources in the mock fixture fell from 434,522 to 363,392 compressed bytes.
 ## Large media lists (2026-11-18)
 
 The task gallery windows accumulated lists of at least 200 cards. Sidebar
@@ -54,7 +60,8 @@ server page limits. Focused items and their adjacent keyboard items remain
 mounted at their actual positions; selection and reveal can reach offscreen
 items without mounting every intervening row. The library keeps its 40-item
 server pages and debounces search for 250 ms. Counts, pagination and select-all
-remain server-owned.
+remain server-owned. A new search applies the debounced term and resets the
+page to one in the same request.
 
 Library thumbnails use thumbnail URLs only. Media without a thumbnail show a
 type icon; browsing no longer loads original videos to extract a frame.
@@ -87,7 +94,7 @@ Synthetic benchmark (image tab, 20–120 term prompts, page of 50 plus count):
 server with the same filter. Revisit with a trigram index if the task table
 grows well beyond 50,000 rows.
 
-## Global library (2.0)
+## Global library
 
 - One `media` table for all projects. Lists are paged on the server
   (`limit` up to 200, default 50, newest first) and filtered there by folder,
@@ -98,10 +105,12 @@ grows well beyond 50,000 rows.
   conditional requests.
 - Generation results enter the library as hard links of the task output, so
   they take no extra disk space on the same file system (a copy is made only
-  across file systems). Content is deduplicated by SHA-256, so identical uploads
-  and results share one file.
-- Canvases store library ids instead of copies; writing a result back to a
-  canvas no longer copies files.
+  across file systems). Imports look up existing content by SHA-256. Since v2.2,
+  a copy out of generation history is a separate library item with its own ID
+  and uses a hard link where supported. Uploads do not reuse hidden history items.
+- Canvases store library IDs. Since v2.2, generation and group runs submit
+  references by ID. The server prepares task snapshots, using hard links when
+  the bytes match. Image normalization can require a separate file.
 
 ## Worker settings
 
@@ -142,11 +151,3 @@ Dedicated tests cover thin summaries, gzip/ETag/range negotiation, byte-preservi
 streamed image downloads, pool isolation, upload races and retries, object URL
 lifetime, whole-library selection, pagination, hidden tabs and status batching.
 Generation requests in tests are mocked; performance work requires no paid calls.
-
-On the subsequent 100-node run, memoized node cards rendered 151 times across
-150 pointer moves (previously 15,100). Stable event delegates use the latest
-committed props. A scoped CSS rule now sets the five zoom-sensitive controls'
-non-inherited value, including newly mounted controls. Zoom interval p95 was
-16.8 ms. The annotation dialog now loads Konva on first use. Cold canvas
-resources in the mock fixture fell from 434,522 to 363,392 compressed bytes.
-Library search now applies the debounced term and page one together.

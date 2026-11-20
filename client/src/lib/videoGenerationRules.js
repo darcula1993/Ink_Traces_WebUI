@@ -2,6 +2,9 @@ import {VIDEO_MODEL_CAPABILITIES,SEEDANCE_25,SEEDANCE_25_MODERATED} from './gene
 
 export const VIDEO_RATIOS = ['adaptive','16:9','4:3','1:1','3:4','9:16','21:9']
 export const VIDEO_AUTO_DURATION = -1
+export const videoRatioLabel = value => value === 'adaptive' ? '自动匹配' : (value || '16:9')
+export const videoOutputSummary = ({ ratio = '16:9', resolution = '720p', duration = 5 } = {}) =>
+ `${videoRatioLabel(ratio)} · ${resolution || '720p'} · ${(duration ?? 5) === VIDEO_AUTO_DURATION ? 'Auto' : `${duration ?? 5}s`}`
 export const effectiveVideoModel = (model,models=[]) => model || models[0]?.id || ''
 export const videoCapabilities = model => VIDEO_MODEL_CAPABILITIES[model===SEEDANCE_25_MODERATED?SEEDANCE_25:model]
 export const videoDurations = model => {

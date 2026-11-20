@@ -157,3 +157,24 @@ def test_group_preview_and_submit_with_bound_mention(group_env):
     inputs = [a['path'] for a in task_db.list_assets(b['task_id']) if a['kind'] == 'input_image']
     ext_bytes = store.asset_path(store.get_asset(wid, ext['id'])).read_bytes()
     assert len(inputs) == 2 and Path(inputs[1]).read_bytes() == ext_bytes
+
+
+def test_keyframe_and_multi_result_writeback_never_duplicate_mentions(canvas):
+    ext = store.save_asset(canvas, io.BytesIO(png('red')), 'ext.png')
+    tid = task_db.create_task('image', 'first frame', {'canvas_workflow_id': canvas, 'canvas_node_id': 'a'})
+    nodes = [
+        {'id': 'a', 'type': 'image', 'title': 'a', 'x': 0, 'y': 0, 'text': '首帧', 'params': {},
+         'providerSelection': {'provider': 'ark', 'profile_id': None}, 'task': {'id': tid, 'status': 'pending', 'error': None}},
+        {'id': 'src', 'type': 'asset', 'title': 'src', 'x': 0, 'y': 200, 'asset': ext, 'candidates': [ext], 'selectedCandidateId': ext['id']},
+        {'id': 'v', 'type': 'video', 'title': 'v', 'x': 300, 'y': 0, 'text': '从 @图片1 到 @图片2',
+         'params': {'video_mode': 'keyframe'}, 'providerSelection': {'provider': 'ark', 'profile_id': None}},
+    ]
+    wf = store.workflow(canvas)
+    store.update_workflow(canvas, wf['title'], {**wf['document'], 'nodes': nodes, 'edges': [
+        {'id': 'e1', 'source': 'a', 'target': 'v'}, {'id': 'e2', 'source': 'src', 'target': 'v'}]}, wf['revision'])
+    finish(tid)
+    document = store.workflow(canvas)['document']
+    v = next(n for n in document['nodes'] if n['id'] == 'v')
+    a = next(n for n in document['nodes'] if n['id'] == 'a')
+    assert v['text'] == '从 @图片2 到 @图片1'
+    assert v['referenceMentions'] == {'@图片2': ext['id'], '@图片1': a['asset']['id']}

@@ -42,8 +42,19 @@ export function canvasMentionItems(node,assets) {
  return ordered.filter(asset=>Object.hasOwn(counts,asset.kind)).map(asset=>({...promptMentionItem(asset.kind,++counts[asset.kind],{...asset,preview:asset.kind==='image'?asset.url:null},'canvas'),id:asset.id,assetId:asset.id}))
 }
 export function bindReferenceMentions(node,assets,text=node.text) {
- const current=new Map(canvasMentionItems(node,assets).map(item=>[item.token,item.assetId])),bindings={}
- for(const token of referenceTokens(text)){const id=node.referenceMentions?.[token]||current.get(token);if(id)bindings[token]=id}
+ const items=canvasMentionItems(node,assets),current=new Map(items.map(item=>[item.token,item])),tokens=referenceTokens(text),bindings={}
+ const prefixOf=token=>token.replace(/\d+$/,'')
+ for(const token of tokens){const saved=node.referenceMentions?.[token];if(saved)bindings[token]=saved}
+ const used=new Set(Object.values(bindings))
+ for(const token of tokens){
+  if(bindings[token])continue
+  const target=current.get(token)
+  if(!target)continue
+  if(!used.has(target.assetId)){bindings[token]=target.assetId;used.add(target.assetId);continue}
+  const kindPrefix=prefixOf(token)
+  const fallback=items.find(item=>prefixOf(item.token)===kindPrefix&&!used.has(item.assetId))
+  if(fallback){bindings[token]=fallback.assetId;used.add(fallback.assetId)}
+ }
  return bindings
 }
 // CANVAS-INPUT-20261114 #6 (user decision 11-14): a mention whose bound material is no longer a reference is

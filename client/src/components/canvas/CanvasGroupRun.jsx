@@ -17,23 +17,25 @@ export function useGroupRunController({workflowId, save, getRevision, titleOf, g
     if (!workflowId) return
     listActiveGroupRuns(workflowId).then(items => { if (owner.current === workflowId) setRuns(latestRunsByGroup(items)) }).catch(() => {})
   }, [workflowId])
+  const refresh = useCallback(async () => {
+    const wid = owner.current
+    if (!wid) return
+    try {
+      const active = await listActiveGroupRuns(wid), ids = new Set(active.map(run => run.id))
+      if (owner.current !== wid) return
+      active.forEach(put)
+      const gone = [...runsRef.current.values()].filter(run => isActiveRun(run) && !ids.has(run.id))
+      for (const run of gone) { const final = await getGroupRun(wid, run.id).catch(() => null); if (owner.current === wid && final) put(final) }
+    } catch { /* keep the last known state; next tick retries */ }
+  }, [put])
   const hasActive = [...runs.values()].some(isActiveRun)
   useEffect(() => {
     if (!workflowId || !hasActive) return
     let stopped = false
-    const tick = async () => {
-      try {
-        const active = await listActiveGroupRuns(workflowId), ids = new Set(active.map(run => run.id))
-        if (stopped || owner.current !== workflowId) return
-        active.forEach(put)
-        // A run that left the active list has finished: fetch its final state once (stopped reason, blocked nodes).
-        const gone = [...runsRef.current.values()].filter(run => isActiveRun(run) && !ids.has(run.id))
-        for (const run of gone) { const final = await getGroupRun(workflowId, run.id).catch(() => null); if (!stopped && final) put(final) }
-      } catch { /* keep the last known state; next tick retries */ }
-    }
+    const tick = async () => { if (!stopped) await refresh() }
     const timer = setInterval(tick, POLL_MS)
     return () => { stopped = true; clearInterval(timer) }
-  }, [workflowId, hasActive, put])
+  }, [workflowId, hasActive, refresh])
 
   const list = useMemo(() => [...runs.values()], [runs])
   const marks = useMemo(() => nodeRunMarks(list), [list])
@@ -95,7 +97,7 @@ export function useGroupRunController({workflowId, save, getRevision, titleOf, g
     </ConfirmDialog>}
     {list.some(run => run.status === 'awaiting_confirm') && <div className="cv-group-run-banners">{list.filter(run => run.status === 'awaiting_confirm').map(run => <GroupRunBanner key={run.id} run={run} title={groupTitleOf(run.group_id)} titleOf={titleOf} error={bannerError[run.id]} onConfirm={() => confirm(run)} onCancel={() => setCancelTarget(run)}/>)}</div>}
   </>
-  return {runs: list, runFor: groupId => runs.get(groupId) || null, marks, owningRun: nodeId => owningRun(list, nodeId), start, requestCancel: run => setCancelTarget(run), dismiss, element}
+  return {runs: list, runFor: groupId => runs.get(groupId) || null, marks, owningRun: nodeId => owningRun(list, nodeId), start, requestCancel: run => setCancelTarget(run), dismiss, refresh, element}
 }
 
 export function GroupRunConfirmDialog({group, preview, titleOf, onClose, onConfirm}) {

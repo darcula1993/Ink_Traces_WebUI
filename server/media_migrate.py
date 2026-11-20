@@ -499,9 +499,11 @@ def _state(db):
 
 
 def preflight(db, db_path, backup_dir, now=None):
-    """Blockers for --apply: active work, running Worker, missing/stale backup."""
+    """Blockers for --apply: external tools, active work, running Worker, missing/stale backup."""
     blockers, warnings = [], []
     now = now or datetime.now(timezone.utc)
+    if not shutil.which('ffprobe'):
+        blockers.append('缺少外部依赖 ffprobe，无法校验音视频素材，请先安装 ffmpeg/ffprobe')
     active = db.execute(f"SELECT COUNT(*) FROM tasks WHERE status IN ({','.join('?' * len(ACTIVE_TASK_STATUSES))})",
                         ACTIVE_TASK_STATUSES).fetchone()[0]
     if active:

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { AnimatePresence, motion, useDragControls } from 'framer-motion'
-import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, FolderInput, FolderSearch, Heart, Image as ImageIcon, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioLines, ArchiveRestore, Ban, Braces, Check, ChevronDown, ChevronLeft, ChevronRight, Columns3, Copy, Download, FolderHeart, FolderInput, FolderSearch, Heart, Image as ImageIcon, MapPin, RefreshCw, RotateCcw, Trash2, X, ZoomIn, ZoomOut } from 'lucide-react'
 import IconButton from '../ui/IconButton'
 import useModalFocus, { isTopModal } from '../ui/useModalFocus'
-import { ACTIVE_STATUSES, STATUS, taskStatusInfo, providerLabel, downloadExtension, uniqueDownloadName, taskDownloadUrl } from './taskModel.js'
-import { AudioArtwork, TaskPreview } from './TaskPreview.jsx'
+import { requestCanvasLocateNode } from '../../lib/canvasBridge.js'
+import { ACTIVE_STATUSES, STATUS, taskStatusInfo, providerLabel, downloadExtension, uniqueDownloadName, taskDownloadUrl, taskTypeLabel } from './taskModel.js'
+import { AudioArtwork, TaskPreview, TaskTypeIcon } from './TaskPreview.jsx'
 
 export function DetailMedia({ item, outputIndex, setOutputIndex }) {
   if (ACTIVE_STATUSES.has(item.status) || item.status === 'failed' || (!item.images?.length && !item.video && !item.audio && !item.poster)) {
@@ -21,6 +22,30 @@ export function DetailMedia({ item, outputIndex, setOutputIndex }) {
       <div className="audio-detail-player">
         <AudioArtwork compact={false} />
         <audio src={item.audio} controls preload="metadata" className="relative z-10 w-full" />
+      </div>
+    )
+  }
+  if (item.type === 'layer') {
+    const layerEntries = item.images.map((url, index) => {
+      if (index === 0) return { url, label: '基础图' }
+      const meta = item.layers?.[index - 1]
+      return { url, label: meta?.name || `图层 ${index}` }
+    })
+    return (
+      <div className="flex size-full min-h-0 flex-col">
+        <div className="flex min-h-0 flex-1 items-center justify-center p-5">
+          <img src={layerEntries[outputIndex]?.url || layerEntries[0]?.url} className="max-h-full max-w-full object-contain" alt={layerEntries[outputIndex]?.label || '图层分解输出'} />
+        </div>
+        {layerEntries.length > 1 && (
+          <div className="flex h-24 shrink-0 justify-center gap-2 overflow-x-auto border-t border-white/8 px-3 py-2" data-testid="task-detail-layers-strip">
+            {layerEntries.map((entry, index) => (
+              <button key={`${entry.url}-${index}`} type="button" onClick={() => setOutputIndex(index)} className={`flex shrink-0 flex-col items-center gap-1 rounded border p-1 ${index === outputIndex ? 'border-nexus-green bg-nexus-green/10' : 'border-white/10 hover:border-white/25'}`}>
+                <img src={entry.url} className="h-12 w-12 rounded object-cover" alt={entry.label} />
+                <span className="max-w-16 truncate text-[10px] text-nexus-text">{entry.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -113,7 +138,7 @@ export function TaskCompareModal({ items, onClose, onReuse }) {
           <Columns3 size={16} className="text-nexus-cyan" />
           <div>
             <div className="text-sm font-semibold text-nexus-text-light">任务对比</div>
-            <div className="font-mono text-xs text-nexus-muted">{items.length} ITEMS</div>
+            <div className="font-mono text-xs text-nexus-muted">{items.length} 项</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <ZoomOut size={14} className="text-nexus-muted" />
@@ -222,6 +247,7 @@ export function TaskDetailModal({
   const [outputIndex, setOutputIndex] = useState(0)
   const [referenceIndex, setReferenceIndex] = useState(null)
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false)
+  const [canvasNotice, setCanvasNotice] = useState('')
   const [openedAt] = useState(() => new Date())
   const backdropRef = useRef(null)
   const downloadMenuRef = useRef(null)
@@ -234,6 +260,7 @@ export function TaskDetailModal({
     setOutputIndex(0)
     setReferenceIndex(null)
     setDownloadMenuOpen(false)
+    setCanvasNotice('')
   }, [item.key])
   useEffect(() => {
     if (!downloadMenuOpen) return undefined
@@ -277,18 +304,19 @@ export function TaskDetailModal({
   const originalDownloadUrl = download ? taskDownloadUrl(item, download, true) : ''
   const supportsPngInfo = download && item.type === 'image' && downloadExtension(item, download) === 'png'
   const aspectRatio = params.aspect_ratio === 'auto'
-    ? 'Auto'
+    ? '自动'
     : params.aspect_ratio === 'custom' ? '自定义' : (params.aspect_ratio || params.ratio)
   const rows = [
+    ['模型', params.model],
+    ['服务商', item.provider ? providerLabel(item.provider) : null],
     ['画幅', aspectRatio],
     ['尺寸', params.size],
     ['分辨率', params.resolution],
-    ['时长', params.duration === -1 ? 'Auto' : params.duration ? `${params.duration}s` : null],
+    ['时长', params.duration === -1 ? '自动' : params.duration ? `${params.duration}s` : null],
     ['格式', params.output_format?.toUpperCase()],
     ['采样率', params.sample_rate ? `${Number(params.sample_rate) / 1000} kHz` : null],
     ['字幕', params.enable_subtitle === undefined ? null : params.enable_subtitle ? '开启' : '关闭'],
     ['声线', params.speaker],
-    ['Provider', item.provider],
   ].filter(([, value]) => value !== undefined && value !== null && value !== '')
 
   return ReactDOM.createPortal(
@@ -326,7 +354,13 @@ export function TaskDetailModal({
           <IconButton label="上一个任务" onClick={onPrevious}><ChevronLeft size={17} /></IconButton>
           <span className="min-w-16 text-center font-mono text-xs text-nexus-text">{position + 1} / {total}</span>
           <IconButton label="下一个任务" onClick={onNext}><ChevronRight size={17} /></IconButton>
-          <span className="ml-3 truncate font-mono text-xs text-nexus-muted">TASK #{item.taskId}</span>
+          <span className="ml-3 truncate font-mono text-xs text-nexus-muted">任务 #{item.taskId}</span>
+          {item.type && (
+            <span className="task-type-badge ml-2" data-testid="task-detail-type-badge">
+              <TaskTypeIcon type={item.type} size={11} />
+              {taskTypeLabel(item.type)}
+            </span>
+          )}
           <span className="ml-auto">
             <IconButton label="关闭任务详情" onClick={onClose}><X size={18} /></IconButton>
           </span>
@@ -340,8 +374,8 @@ export function TaskDetailModal({
           <div className="custom-scrollbar flex-1 overflow-y-auto">
             <section className="border-b border-white/8 p-4">
               <div className="mb-3 flex items-center gap-2 text-xs font-semibold text-nexus-text-light">
-                <Braces size={14} className="text-nexus-green" /> Prompt
-                <button type="button" aria-label="复制 Prompt" title="复制 Prompt" onClick={() => navigator.clipboard?.writeText(item.prompt || '')} className="btn btn-icon btn-sm ml-auto"><Copy size={13} /></button>
+                <Braces size={14} className="text-nexus-green" /> 提示词
+                <button type="button" aria-label="复制提示词" title="复制提示词" onClick={() => navigator.clipboard?.writeText(item.prompt || '')} className="btn btn-icon btn-sm ml-auto"><Copy size={13} /></button>
               </div>
               <p className="whitespace-pre-wrap break-words text-sm leading-6 text-nexus-text">{item.prompt || '未填写提示词'}</p>
             </section>
@@ -350,6 +384,66 @@ export function TaskDetailModal({
                 <div className="mb-2 text-xs font-semibold text-nexus-amber">结果未知，可能已计费</div>
                 <p className="text-xs leading-5 text-nexus-text">{item.resultUnknownReason ? `${item.resultUnknownReason}。` : ''}请求已发出但没有收到确认结果。请先到供应商控制台核查{item.type === 'image' ? '；重试需要再次确认，可能重复计费' : '；此类任务不提供重试，请复用参数后自行决定是否重新提交'}。</p>
                 {item.error && <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-5 text-nexus-text-light">{item.error}</p>}
+              </section>
+            )}
+            {item.canvasSource && (
+              <section className="border-b border-white/8 p-4" data-testid="task-canvas-source">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-nexus-text-light">
+                  <span>来源画布</span>
+                  {(item.canvasSource.workflow_deleted || item.canvasSource.project_deleted) ? (
+                    <span className="font-normal text-nexus-amber">原画布已删除</span>
+                  ) : item.canvasSource.node_deleted ? (
+                    <span className="font-normal text-nexus-amber">原节点已删除</span>
+                  ) : null}
+                </div>
+                <dl className="mb-3 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-nexus-muted">项目 / 画布</dt>
+                    <dd className="truncate text-right text-nexus-text-light" title={`${item.canvasSource.project_name || '已删除项目'} / ${item.canvasSource.workflow_name || '已删除画布'}`}>
+                      {item.canvasSource.project_name || '已删除项目'} / {item.canvasSource.workflow_name || '已删除画布'}
+                    </dd>
+                  </div>
+                  {(item.canvasSource.node_label || item.canvasSource.node_id) && (
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-nexus-muted">节点</dt>
+                      <dd className="truncate text-right text-nexus-text-light" title={item.canvasSource.node_label || item.canvasSource.node_id}>
+                        {item.canvasSource.node_label || (item.canvasSource.node_deleted ? '原节点已删除' : item.canvasSource.node_id)}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+                <button
+                  type="button"
+                  data-testid="task-locate-canvas-node"
+                  className="btn btn-secondary btn-sm btn-block"
+                  onClick={() => {
+                    const src = item.canvasSource
+                    if (src.workflow_deleted || src.project_deleted) {
+                      setCanvasNotice('原画布已删除，无法定位节点')
+                      return
+                    }
+                    const handled = requestCanvasLocateNode({
+                      projectId: src.project_id,
+                      workflowId: src.workflow_id,
+                      nodeId: src.node_id,
+                      projectName: src.project_name,
+                      workflowName: src.workflow_name,
+                      nodeLabel: src.node_label,
+                    })
+                    if (handled) {
+                      onClose()
+                    } else {
+                      setCanvasNotice('请切换到创作画布以查看原节点')
+                    }
+                  }}
+                >
+                  <MapPin size={13} aria-hidden="true" /> 返回画布定位节点
+                </button>
+                {canvasNotice && (
+                  <p role="status" data-testid="task-canvas-source-notice" className="mt-2 text-xs leading-5 text-nexus-amber">
+                    {canvasNotice}
+                  </p>
+                )}
               </section>
             )}
             <section className="border-b border-white/8 p-4">
@@ -421,11 +515,16 @@ export function TaskDetailModal({
               </section>
             )}
           </div>
-          <footer className="flex h-14 shrink-0 items-center gap-1 border-t border-white/10 px-3">
-            {item.taskId && !trash && (
-              <IconButton label={item.favorite ? '取消收藏任务' : '收藏任务'} onClick={() => onFavorite(item)} className={item.favorite ? 'text-[#ff5c7c]' : ''}>
-                <Heart size={17} fill={item.favorite ? 'currentColor' : 'none'} />
-              </IconButton>
+          <footer className="task-detail-footer flex min-h-14 shrink-0 flex-wrap items-center gap-1.5 border-t border-white/10 px-3 py-2">
+            {item.kind === 'history' && !trash && (
+              <button type="button" aria-label="复用任务参数" title="复用任务参数" onClick={() => onReuse(item.source)} className="btn btn-primary btn-sm">
+                <RotateCcw size={14} /> 复用参数
+              </button>
+            )}
+            {item.kind === 'history' && trash && (
+              <button type="button" aria-label="恢复任务" title="恢复任务" onClick={() => onRestore(item)} className="btn btn-primary btn-sm">
+                <ArchiveRestore size={14} /> 恢复任务
+              </button>
             )}
             {supportsPngInfo ? (
               <div ref={downloadMenuRef} className="relative">
@@ -436,10 +535,11 @@ export function TaskDetailModal({
                   aria-expanded={downloadMenuOpen}
                   title="选择下载格式"
                   onClick={() => setDownloadMenuOpen(open => !open)}
-                  className={`btn btn-icon ${downloadMenuOpen ? 'is-active' : ''}`}
+                  className={`btn btn-secondary btn-sm ${downloadMenuOpen ? 'is-active' : ''}`}
                 >
-                  <Download size={17} />
-                  <ChevronDown size={10} />
+                  <Download size={14} />
+                  下载
+                  <ChevronDown size={11} />
                 </button>
                 <AnimatePresence>
                   {downloadMenuOpen && (
@@ -462,28 +562,29 @@ export function TaskDetailModal({
                 </AnimatePresence>
               </div>
             ) : download ? (
-              <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="btn btn-icon"><Download size={17} /></a>
+              <a href={downloadUrl} download={downloadName} aria-label="下载任务结果" title={downloadName} className="btn btn-secondary btn-sm"><Download size={14} /> 下载</a>
             ) : null}
+            {item.taskId && !trash && (
+              <IconButton label={item.favorite ? '取消收藏任务' : '收藏任务'} onClick={() => onFavorite(item)} className={`btn-sm ${item.favorite ? 'text-[#ff5c7c]' : ''}`}>
+                <Heart size={15} fill={item.favorite ? 'currentColor' : 'none'} />
+              </IconButton>
+            )}
             {item.libraryMedia?.length > 0 && onReveal && (
-              <IconButton label="在素材库中显示" onClick={() => onReveal(item)}><FolderSearch size={17} /></IconButton>
+              <IconButton label="在素材库中显示" onClick={() => onReveal(item)} className="btn-sm"><FolderSearch size={15} /></IconButton>
             )}
             {item.libraryMedia?.length > 0 && onMove && (
-              <IconButton label={item.libraryMedia.length > 1 ? `全部 ${item.libraryMedia.length} 个结果复制到文件夹` : '结果复制到文件夹'} onClick={() => onMove(item)}><FolderInput size={17} /></IconButton>
+              <IconButton label={item.libraryMedia.length > 1 ? `全部 ${item.libraryMedia.length} 个结果复制到文件夹` : '结果复制到文件夹'} onClick={() => onMove(item)} className="btn-sm"><FolderInput size={15} /></IconButton>
             )}
             {item.resultDeleted && <span className="px-1 text-xs text-nexus-muted" data-testid="task-detail-result-deleted">结果已删除</span>}
-            {item.kind === 'history' && !trash && <IconButton label="复用任务参数" onClick={() => onReuse(item.source)}><RotateCcw size={17} /></IconButton>}
             {item.taskId && ACTIVE_STATUSES.has(item.status) && item.status !== 'cancel_requested' && !trash && (
-              <IconButton label="取消任务" onClick={() => onCancel(item)} className="hover:text-nexus-amber"><Ban size={17} /></IconButton>
+              <IconButton label="取消任务" onClick={() => onCancel(item)} className="btn-sm hover:text-nexus-amber"><Ban size={15} /></IconButton>
             )}
             {item.taskId && item.type === 'image' && ['failed', 'cancelled'].includes(item.status) && !trash && (
-              <IconButton label={item.resultUnknown ? '重试任务（结果未知，需确认）' : '重试任务'} onClick={() => onRetry(item)}><RefreshCw size={17} /></IconButton>
-            )}
-            {item.kind === 'history' && trash && (
-              <IconButton label="恢复任务" onClick={() => onRestore(item)}><ArchiveRestore size={17} /></IconButton>
+              <IconButton label={item.resultUnknown ? '重试任务（结果未知，需确认）' : '重试任务'} onClick={() => onRetry(item)} className="btn-sm"><RefreshCw size={15} /></IconButton>
             )}
             {item.kind === 'history' && (
               <span className="ml-auto">
-                <IconButton label={trash ? '彻底删除任务' : '移到回收站'} onClick={() => onDelete(item)} className="hover:text-nexus-red"><Trash2 size={17} /></IconButton>
+                <IconButton label={trash ? '彻底删除任务' : '移到回收站'} onClick={() => onDelete(item)} className="btn-sm btn-danger"><Trash2 size={15} /></IconButton>
               </span>
             )}
           </footer>
@@ -515,7 +616,7 @@ export function TaskDetailModal({
             >
               <header className="flex h-11 shrink-0 items-center border-b border-white/10 px-3">
                 <span className="font-mono text-xs text-nexus-muted">
-                  REF {referenceIndex + 1} / {item.refs.length}
+                  参考素材 {referenceIndex + 1} / {item.refs.length}
                 </span>
                 <span className="ml-auto">
                   <IconButton label="关闭参考素材预览" onClick={() => setReferenceIndex(null)}><X size={17} /></IconButton>

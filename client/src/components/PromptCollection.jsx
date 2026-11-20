@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
-import { Check, Edit2, Library, Search, Trash2, X } from 'lucide-react'
+import { Check, Edit2, Search, Trash2, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import askConfirm from './ui/askConfirm'
+import { PromptEmptyArt } from './art/ShellEmptyArt'
 
 function PromptCollection({ onSelectPrompt }) {
   const [prompts, setPrompts] = useState([])
@@ -100,7 +101,7 @@ function PromptCollection({ onSelectPrompt }) {
           </div>
         ) : visiblePrompts.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center text-center text-nexus-muted">
-            <Library size={30} className="mb-3 opacity-40" />
+            <PromptEmptyArt isSearch={Boolean(query.trim())} className="mb-2.5" />
             <p className="text-sm">{query ? '没有匹配的提示词' : '提示词库为空'}</p>
           </div>
         ) : (

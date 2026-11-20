@@ -14,7 +14,7 @@
 }
 
 /* ---- head: kind glyph + editable name + collapse */
-.canvas-studio .cv-properties-head { min-height: 52px; padding: 8px 8px 8px var(--pf-pad); gap: 8px; }
+.canvas-studio .cv-properties-head { height: 44px; min-height: 44px; padding: 0 8px 0 var(--pf-pad); gap: 8px; }
 .canvas-studio .cv-properties-kind-box { flex: 0 0 auto; display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--pf-rim); border-radius: 6px; background: var(--pf-fill); }
 .canvas-studio .cv-properties-head .cv-panel-title { height: 32px; margin-left: -4px; padding: 0 4px; }
 .canvas-studio .cv-properties-head .btn.btn-icon.btn-sm { color: var(--text-2); border-color: transparent; background: transparent; }
@@ -135,7 +135,27 @@
 .canvas-studio .cv-properties .cv-pf-refs .ul-upload-menu summary:hover { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); }
 .canvas-studio .cv-properties .cv-pf-refs .ul-upload-menu summary:focus-visible { outline: none; box-shadow: var(--ring-focus); }
 .canvas-studio .cv-properties .cv-pf-refs .ul-upload-menu > div { left: auto; right: 0; }
-.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumbnails { flex-wrap: wrap; gap: 8px; overflow: visible; padding: 0; }
+.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumbnails { flex-wrap: wrap; gap: 8px; overflow: visible; padding: 2px 2px 0 0; }
+.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-preview-btn {
+  display: block; padding: 0; margin: 0; min-height: 0; border: 0; border-radius: 3px; background: transparent;
+  line-height: 0; cursor: zoom-in;
+}
+.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-preview-btn:focus-visible {
+  outline: none; box-shadow: var(--ring-focus);
+}
+.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-remove {
+  position: absolute; top: -6px; right: -6px; z-index: 3; width: 18px; height: 18px; min-height: 0; min-width: 0;
+  padding: 0; display: grid; place-items: center; border-radius: 999px;
+  border: 1px solid var(--cv-border-strong); background: var(--surface-solid, #18191b); color: var(--text-2);
+  cursor: pointer; transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-remove:hover {
+  color: var(--cv-text); border-color: var(--danger); background: var(--surface-2, #222528);
+}
+.canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-remove:focus-visible {
+  outline: none; box-shadow: var(--ring-focus); color: var(--cv-text);
+}
+.canvas-studio .cv-properties .cv-pf-field select.is-mixed { color: var(--text-2); }
 
 /* versions: compact chips */
 .canvas-studio .cv-properties .cv-pf-versions .cv-candidates { gap: 6px; }
@@ -150,10 +170,13 @@
 .canvas-studio .cv-properties-footer .btn.cv-pf-primary { width: 100%; min-height: var(--pf-h); height: var(--pf-h); border-radius: 8px; font-size: 13px; font-weight: 600; gap: 6px; }
 .canvas-studio .cv-properties-footer .btn.cv-pf-primary:disabled { opacity: .45; cursor: not-allowed; }
 
-/* non-generation contents (canvas / text / asset / multi / group) keep their layout, on the same 16px gutter */
-.canvas-studio .cv-properties-body > :not(.cv-generation-body) { padding-top: 12px; }
+/* non-generation contents (canvas / text / asset / multi / group) share the same .cv-pf-section rhythm as generation */
 .canvas-studio .cv-properties .cv-pf-section .cv-prop-hint { margin: 0; }
-.canvas-studio .cv-properties .cv-prop-actions .btn { min-height: 32px; }
+.canvas-studio .cv-properties .cv-pf-section .cv-prop-stats { margin: 0; }
+.canvas-studio .cv-properties .cv-pf-section .cv-prop-summary,
+.canvas-studio .cv-properties .cv-pf-section .cv-prop-sublabel { margin: 0; font-size: 12px; color: var(--text-2); }
+.canvas-studio .cv-properties .cv-pf-section .cv-prop-summary { color: var(--cv-text); }
+.canvas-studio .cv-properties .cv-prop-actions .btn { min-height: 32px; height: 32px; }
 /* prompt tools: 编辑提示词 across the full width, 提示词库 / 存入提示词库 as an equal pair below */
 .canvas-studio .cv-properties .cv-pf-buttons .btn { color: var(--btn-text); }
 .canvas-studio .cv-properties .cv-pf-prompt .cv-pf-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }

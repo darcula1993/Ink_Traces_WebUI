@@ -42,7 +42,8 @@ def _filters(args):
     if not page.isdigit() or not limit.isdigit():
         raise media.MediaError('分页参数无效')
     return int(page), int(limit), {'folder_id': folder, 'include_subfolders': args.get('include_subfolders') == '1',
-                                   'kind': args.get('kind') or None, 'q': args.get('q') or None, 'origin': args.get('origin') or None}
+                                   'kind': args.get('kind') or None, 'q': args.get('q') or None, 'origin': args.get('origin') or None,
+                                   'sort': args.get('sort') or 'newest'}
 
 
 @media_api.route(PREFIX, methods=['GET', 'POST'])
@@ -91,12 +92,29 @@ def info(media_id):
     return jsonify(success=True, media=media.public(media.get_media(media_id)))
 
 
+@media_api.get(PREFIX + '/<media_id>/references')
+def references(media_id):
+    return jsonify(success=True, **media.media_references(media_id))
+
+
 @media_api.get(PREFIX + '/<media_id>/thumbnail')
 def thumbnail(media_id):
     from PIL import Image, ImageOps
     row = media.get_media(media_id)
+    if row['kind'] == 'video':
+        thumb = media.ensure_video_thumbnail(row)
+        if thumb is None:
+            raise media.MediaError('此视频暂无可用封面缩略图', 404, 'no_thumbnail')
+        try:
+            response = send_file(thumb, mimetype='image/webp', conditional=True)
+        except FileNotFoundError:
+            media.get_media(media_id)
+            raise media.MediaError('缩略图不可用', 409, 'file_missing') from None
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Cache-Control'] = 'private, max-age=60'
+        return response
     if row['kind'] != 'image':
-        raise media.MediaError('此素材没有图片缩略图', 404, 'no_thumbnail')
+        raise media.MediaError('此素材没有缩略图', 404, 'no_thumbnail')
     output = io.BytesIO()
     try:
         with Image.open(media.media_path(row)) as original:
@@ -110,6 +128,7 @@ def thumbnail(media_id):
         raise media.MediaError('缩略图不可用', 409, 'file_missing') from error
     output.seek(0)
     response = send_file(output, mimetype='image/webp')
+    response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Cache-Control'] = 'private, max-age=60'
     return response
 

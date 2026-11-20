@@ -26,6 +26,18 @@ TASK_VIEWS = {'all', 'favorite', 'active', 'trash'}
 TASK_SORTS = {'newest', 'oldest', 'updated'}
 
 
+TRASH_TASK_TYPES = ('all', 'image', 'video', 'audio', 'layer')
+SKIP_REASONS = ('cancel_requested', 'leased', 'not_in_trash')
+
+
+def _parse_optional_task_type(raw):
+    if raw is None or raw == '':
+        return None, None
+    if not isinstance(raw, str) or raw not in TRASH_TASK_TYPES:
+        return None, (jsonify({'success': False, 'error': 'type 必须是 all、image、video、audio 或 layer'}), 400)
+    return (None if raw == 'all' else raw), None
+
+
 TASK_FILTER_STATUSES = {
     'submitting', 'preparing', 'pending', 'processing', 'cancel_requested',
     'succeeded', 'failed', 'cancelled',
@@ -98,7 +110,9 @@ def _parse_task_ids(data, maximum=500):
 
 @task_api.route('/api/tasks', methods=['GET'])
 def api_list_tasks():
-    task_type = request.args.get('type')
+    task_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
     advanced_filters, advanced_error = _task_advanced_filters()
     if advanced_error:
         return advanced_error
@@ -133,7 +147,9 @@ def api_list_tasks():
 
 @task_api.route('/api/tasks/filter-options', methods=['GET'])
 def api_task_filter_options():
-    task_type = request.args.get('type')
+    task_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
     deleted = request.args.get('deleted', '').lower() in ('1', 'true', 'yes')
     return jsonify({
         'success': True,
@@ -143,6 +159,9 @@ def api_task_filter_options():
 
 @task_api.route('/api/tasks/status', methods=['GET'])
 def api_task_statuses():
+    effective_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
     raw_ids = request.args.get('ids', '')
     if not raw_ids:
         return jsonify({'success': False, 'error': '缺少任务 ids'}), 400
@@ -158,7 +177,10 @@ def api_task_statuses():
             task_ids.append(task_id)
     if len(task_ids) > 100:
         return jsonify({'success': False, 'error': '单次最多查询 100 个任务'}), 400
-    statuses = attach_library_status(task_db.get_task_statuses(task_ids))
+    statuses = task_db.get_task_statuses(task_ids)
+    if effective_type:
+        statuses = [task for task in statuses if task.get('type') == effective_type]
+    statuses = attach_library_status(statuses)
     found = {int(task['id']) for task in statuses}
     return jsonify({
         'success': True,
@@ -170,7 +192,9 @@ def api_task_statuses():
 @task_api.route('/api/tasks/navigation', defaults={'task_id': None}, methods=['GET'])
 @task_api.route('/api/tasks/<int:task_id>/navigation', methods=['GET'])
 def api_task_navigation(task_id):
-    task_type = request.args.get('type')
+    task_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
     view = request.args.get('view', 'all')
     search = request.args.get('q', '').strip()
     sort = request.args.get('sort', 'newest')
@@ -202,8 +226,11 @@ def api_task_navigation(task_id):
 
 
 @task_api.route('/api/tasks/selection', methods=['GET'])
+@task_api.route('/api/tasks/ids', methods=['GET'])
 def api_task_selection():
-    task_type = request.args.get('type')
+    effective_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
     view = request.args.get('view', 'all')
     search = request.args.get('q', '').strip()
     sort = request.args.get('sort', 'newest')
@@ -215,22 +242,111 @@ def api_task_selection():
     if group_error:
         return group_error
     ungrouped = request.args.get('ungrouped', '').lower() in ('1', 'true', 'yes')
+    favorite_arg = request.args.get('favorite')
+    favorite = True if view == 'favorite' else (
+        None if favorite_arg is None else favorite_arg.lower() in ('1', 'true', 'yes')
+    )
+    active = view == 'active' or request.args.get('active', '').lower() in ('1', 'true', 'yes')
+    deleted = view == 'trash' or request.args.get('deleted', '').lower() in ('1', 'true', 'yes')
     advanced_filters, advanced_error = _task_advanced_filters()
     if advanced_error:
         return advanced_error
     task_ids = task_db.list_task_ids(
-        task_type=task_type,
-        favorite=True if view == 'favorite' else None,
-        active=view == 'active',
+        task_type=effective_type,
+        favorite=favorite,
+        active=active,
         search=search,
-        deleted=view == 'trash',
-        favorite_group=favorite_group if view == 'favorite' else None,
-        ungrouped=ungrouped if view == 'favorite' else False,
+        deleted=deleted,
+        favorite_group=favorite_group if (view == 'favorite' or favorite is True) else None,
+        ungrouped=ungrouped if (view == 'favorite' or favorite is True) else False,
         sort=sort,
         status=advanced_filters['status'], provider=advanced_filters['provider'],
         model=advanced_filters['model'], created_after=advanced_filters['created_after'],
     )
     return jsonify({'success': True, 'ids': task_ids, 'total': len(task_ids)})
+
+
+def _attach_canvas_source(task):
+    """Attach read-only canvas origin metadata (project/workflow/node) when a task came from a canvas."""
+    if not isinstance(task, dict):
+        return task
+    params = task.get('params') or {}
+    if not isinstance(params, dict):
+        params = {}
+    workflow_id = params.get('canvas_workflow_id')
+    node_id = params.get('canvas_node_id') if isinstance(params.get('canvas_node_id'), str) else None
+    db = task_db.get_db()
+    if not workflow_id and task.get('id') is not None:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='canvas_workflow_tasks'").fetchone():
+            ref = db.execute(
+                'SELECT workflow_id FROM canvas_workflow_tasks WHERE task_id = ? LIMIT 1',
+                (task['id'],),
+            ).fetchone()
+            if ref:
+                workflow_id = ref['workflow_id']
+    if not workflow_id:
+        task['canvas_source'] = None
+        return task
+
+    from canvas_cleanup import is_deleted
+    import json as _json
+
+    wf = db.execute(
+        'SELECT id, project_id, title, document FROM canvas_workflows WHERE id = ?',
+        (workflow_id,),
+    ).fetchone()
+    workflow_deleted = wf is None or is_deleted('workflow', workflow_id)
+    project_id = wf['project_id'] if wf else None
+    workflow_name = wf['title'] if wf else None
+
+    project_name = None
+    project_deleted = False
+    if project_id:
+        proj = db.execute('SELECT id, title FROM canvas_projects WHERE id = ?', (project_id,)).fetchone()
+        project_deleted = proj is None or is_deleted('project', project_id)
+        project_name = proj['title'] if proj else None
+    elif workflow_deleted:
+        project_deleted = True
+
+    node_label = None
+    node_deleted = workflow_deleted
+    if wf is not None:
+        try:
+            document = _json.loads(wf['document'] or '{}')
+        except ValueError:
+            document = {}
+        nodes = document.get('nodes', []) if isinstance(document, dict) else []
+        matched = None
+        if node_id:
+            matched = next((n for n in nodes if isinstance(n, dict) and n.get('id') == node_id), None)
+        if matched is None and task.get('id') is not None:
+            for n in nodes:
+                if not isinstance(n, dict):
+                    continue
+                nt = n.get('task')
+                if isinstance(nt, dict) and nt.get('id') == task['id']:
+                    matched = n
+                    if not node_id and isinstance(n.get('id'), str):
+                        node_id = n['id']
+                    break
+        if matched is not None:
+            node_label = matched.get('title') or None
+            node_deleted = False
+        else:
+            node_deleted = True
+
+    task['canvas_source'] = {
+        'project_id': project_id,
+        'project_name': project_name,
+        'workflow_id': workflow_id,
+        'workflow_name': workflow_name,
+        'node_id': node_id,
+        'node_label': node_label,
+        'project_deleted': bool(project_deleted),
+        'workflow_deleted': bool(workflow_deleted),
+        'node_deleted': bool(node_deleted),
+    }
+    return task
 
 
 @task_api.route('/api/tasks/<int:task_id>', methods=['GET'])
@@ -240,6 +356,7 @@ def api_get_task(task_id):
         return jsonify({'success': False, 'error': '任务不存在'}), 404
     _attach_task_input_references([t])
     attach_library_status([t])
+    _attach_canvas_source(t)
     return jsonify({'success': True, 'task': public_task(t)})
 
 
@@ -257,9 +374,12 @@ def api_favorite_task(task_id):
 
 @task_api.route('/api/favorite-groups', methods=['GET'])
 def api_list_favorite_groups():
+    task_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
     return jsonify({
         'success': True,
-        'groups': task_db.list_favorite_groups(request.args.get('type')),
+        'groups': task_db.list_favorite_groups(task_type),
     })
 
 
@@ -364,14 +484,18 @@ def api_bulk_favorite_groups():
 
 
 @task_api.route('/api/tasks/bulk-delete', methods=['POST'])
+@task_api.route('/api/tasks/batch/delete', methods=['POST'])
 def api_bulk_delete_tasks():
     data = request.get_json(silent=True) or {}
     task_ids, id_error = _parse_task_ids(data)
     if id_error:
         return id_error
+    effective_type, type_error = _parse_optional_task_type(data.get('type')) if 'type' in data else (None, None)
+    if type_error:
+        return type_error
     permanent = bool(data.get('permanent', False))
     if not permanent:
-        moved_ids = task_db.move_tasks_to_trash(task_ids)
+        moved_ids = task_db.move_tasks_to_trash(task_ids, task_type=effective_type)
         missing_ids = [task_id for task_id in task_ids if task_id not in moved_ids]
         return jsonify({
             'success': True,
@@ -383,7 +507,28 @@ def api_bulk_delete_tasks():
         })
 
     # GEN-RESULT-LIFECYCLE-20261119: the tasks' 生成历史 results are deleted with them.
-    result = gen_results.purge(task_ids)
+    result = gen_results.purge(task_ids, effective_type)
+    return jsonify({
+        'success': True,
+        'deleted': len(result['deleted_ids']),
+        'deleted_ids': result['deleted_ids'],
+        'missing_ids': result['missing_ids'],
+        'skipped_ids': list(result['skipped']),
+        'skipped_reasons': result['skipped'],
+        'media_deleted': len(result['media_deleted_ids']),
+    })
+
+
+@task_api.route('/api/tasks/batch/purge', methods=['POST'])
+def api_batch_purge_tasks():
+    data = request.get_json(silent=True) or {}
+    task_ids, id_error = _parse_task_ids(data, maximum=5000)
+    if id_error:
+        return id_error
+    effective_type, type_error = _parse_optional_task_type(data.get('type')) if 'type' in data else (None, None)
+    if type_error:
+        return type_error
+    result = gen_results.purge(task_ids, effective_type)
     return jsonify({
         'success': True,
         'deleted': len(result['deleted_ids']),
@@ -398,26 +543,32 @@ def api_bulk_delete_tasks():
 @task_api.route('/api/tasks/delete-preview', methods=['POST'])
 def api_task_delete_preview():
     """What permanently deleting these trashed tasks (``ids``) or emptying the trash of one
-    ``type`` removes from the media library: their 生成历史 results and the canvases, groups
-    and character cards referencing them (GEN-RESULT-LIFECYCLE-20261119). Read only."""
+    ``type`` (or ``all``) removes from the media library: their 生成历史 results and the canvases,
+    groups and character cards referencing them (GEN-RESULT-LIFECYCLE-20261119 / P2-GLOBAL-TASK-CENTER).
+    Read only."""
     data = request.get_json(silent=True)
     if isinstance(data, dict) and 'type' in data and 'ids' not in data:
-        if data['type'] not in TRASH_TASK_TYPES:
-            return jsonify({'success': False, 'error': 'type 必须是 image、video 或 audio'}), 400
-        return jsonify({'success': True, **gen_results.preview(gen_results.trashed_ids(data['type']), data['type'])})
+        task_type = data['type']
+        if not isinstance(task_type, str) or task_type not in TRASH_TASK_TYPES:
+            return jsonify({'success': False, 'error': 'type 必须是 all、image、video、audio 或 layer'}), 400
+        effective_type = None if task_type == 'all' else task_type
+        return jsonify({
+            'success': True,
+            'type': task_type,
+            **gen_results.preview(gen_results.trashed_ids(effective_type), effective_type),
+        })
     task_ids, id_error = _parse_task_ids(data or {}, maximum=5000)
     if id_error:
         return id_error
-    return jsonify({'success': True, **gen_results.preview(task_ids)})
-
-
-TRASH_TASK_TYPES = ('image', 'video', 'audio')
-SKIP_REASONS = ('cancel_requested', 'leased', 'not_in_trash')
+    effective_type, type_error = _parse_optional_task_type(data.get('type')) if isinstance(data, dict) and 'type' in data else (None, None)
+    if type_error:
+        return type_error
+    return jsonify({'success': True, **gen_results.preview(task_ids, effective_type)})
 
 
 @task_api.route('/api/tasks/trash/empty', methods=['POST'])
 def api_empty_task_trash():
-    """Permanently delete every trashed task of one type (EMPTY-TRASH-20261118).
+    """Permanently delete every trashed task of one type or all types (EMPTY-TRASH-20261118 / P2-GLOBAL-TASK-CENTER).
 
     Uses the same rules as single/bulk permanent deletion: tasks still cancelling or
     holding a worker lease are skipped; the tasks' 生成历史 results are deleted with them
@@ -426,18 +577,19 @@ def api_empty_task_trash():
     """
     data = request.get_json(silent=True)
     task_type = data.get('type') if isinstance(data, dict) else None
-    if task_type not in TRASH_TASK_TYPES:
-        return jsonify({'success': False, 'error': 'type 必须是 image、video 或 audio'}), 400
+    if not isinstance(task_type, str) or task_type not in TRASH_TASK_TYPES:
+        return jsonify({'success': False, 'error': 'type 必须是 all、image、video、audio 或 layer'}), 400
+    effective_type = None if task_type == 'all' else task_type
     deleted_ids = []
     skipped = {}
     media_deleted = 0
     after_id = 0
     while True:
-        batch = task_db.list_trashed_task_ids(task_type, after_id)
+        batch = task_db.list_trashed_task_ids(effective_type, after_id)
         if not batch:
             break
         after_id = batch[-1]
-        result = gen_results.purge(batch, task_type)
+        result = gen_results.purge(batch, effective_type)
         skipped.update(result['skipped'])
         deleted_ids += result['deleted_ids']
         media_deleted += len(result['media_deleted_ids'])
@@ -496,12 +648,16 @@ def api_restore_task(task_id):
 
 
 @task_api.route('/api/tasks/bulk-restore', methods=['POST'])
+@task_api.route('/api/tasks/batch/restore', methods=['POST'])
 def api_bulk_restore_tasks():
     data = request.get_json(silent=True) or {}
     task_ids, id_error = _parse_task_ids(data)
     if id_error:
         return id_error
-    restored_ids = task_db.restore_tasks(task_ids)
+    effective_type, type_error = _parse_optional_task_type(data.get('type')) if 'type' in data else (None, None)
+    if type_error:
+        return type_error
+    restored_ids = task_db.restore_tasks(task_ids, task_type=effective_type)
     return jsonify({
         'success': True,
         'restored': len(restored_ids),

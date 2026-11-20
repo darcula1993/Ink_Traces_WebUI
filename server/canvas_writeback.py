@@ -346,7 +346,10 @@ def merge_stale_save(db, workflow_id, base_revision, current_revision, document)
             continue
         results.append(node['id'])
         merged = dict(node)
-        merged['task'] = source['task']
+        src_task = source['task']
+        if isinstance(src_task, dict) and isinstance(src_task.get('error'), str) and src_task['error']:
+            src_task = {**src_task, 'error': mask_text(src_task['error']) or None}
+        merged['task'] = src_task
         known = {candidate.get('id') for candidate in node.get('candidates') or [] if isinstance(candidate, dict)}
         added = [candidate for candidate in source.get('candidates') or [] if candidate.get('id') not in known]
         if source['task'].get('status') == 'succeeded' and source.get('asset') and added:

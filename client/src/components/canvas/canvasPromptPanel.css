@@ -1,0 +1,79 @@
+/* P0-UI-FIXES-20261120 (P0-4): CanvasPromptPanel CRUD controls and legible left-aligned prompt list items. */
+.canvas-studio .cv-panel-prompts .cv-prompt-library-option {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  width: 100%;
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: left;
+  white-space: normal;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+.cv-panel-prompts-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  flex: 0 0 auto;
+}
+.cv-panel-prompts-toolbar .btn {
+  white-space: nowrap;
+}
+.cv-panel-prompts-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 8px;
+  padding: 8px;
+  border: 1px solid var(--cv-border);
+  border-radius: 6px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.03));
+  flex: 0 0 auto;
+}
+.cv-panel-prompts-editor textarea {
+  width: 100%;
+  min-height: 76px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--cv-border);
+  border-radius: 6px;
+  background: var(--field, rgba(0, 0, 0, 0.25));
+  color: inherit;
+  font: 12px/1.5 inherit;
+}
+.cv-panel-prompts-editor textarea:focus-visible {
+  outline: 1px solid var(--accent, #3ecf8e);
+  border-color: var(--accent, #3ecf8e);
+}
+.cv-panel-prompts-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.cv-panel-prompts-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--cv-border);
+}
+.cv-panel-prompts-preview-head span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cv-secondary);
+}
+.cv-panel-prompts-preview-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cv-panel-prompts-preview p {
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}

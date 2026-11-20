@@ -1,14 +1,15 @@
 import React from 'react'
 import useGridWindow from '../../lib/useGridWindow'
-import { Ban, Check, FolderInput, FolderSearch, Heart, Trash2 } from 'lucide-react'
+import { ArchiveRestore, Ban, Check, FolderInput, FolderSearch, Heart, Trash2 } from 'lucide-react'
 import { ACTIVE_STATUSES, STATUS, taskStatusInfo, formatTime, providerLabel, taskTypeLabel, selectionToken } from './taskModel.js'
-import { TaskPreview } from './TaskPreview.jsx'
+import { TaskPreview, TaskTypeIcon } from './TaskPreview.jsx'
 
 export const TaskCard = React.memo(function TaskCard({
   item,
   windowIndex,
   windowStyle,
   detailed,
+  showTypeBadge = false,
   selectionMode,
   checked,
   selectionTokenValue,
@@ -17,6 +18,7 @@ export const TaskCard = React.memo(function TaskCard({
   onFavorite,
   onCancel,
   onDelete,
+  onRestore,
   onReveal,
   onMove,
   trash,
@@ -35,6 +37,7 @@ export const TaskCard = React.memo(function TaskCard({
       role="button"
       tabIndex={0}
       data-testid="task-gallery-card"
+      data-task-type={item.type || 'image'}
       aria-label={selectionMode
         ? `${checked ? '取消选择' : '选择'}${taskTypeLabel(item.type)}任务`
         : `打开${taskTypeLabel(item.type)}任务`}
@@ -49,16 +52,28 @@ export const TaskCard = React.memo(function TaskCard({
       }}
       data-status={item.status}
       data-result-unknown={item.resultUnknown ? 'true' : undefined}
-      className={`task-gallery-card group relative min-w-0 overflow-hidden border bg-black/35 text-left transition-colors ${checked ? 'task-gallery-card-selected' : 'border-white/10 hover:border-white/25'}`}
+      className={`task-gallery-card group relative flex min-w-0 flex-col overflow-hidden border text-left transition-colors ${checked ? 'task-gallery-card-selected' : 'border-white/10 hover:border-white/25'}`}
     >
       <div className="task-card-preview relative overflow-hidden bg-[#050708]">
-        <TaskPreview item={item} />
-        {item.status !== 'succeeded' && (
+        <TaskPreview item={item} trash={trash} />
+        {(showTypeBadge || item.status !== 'succeeded') && (
           <div className="absolute left-2 top-2 z-20 flex items-center gap-1.5">
-            <span className={`status-pill min-h-6 px-2 text-xs ${status.tone}`}>
-              <StatusIcon size={11} className={status.spin ? 'animate-spin' : ''} />
-              {status.label}
-            </span>
+            {showTypeBadge && (
+              <span
+                className={`task-type-badge task-type-badge-${item.type || 'image'}`}
+                data-testid="task-card-type-badge"
+                data-task-type={item.type || 'image'}
+              >
+                <TaskTypeIcon type={item.type} size={11} />
+                {taskTypeLabel(item.type)}
+              </span>
+            )}
+            {item.status !== 'succeeded' && (
+              <span className={`status-pill min-h-6 px-2 text-xs ${status.tone}`}>
+                <StatusIcon size={11} className={status.spin ? 'animate-spin' : ''} />
+                {status.label}
+              </span>
+            )}
           </div>
         )}
         {selectionMode ? (
@@ -114,6 +129,17 @@ export const TaskCard = React.memo(function TaskCard({
                 <FolderInput size={14} />
               </button>
             )}
+            {item.taskId && trash && onRestore && (
+              <button
+                type="button"
+                aria-label="恢复任务"
+                title="恢复任务"
+                onClick={event => { event.stopPropagation(); onRestore(item) }}
+                className="task-card-action hover:text-nexus-green"
+              >
+                <ArchiveRestore size={14} />
+              </button>
+            )}
             {item.taskId && (
               <button
                 type="button"
@@ -129,17 +155,17 @@ export const TaskCard = React.memo(function TaskCard({
         )}
       </div>
       {detailed && (
-        <div className="task-card-details border-t border-white/8 px-3 py-2.5">
+        <div className="task-card-details flex flex-1 flex-col border-t border-white/8 px-3 py-2.5">
           <p className="line-clamp-2 min-h-10 break-words text-xs leading-5 text-nexus-text-light">{item.prompt || '未填写提示词'}</p>
-          {(item.favoriteGroups?.length > 0 ? (
+          {item.favoriteGroups?.length > 0 && (
             <div className="mt-2 flex min-w-0 gap-1 overflow-hidden">
               {item.favoriteGroups.slice(0, 2).map(group => (
                 <span key={group.id} className="favorite-group-pill" data-color={group.color}>{group.name}</span>
               ))}
               {item.favoriteGroups.length > 2 && <span className="favorite-group-pill">+{item.favoriteGroups.length - 2}</span>}
             </div>
-          ) : <div className="mt-2" style={{height:22}} aria-hidden="true"/>)}
-          <div className="mt-2 flex min-w-0 items-center gap-2 font-mono text-xs text-nexus-muted">
+          )}
+          <div className="mt-auto flex min-w-0 items-center gap-2 pt-2 font-mono text-xs text-nexus-muted">
             <span>#{item.taskId}</span>
             {item.provider && <span className="truncate">{providerLabel(item.provider)}</span>}
             {item.createdAt && <time className="ml-auto shrink-0">{formatTime(item.createdAt)}</time>}

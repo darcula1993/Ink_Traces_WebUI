@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react'
 import {Play,Pause,Volume2,VolumeX} from 'lucide-react'
+import {AudioWaveformArt} from '../art/CanvasLibraryArt'
 import './canvasFeedback.css'
 
 // UI-ITER-R2A #5: themed in-node player (play/pause, seek, time, volume) replacing native controls.
@@ -23,6 +24,7 @@ export default function MediaPlayer({kind,src,title,onMetadata,autoPlay=false,on
   {kind==='video'&&!ready&&!error&&<span className="cv-media-player-loading" role="status">正在载入视频…</span>}
   {kind==='video'&&!playing&&<button type="button" className="cv-media-player-center" tabIndex={-1} aria-hidden="true" onClick={toggle}><Play size={22} aria-hidden="true"/></button>}
   {kind==='audio'&&<span className="cv-media-player-title" title={title}>{title}</span>}
+  {kind==='audio'&&<div className="cv-media-player-wave" data-testid="canvas-audio-waveform"><AudioWaveformArt variant="compact" progress={progress} playing={playing}/></div>}
   <div className="cv-media-player-bar" role="group" aria-label={`${label}播放控制 ${title}`}>
    <button type="button" className="cv-media-player-toggle" aria-label={`${playing?'暂停':'播放'}${label}`} title={playing?'暂停':'播放'} onClick={toggle}>{playing?<Pause size={14} aria-hidden="true"/>:<Play size={14} aria-hidden="true"/>}</button>
    <input type="range" className="cv-media-player-progress" aria-label={`${label}进度`} aria-valuetext={`${clock(time)} / ${clock(duration)}`} min="0" max={duration||0} step="0.1" value={Math.min(time,duration||0)} disabled={!duration} onChange={seek} style={{'--cv-progress':`${progress}%`}}/>

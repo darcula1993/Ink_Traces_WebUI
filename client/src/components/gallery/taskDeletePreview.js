@@ -6,13 +6,17 @@ import { MEDIA_STATUS_EVENT } from '../../lib/canvasMediaStatus.js'
 
 export const PREVIEW_BATCH = 5000
 const SKIP_LABELS = { cancel_requested: '取消中', leased: '执行中', not_in_trash: '不在回收站' }
-const KIND_LABELS = { image: '图片', video: '视频', audio: '音频' }
+const KIND_LABELS = { image: '图片', video: '视频', audio: '音频', layer: '图层' }
 
 export function mergeTaskDeletePreviews(results) {
   const workflows = new Map(), groups = new Map(), characters = new Map()
-  const merged = { tasks: 0, skipped: {}, missing_ids: [], media: { count: 0, kinds: { image: 0, video: 0, audio: 0 }, copies_kept: 0, affected_workflows: [], media_groups: [], characters: [] } }
+  const merged = { tasks: 0, types_breakdown: {}, skipped: {}, missing_ids: [], media: { count: 0, kinds: { image: 0, video: 0, audio: 0 }, copies_kept: 0, affected_workflows: [], media_groups: [], characters: [] } }
   for (const result of results) {
     merged.tasks += Number(result?.tasks) || 0
+    for (const [taskType, n] of Object.entries(result?.types_breakdown || {})) {
+      const count = Number(n) || 0
+      if (count > 0) merged.types_breakdown[taskType] = (merged.types_breakdown[taskType] || 0) + count
+    }
     Object.assign(merged.skipped, result?.skipped || {})
     merged.missing_ids.push(...(result?.missing_ids || []))
     const media = result?.media || {}
@@ -40,8 +44,20 @@ export async function previewTaskDelete({ ids, type }) {
 }
 
 // count/label: the empty-trash dialog states the server's trash count for its task type.
-export function taskDeletePlanLines(preview, { count = preview.tasks, label = '' } = {}) {
-  const media = preview.media, lines = [`将彻底删除 ${count} 个${label}任务，不可恢复。`]
+export function taskDeletePlanLines(preview, { count = preview.tasks, label = '', scope = '' } = {}) {
+  const media = preview.media
+  let headline
+  if (scope === 'all') {
+    const breakdown = Object.entries(preview.types_breakdown || {})
+      .filter(([, n]) => Number(n) > 0)
+      .map(([type, n]) => `${KIND_LABELS[type] || type} ${n}`)
+    headline = breakdown.length
+      ? `将彻底删除全部类型回收站中的 ${count} 个任务（${breakdown.join('、')}），不可恢复。`
+      : `将彻底删除全部类型回收站中的 ${count} 个任务（覆盖图片、视频、音频、图层），不可恢复。`
+  } else {
+    headline = `将彻底删除 ${count} 个${label}任务，不可恢复。`
+  }
+  const lines = [headline]
   if (media.count) {
     const kinds = Object.entries(media.kinds || {}).filter(([, n]) => n > 0).map(([kind, n]) => `${KIND_LABELS[kind] || kind} ${n}`)
     lines.push(`同时删除这些任务在素材库“生成历史”中的 ${media.count} 个结果${kinds.length ? `（${kinds.join('、')}）` : ''}及其文件。`)

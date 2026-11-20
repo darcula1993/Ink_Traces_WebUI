@@ -2,8 +2,6 @@ import React, {useEffect, useRef, useState} from 'react'
 
 const STORAGE_KEY = 'ink-traces.canvas.sidebar-width.v1'
 const BASE_DEFAULT_WIDTH = 300
-// UI-ITER-R2-FIX: >=2200px the sidebar content is zoomed 1.2, so its default/limits scale with it.
-const scaleFactor = () => (typeof window !== 'undefined' && window.innerWidth >= 2200 ? 1.2 : 1)
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 function readWidth(storageKey, fallback) {
   try {
@@ -13,17 +11,17 @@ function readWidth(storageKey, fallback) {
 }
 
 // CANVAS-LAYOUT-2-20261118: also hosts the left rail's pop-out panel (pinned or floating). Without the new
-// props it behaves exactly as the old sidebar shell. `minWidth`/`maxWidth` are in unscaled px (spec: 240–360),
+// props it behaves exactly as the old sidebar shell. `minWidth`/`maxWidth` are in px (spec: 240–360),
 // `reserve` is the width kept for the rest of the layout, `onWidth` reports the effective width.
 export default function ResizableSidebar({children, className = '', storageKey = STORAGE_KEY, minWidth = null, maxWidth = 640,
   defaultWidth = BASE_DEFAULT_WIDTH, reserve = 480, label = '调整左侧栏宽度', onWidth, ...rest}) {
   const shell = useRef(null), gesture = useRef(null), endGuard = useRef(null)
-  const fallbackWidth = () => Math.round(defaultWidth * scaleFactor())
+  const fallbackWidth = () => Math.round(defaultWidth)
   const [preferred, setPreferred] = useState(() => readWidth(storageKey, fallbackWidth()))
   const [available, setAvailable] = useState(1440)
   const [dragging, setDragging] = useState(false)
-  const scale = scaleFactor(), floor = minWidth == null ? 160 : minWidth * scale
-  const max = Math.min(maxWidth * scale, Math.max(floor, available - reserve)), min = Math.min(minWidth == null ? 280 : floor, max)
+  const floor = minWidth == null ? 160 : minWidth
+  const max = Math.min(maxWidth, Math.max(floor, available - reserve)), min = Math.min(minWidth == null ? 280 : floor, max)
   const width = clamp(preferred, min, max)
   useEffect(() => { onWidth?.(width) }, [width])
 

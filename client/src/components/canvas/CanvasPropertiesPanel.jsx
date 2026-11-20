@@ -5,17 +5,18 @@ import ImageOutputControls from '../image-parameters/ImageOutputControls'
 import ReferenceThumbnails from './ReferenceThumbnails'
 import CanvasVideoEstimate from './CanvasVideoEstimate'
 import ConfirmDialog from '../ui/ConfirmDialog'
-import CanvasGroupColors from './CanvasGroupColors'
+import CanvasGroupColors,{GROUP_COLORS} from './CanvasGroupColors'
 import PromptLibraryPicker from './PromptLibraryPicker'
 import {GroupRunBadge} from './CanvasGroupRun'
 import {isActiveRun} from '../../lib/canvasGroupRun'
-import {isBusyTaskStatus,isFailureTaskStatus} from '../../lib/taskStatus'
+import {isBusyTaskStatus,isCancellableTask,isFailureTaskStatus,isGeneratingTaskStatus,taskStatusLabel} from '../../lib/taskStatus'
 import {imageSizeSummary} from '../../lib/imageGenerationRules'
-import {videoDurations,VIDEO_RATIOS} from '../../lib/videoGenerationRules'
+import {videoDurations,VIDEO_RATIOS,videoRatioLabel,videoOutputSummary} from '../../lib/videoGenerationRules'
 import {selectionOptionId,toSelection} from '../../lib/canvasProviderSelection'
 import {AUDIO_SPEAKERS,AUDIO_OUTPUT_FORMATS,AUDIO_SAMPLE_RATES} from '../../lib/generationSettings'
+import {MIXED_VALUE,batchParamSummary} from '../../lib/canvasBatchParams'
 import {positionalMentionRebinds} from '../../lib/canvasReferences'
-import {FAILURE_ACTION_LABELS} from '../../lib/canvasTaskEcho'
+import {FAILURE_ACTION_LABELS,formatTaskError} from '../../lib/canvasTaskEcho'
 import {formatCostRange} from '../../lib/canvasBatchRun'
 import './propertiesPanel.css'
 import './propertiesForm.css'
@@ -94,30 +95,165 @@ export default function CanvasPropertiesPanel({prefs,content,onFocusCanvas}) {
 
 export function canvasContent({nodes}) {
  const busy=nodes.filter(node=>isBusyTaskStatus(node.task?.status)).length,failed=nodes.filter(node=>node.task&&isFailureTaskStatus(node.task.status)).length
- return {kind:'canvas',label:'画布',head:<h2 className="cv-properties-title">画布</h2>,body:<div className="cv-prop-stats" data-testid="properties-canvas"><dl><div><dt>节点</dt><dd>{nodes.length}</dd></div><div><dt>进行中任务</dt><dd>{busy}</dd></div><div><dt>失败</dt><dd>{failed}</dd></div></dl><p className="cv-prop-hint">选择节点以编辑接口与参数</p></div>}
+ return {kind:'canvas',label:'画布',head:<><span className="cv-properties-kind-box"><Layers size={14} aria-hidden="true" className="cv-properties-kind"/></span><h2 className="cv-properties-title">画布</h2></>,body:<div data-testid="properties-canvas"><Section id="cv-prop-canvas-overview" title="画布概览" className="cv-pf-section"><dl className="cv-prop-stats"><div><dt>节点</dt><dd>{nodes.length}</dd></div><div><dt>进行中任务</dt><dd>{busy}</dd></div><div><dt>失败</dt><dd>{failed}</dd></div></dl><p className="cv-prop-hint">选择节点以编辑接口与参数</p></Section></div>}
 }
 
-export function multiContent({nodes,plan,onLocate,onMakeGroup,onRun,groupDisabled,runDisabledReason}) {
+function BatchParamsSection({nodes,capabilities,disabled,onBatchChange}) {
+ const summary=batchParamSummary(nodes,capabilities)
+ if(!summary||!onBatchChange)return null
+ const {kind,providerOptions,values}=summary
+ const mixedOption=state=>state.mixed?<option value={MIXED_VALUE} disabled>多项不同</option>:null
+ const applyField=(field,value)=>{if(value!==MIXED_VALUE)onBatchChange({field,value})}
+ const applyProvider=id=>{const chosen=providerOptions.find(option=>option.id===id);if(chosen)onBatchChange({providerOption:chosen})}
+ const kindTitle=KIND_LABEL[kind]||kind
+ return <Section id="cv-prop-batch-params" title={`批量参数（${nodes.length} 个${kindTitle}节点）`} className="cv-pf-section">
+  <div className="cv-pf-fields" data-testid="batch-params-editor" data-batch-kind={kind}>
+   <Field label="接口" prefix={<Plug size={14}/>}>
+    <select className={`cv-prop-select ${values.providerSelection.mixed?'is-mixed':''}`} aria-label="批量修改接口" disabled={disabled} value={values.providerSelection.value} onChange={e=>applyProvider(e.target.value)}>
+     {mixedOption(values.providerSelection)}
+     {!values.providerSelection.mixed&&!values.providerSelection.value&&<option value="" disabled>请选择接口</option>}
+     {!values.providerSelection.mixed&&values.providerSelection.value&&!providerOptions.some(o=>o.id===values.providerSelection.value)&&<option value={values.providerSelection.value}>原接口已停用或不可用</option>}
+     {providerOptions.map(option=><option key={option.id} value={option.id}>{option.name}</option>)}
+    </select>
+   </Field>
+   {kind==='video'&&<>
+    {summary.modelOptions.length>0&&<Field label="模型" prefix={<Cpu size={14}/>}>
+     <select className={`cv-prop-select ${values.model.mixed?'is-mixed':''}`} aria-label="批量修改视频模型" disabled={disabled} value={values.model.value} onChange={e=>applyField('model',e.target.value)}>
+      {mixedOption(values.model)}
+      {!values.model.mixed&&!summary.modelOptions.some(m=>m.id===values.model.value)&&<option value={values.model.value}>{values.model.value||'原模型'}</option>}
+      {summary.modelOptions.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
+     </select>
+    </Field>}
+    <Field label="模式">
+     <select className={`cv-prop-select ${values.video_mode.mixed?'is-mixed':''}`} aria-label="批量修改视频模式" disabled={disabled} value={values.video_mode.value} onChange={e=>applyField('video_mode',e.target.value)}>
+      {mixedOption(values.video_mode)}
+      <option value="reference">全能参考</option>
+      <option value="keyframe">首尾帧</option>
+     </select>
+    </Field>
+    <Field label="画幅" prefix={<RatioGlyph value={values.ratio.mixed?'auto':values.ratio.value}/>}>
+     <select className={`cv-prop-select ${values.ratio.mixed?'is-mixed':''}`} aria-label="批量修改视频画幅" disabled={disabled} value={values.ratio.value} onChange={e=>applyField('ratio',e.target.value)}>
+      {mixedOption(values.ratio)}
+      {summary.ratioOptions.map(v=><option key={v} value={v}>{videoRatioLabel(v)}</option>)}
+     </select>
+    </Field>
+    <Field label="分辨率">
+     <select className={`cv-prop-select ${values.resolution.mixed?'is-mixed':''}`} aria-label="批量修改视频分辨率" disabled={disabled} value={values.resolution.value} onChange={e=>applyField('resolution',e.target.value)}>
+      {mixedOption(values.resolution)}
+      {!values.resolution.mixed&&!summary.resolutionOptions.includes(values.resolution.value)&&<option value={values.resolution.value}>{values.resolution.value}</option>}
+      {summary.resolutionOptions.map(v=><option key={v} value={v}>{v}</option>)}
+     </select>
+    </Field>
+    <Field label="时长" prefix={<Clock3 size={14}/>}>
+     <select className={`cv-prop-select ${values.duration.mixed?'is-mixed':''}`} aria-label="批量修改视频时长" disabled={disabled} value={values.duration.value} onChange={e=>applyField('duration',e.target.value===MIXED_VALUE?MIXED_VALUE:Number(e.target.value))}>
+      {mixedOption(values.duration)}
+      {!values.duration.mixed&&!summary.durationOptions.includes(values.duration.value)&&<option value={values.duration.value}>{values.duration.value===-1?'Auto':`${values.duration.value}s`}</option>}
+      {summary.durationOptions.map(v=><option key={v} value={v}>{v===-1?'Auto':`${v}s`}</option>)}
+     </select>
+    </Field>
+    <Field label="输出音频">
+     <select className={`cv-prop-select ${values.generate_audio.mixed?'is-mixed':''}`} aria-label="批量修改输出音频" disabled={disabled} value={values.generate_audio.value} onChange={e=>applyField('generate_audio',e.target.value==='true')}>
+      {mixedOption(values.generate_audio)}
+      <option value="true">开启</option>
+      <option value="false">关闭</option>
+     </select>
+    </Field>
+   </>}
+   {kind==='image'&&<>
+    <Field label="画幅" prefix={<RatioGlyph value={values.ratio.mixed?'auto':values.ratio.value}/>}>
+     <select className={`cv-prop-select ${values.ratio.mixed?'is-mixed':''}`} aria-label="批量修改图片画幅" disabled={disabled} value={values.ratio.value} onChange={e=>applyField('ratio',e.target.value)}>
+      {mixedOption(values.ratio)}
+      {!values.ratio.mixed&&!summary.ratioOptions.includes(values.ratio.value)&&<option value={values.ratio.value}>{values.ratio.value==='custom'?'自定义':values.ratio.value==='auto'?'Auto':values.ratio.value}</option>}
+      {summary.ratioOptions.map(v=><option key={v} value={v}>{v==='auto'?'Auto':v}</option>)}
+     </select>
+    </Field>
+    <Field label="分辨率">
+     <select className={`cv-prop-select ${values.resolution.mixed?'is-mixed':''}`} aria-label="批量修改图片分辨率" disabled={disabled} value={values.resolution.value} onChange={e=>applyField('resolution',e.target.value)}>
+      {mixedOption(values.resolution)}
+      {!values.resolution.mixed&&!summary.resolutionOptions.includes(values.resolution.value)&&<option value={values.resolution.value}>{values.resolution.value}</option>}
+      {summary.resolutionOptions.map(v=><option key={v} value={v}>{v}</option>)}
+     </select>
+    </Field>
+    <Field label="格式">
+     <select className={`cv-prop-select ${values.output_format.mixed?'is-mixed':''}`} aria-label="批量修改图片格式" disabled={disabled} value={values.output_format.value} onChange={e=>applyField('output_format',e.target.value)}>
+      {mixedOption(values.output_format)}
+      {summary.formatOptions.map(v=><option key={v} value={v}>{v.toUpperCase()}</option>)}
+     </select>
+    </Field>
+    <Field label="水印">
+     <select className={`cv-prop-select ${values.watermark.mixed?'is-mixed':''}`} aria-label="批量修改图片水印" disabled={disabled} value={values.watermark.value} onChange={e=>applyField('watermark',e.target.value==='true')}>
+      {mixedOption(values.watermark)}
+      <option value="false">关闭</option>
+      <option value="true">开启</option>
+     </select>
+    </Field>
+   </>}
+   {kind==='audio'&&<>
+    <Field label="声线" prefix={<Mic size={14}/>}>
+     <select className={`cv-prop-select ${values.speaker.mixed?'is-mixed':''}`} aria-label="批量修改音频声线" disabled={disabled} value={values.speaker.value} onChange={e=>applyField('speaker',e.target.value)}>
+      {mixedOption(values.speaker)}
+      {summary.speakerOptions.map(item=><option key={item.value||'auto'} value={item.value}>{item.label}</option>)}
+     </select>
+    </Field>
+    <Field label="格式">
+     <select className={`cv-prop-select ${values.output_format.mixed?'is-mixed':''}`} aria-label="批量修改音频格式" disabled={disabled} value={values.output_format.value} onChange={e=>applyField('output_format',e.target.value)}>
+      {mixedOption(values.output_format)}
+      {summary.formatOptions.map(item=><option key={item.value} value={item.value}>{item.label}</option>)}
+     </select>
+    </Field>
+    <Field label="采样率">
+     <select className={`cv-prop-select ${values.sample_rate.mixed?'is-mixed':''}`} aria-label="批量修改音频采样率" disabled={disabled} value={values.sample_rate.value} onChange={e=>applyField('sample_rate',e.target.value===MIXED_VALUE?MIXED_VALUE:Number(e.target.value))}>
+      {mixedOption(values.sample_rate)}
+      {summary.sampleRateOptions.map(rate=><option key={rate} value={rate}>{rate} Hz</option>)}
+     </select>
+    </Field>
+    <Field label="生成字幕">
+     <select className={`cv-prop-select ${values.enable_subtitle.mixed?'is-mixed':''}`} aria-label="批量修改生成字幕" disabled={disabled} value={values.enable_subtitle.value} onChange={e=>applyField('enable_subtitle',e.target.value==='true')}>
+      {mixedOption(values.enable_subtitle)}
+      <option value="true">开启</option>
+      <option value="false">关闭</option>
+     </select>
+    </Field>
+   </>}
+  </div>
+  <p className="cv-prop-hint">修改任一字段将同步应用到全部 {nodes.length} 个选中节点，支持一步撤销。</p>
+ </Section>
+}
+
+export function multiContent({nodes,plan,capabilities,onBatchChange,onLocate,onMakeGroup,onRun,groupDisabled,runDisabledReason}) {
  const counts=Object.entries(nodes.reduce((all,node)=>{const key=node.type==='asset'?'素材':KIND_LABEL[node.type]||node.type;all[key]=(all[key]||0)+1;return all},{}))
  const generation=nodes.some(node=>['image','video','audio'].includes(node.type))
  const reasonId='cv-run-selected-reason',reason=generation?(runDisabledReason||(plan&&!plan.ready.length?'所选节点中没有可运行的生成节点':'')):''
- return {kind:'multi',label:`已选 ${nodes.length} 个节点`,head:<h2 className="cv-properties-title">已选 {nodes.length} 个节点</h2>,
+ return {kind:'multi',label:`已选 ${nodes.length} 个节点`,head:<><span className="cv-properties-kind-box"><Layers size={14} aria-hidden="true" className="cv-properties-kind"/></span><h2 className="cv-properties-title">已选 {nodes.length} 个节点</h2></>,
   body:<div data-testid="properties-multi">
-   <p className="cv-prop-hint">{counts.map(([kind,count])=>`${kind} ${count}`).join(' · ')} · 拖动任一标题一起移动</p>
-   {generation&&plan&&<Section id="cv-prop-batch" title="运行预览"><p data-testid="batch-preview-summary">可运行 {plan.ready.length} 个，跳过 {plan.skipped.length} 个{plan.ready.length?` · 合计预估 ${plan.total.text}`:''}</p>
+   <Section id="cv-prop-multi-overview" title="选区概览" className="cv-pf-section">
+    <p className="cv-prop-hint">{counts.map(([kind,count])=>`${kind} ${count}`).join(' · ')} · 拖动任一标题一起移动</p>
+   </Section>
+   <BatchParamsSection nodes={nodes} capabilities={capabilities} disabled={groupDisabled} onBatchChange={onBatchChange}/>
+   {generation&&plan&&<Section id="cv-prop-batch" title="运行预览" className="cv-pf-section"><p className="cv-prop-summary" data-testid="batch-preview-summary">可运行 {plan.ready.length} 个，跳过 {plan.skipped.length} 个{plan.ready.length?` · 合计预估 ${plan.total.text}`:''}</p>
     {plan.ready.length>0&&<ul className="cv-prop-list">{plan.ready.map(({node,cost})=><li key={node.id}><button type="button" className="cv-prop-link" title="定位节点" onClick={()=>onLocate(node.id)}>{node.title}</button><span>{cost.known?formatCostRange(cost.min,cost.max):'费用未知'}</span></li>)}</ul>}
-    {plan.skipped.length>0&&<><p>跳过：</p><ul className="cv-prop-list" data-testid="batch-preview-skipped">{plan.skipped.map(({node,reason})=><li key={node.id}><button type="button" className="cv-prop-link" title="定位节点" onClick={()=>onLocate(node.id)}>{node.title}</button><span>{reason}</span></li>)}</ul></>}
+    {plan.skipped.length>0&&<><p className="cv-prop-sublabel">跳过：</p><ul className="cv-prop-list" data-testid="batch-preview-skipped">{plan.skipped.map(({node,reason})=><li key={node.id}><button type="button" className="cv-prop-link" title="定位节点" onClick={()=>onLocate(node.id)}>{node.title}</button><span>{reason}</span></li>)}</ul></>}
     <p className="cv-prop-hint">每个节点创建一个独立任务；不会自动运行下游节点。</p></Section>}
-   <div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" disabled={groupDisabled} onClick={onMakeGroup}>创建节点组</button></div>
+   <Section id="cv-prop-multi-actions" title="组织" className="cv-pf-section">
+    <div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" disabled={groupDisabled} onClick={onMakeGroup}>创建节点组</button></div>
+   </Section>
   </div>,
   footer:generation?<>{plan&&plan.ready.length>0&&<div className="cv-pf-estimate"><span>合计预估</span><span>{plan.total.text}</span></div>}{reason&&<span id={reasonId} className="cv-sr-only">{reason}</span>}<button type="button" className="btn btn-primary btn-block cv-pf-primary cv-run-selected" aria-describedby={reason?reasonId:undefined} title={reason?`无法运行：${reason}`:'一次提交所选节点中输入已就绪的生成节点，每个节点独立任务，不连锁下游'} disabled={!!reason} onClick={onRun}><Play size={14} aria-hidden="true"/>运行所选</button></>:null}
 }
 
 export function groupContent({group,nodes,run,titleOf,disabled,onRename,onColor,onUngroup,onRun,onCancelRun}) {
  const active=isActiveRun(run),runnable=nodes.some(node=>group.nodeIds.includes(node.id)&&['image','video','audio'].includes(node.type))
- return {kind:'group',label:`节点组 ${group.title}`,head:<h2 className="cv-properties-title">{group.title}</h2>,
-  body:<div data-testid="properties-group"><p className="cv-prop-hint">节点组 · {group.nodeIds.length} 个节点</p><GroupRunBadge run={run} titleOf={titleOf}/>
-   <div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" onClick={()=>onRename(group)}>重命名</button><CanvasGroupColors group={group} disabled={disabled} onChange={onColor}/><button type="button" className="btn btn-ghost btn-sm" onClick={()=>onUngroup(group)}>解散组</button></div></div>,
+ const colorLabel=GROUP_COLORS[group.color||'green']||'绿色'
+ return {kind:'group',label:`节点组 ${group.title}`,head:<><span className="cv-properties-kind-box"><Layers size={14} aria-hidden="true" className="cv-properties-kind"/></span><h2 className="cv-properties-title">{group.title}</h2></>,
+  body:<div data-testid="properties-group">
+   <Section id={`cv-prop-group-info-${group.id}`} title="节点组信息" className="cv-pf-section">
+    <dl className="cv-prop-stats"><div><dt>成员节点</dt><dd>{group.nodeIds.length} 个</dd></div><div><dt>底色</dt><dd>{colorLabel}</dd></div></dl>
+    <GroupRunBadge run={run} titleOf={titleOf}/>
+   </Section>
+   <Section id={`cv-prop-group-actions-${group.id}`} title="操作" className="cv-pf-section">
+    <div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" onClick={()=>onRename(group)}>重命名</button><CanvasGroupColors variant="panel" group={group} disabled={disabled} onChange={onColor}/><button type="button" className="btn btn-ghost btn-sm" onClick={()=>onUngroup(group)}>解散组</button></div>
+   </Section>
+  </div>,
   footer:onRun&&runnable?(active?<button type="button" className="btn btn-secondary btn-block cv-pf-primary" title="只停止尚未提交的节点，已提交任务照常跑完写回" onClick={()=>onCancelRun(run)}>取消整组</button>:<button type="button" className="btn btn-primary btn-block cv-pf-primary" disabled={disabled} title="按依赖顺序逐个提交组内生成节点；每个节点独立任务" onClick={()=>onRun(group)}><Play size={14} aria-hidden="true"/>运行组</button>):null}
 }
 
@@ -126,7 +262,15 @@ const NodeHead=({node,label,onChange,children})=>{const Icon=KIND_ICON[node.type
 export function textContent({node,usedBy,onChange,onEditPrompt}) {
  const length=[...(node.text||'')].length
  return {kind:'text',nodeId:node.id,label:node.title,head:<NodeHead node={node} label="文本" onChange={onChange}/>,
-  body:<div data-testid="properties-text"><dl className="cv-prop-stats"><div><dt>字数</dt><dd>{length}</dd></div><div><dt>使用</dt><dd>被 {usedBy} 个节点使用</dd></div></dl><p className="cv-prop-hint">文本节点的内容在卡片中编辑；作为提示词输入口为第二期。</p><div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" onClick={onEditPrompt}><Pencil size={13} aria-hidden="true"/>编辑文本</button></div></div>}
+  body:<div data-testid="properties-text">
+   <Section id={`cv-prop-text-info-${node.id}`} title="文本信息" className="cv-pf-section">
+    <dl className="cv-prop-stats"><div><dt>字数</dt><dd>{length}</dd></div><div><dt>使用</dt><dd>被 {usedBy} 个节点使用</dd></div></dl>
+    <p className="cv-prop-hint">文本节点的内容在卡片中编辑；作为提示词输入口为第二期。</p>
+   </Section>
+   <Section id={`cv-prop-text-actions-${node.id}`} title="操作" className="cv-pf-section">
+    <div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" onClick={onEditPrompt}><Pencil size={13} aria-hidden="true"/>编辑文本</button></div>
+   </Section>
+  </div>}
 }
 
 export function assetContent({node,dimensions,deleted,onChange,onCopy,onRevealInLibrary,onMoveToFolder,onAddToCharacter,onReplace,onReplaceFromLibrary,onRemove}) {
@@ -134,9 +278,15 @@ export function assetContent({node,dimensions,deleted,onChange,onCopy,onRevealIn
  const size=kind==='image'&&dimensions?`${dimensions.width} × ${dimensions.height}`:kind==='video'&&dimensions?`${dimensions.width} × ${dimensions.height}`:''
  const duration=Number(node.asset?.duration)>0?`${Math.round(Number(node.asset.duration)*10)/10}s`:''
  return {kind:'asset',nodeId:node.id,label:node.title,head:<NodeHead node={node} label="素材" onChange={onChange}><button type="button" className="btn btn-icon btn-sm" aria-label="复制" title="复制节点" onClick={onCopy}><Copy size={13}/></button></NodeHead>,
-  body:<div data-testid="properties-asset"><dl className="cv-prop-stats"><div><dt>类型</dt><dd>{kindLabel}</dd></div>{size&&<div><dt>尺寸</dt><dd>{size}</dd></div>}{duration&&<div><dt>时长</dt><dd>{duration}</dd></div>}</dl>
-   {deleted?<><p className="cv-reference-warning" role="status">素材已在素材库中删除</p><div className="cv-prop-actions">{onReplaceFromLibrary&&<button type="button" className="btn btn-secondary btn-sm" onClick={onReplaceFromLibrary}>从素材库替换</button>}{onReplace&&<button type="button" className="btn btn-secondary btn-sm" onClick={onReplace}>上传替换</button>}<button type="button" className="btn btn-ghost btn-sm" onClick={onRemove}>移除节点</button></div></>
-   :<div className="cv-prop-actions">{onRevealInLibrary&&<button type="button" className="btn btn-secondary btn-sm" onClick={onRevealInLibrary}><Search size={13} aria-hidden="true"/>在素材库中显示</button>}{onMoveToFolder&&<button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog" onClick={onMoveToFolder}><FolderInput size={13} aria-hidden="true"/>移动到文件夹</button>}{onAddToCharacter&&<button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog" onClick={onAddToCharacter}><UserPlus size={13} aria-hidden="true"/>加入角色卡</button>}</div>}
+  body:<div data-testid="properties-asset">
+   <Section id={`cv-prop-asset-info-${node.id}`} title="素材信息" className="cv-pf-section">
+    <dl className="cv-prop-stats"><div><dt>类型</dt><dd>{kindLabel}</dd></div>{size&&<div><dt>尺寸</dt><dd>{size}</dd></div>}{duration&&<div><dt>时长</dt><dd>{duration}</dd></div>}</dl>
+    {deleted&&<p className="cv-reference-warning" role="status">素材已在素材库中删除</p>}
+   </Section>
+   <Section id={`cv-prop-asset-actions-${node.id}`} title="操作" className="cv-pf-section">
+    {deleted?<div className="cv-prop-actions">{onReplaceFromLibrary&&<button type="button" className="btn btn-secondary btn-sm" onClick={onReplaceFromLibrary}>从素材库替换</button>}{onReplace&&<button type="button" className="btn btn-secondary btn-sm" onClick={onReplace}>上传替换</button>}<button type="button" className="btn btn-ghost btn-sm" onClick={onRemove}>移除节点</button></div>
+    :<div className="cv-prop-actions">{onRevealInLibrary&&<button type="button" className="btn btn-secondary btn-sm" onClick={onRevealInLibrary}><Search size={13} aria-hidden="true"/>在素材库中显示</button>}{onMoveToFolder&&<button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog" onClick={onMoveToFolder}><FolderInput size={13} aria-hidden="true"/>移动到文件夹</button>}{onAddToCharacter&&<button type="button" className="btn btn-secondary btn-sm" aria-haspopup="dialog" onClick={onAddToCharacter}><UserPlus size={13} aria-hidden="true"/>加入角色卡</button>}</div>}
+   </Section>
   </div>}
 }
 
@@ -153,19 +303,36 @@ function GenerateBar({node,gen,estimate,onGenerate}) {
  return <div className="cv-generation-actions"><div className="cv-pf-estimate"><span>费用估算</span><CanvasVideoEstimate estimate={estimate}/></div>{reason&&<span id={reasonId} className="cv-sr-only" data-testid="generate-disabled-reason">{reason}</span>}<button type="button" className="btn btn-primary btn-block cv-pf-primary cv-generate" aria-label={`生成${label}`} title={reason?`无法生成：${reason}`:`生成${label}`} aria-describedby={reason?reasonId:undefined} disabled={!!reason} onClick={onGenerate}><Sparkles size={14} aria-hidden="true"/>生成</button></div>
 }
 
-function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets=[],resultUnknown,errorMessage='',mentionNotice,onChange,onGenerate,onReorderReferences,onClearReferences,portWarnings=[],overLimitCount=0,onRemoveOverLimit,onUpload,onLibrary,onLinkTask,onOpenTask,onDismissStale,onNotice,onEditPrompt,onOrganizeGroup}) {
+function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets=[],resultUnknown,errorMessage='',mentionNotice,onChange,onGenerate,onCancelTask,cancellingTaskIds,groupRunActive=false,onReorderReferences,onRemoveReference,onPreviewReference,onClearReferences,portWarnings=[],overLimitCount=0,onRemoveOverLimit,onUpload,onLibrary,onLinkTask,onOpenTask,onDismissStale,onNotice,onEditPrompt,onOrganizeGroup}) {
  const [taskNumber,setTaskNumber]=useState(''),[copied,setCopied]=useState(false),[regenerateConfirm,setRegenerateConfirm]=useState(false),outputRef=useRef(null)
  const {params,model,spec,ratio,unsupported,frames,imageAdapter,imageMetadata,imageDimensions,imageIssues,imageInvalid,audioParams,audioIssue,failure,failureClass,disabledReason}=gen
- const task=node.task,selection=node.providerSelection,selectionId=selectionOptionId(selection)
+ const task=node.task,selection=node.providerSelection,selectionId=provider?provider.id:selectionOptionId(selection)
  const setParam=(key,value)=>onChange({params:{...params,[key]:value}})
  const recovery=task&&(task.status==='unknown'||task.status==='submitting'&&!task.id)
- const outputSummary=node.type==='audio'?`${AUDIO_SPEAKERS.find(item=>item.value===audioParams.speaker)?.label||audioParams.speaker} · ${AUDIO_OUTPUT_FORMATS.find(item=>item.value===audioParams.output_format)?.label||audioParams.output_format} · ${audioParams.sample_rate/1000}kHz`:node.type==='image'?imageSizeSummary(imageAdapter,params):`${ratio.value} · ${params.resolution||'720p'} · ${(params.duration??5)===-1?'Auto':`${params.duration??5}s`}`
+ const inFlight=!!task&&isGeneratingTaskStatus(task.status)
+ const cancellable=isCancellableTask(task)&&!resultUnknown
+ const cancelling=cancellable&&!!cancellingTaskIds?.has(Number(task.id))
+ const outputSummary=node.type==='audio'?`${AUDIO_SPEAKERS.find(item=>item.value===audioParams.speaker)?.label||audioParams.speaker} · ${AUDIO_OUTPUT_FORMATS.find(item=>item.value===audioParams.output_format)?.label||audioParams.output_format} · ${audioParams.sample_rate/1000}kHz`:node.type==='image'?imageSizeSummary(imageAdapter,params):videoOutputSummary({ratio:ratio.value,resolution:params.resolution||'720p',duration:params.duration??5})
  const showOutput=()=>{const box=outputRef.current;box?.scrollIntoView?.({block:'nearest'});box?.querySelector('select,input,button')?.focus({preventScroll:true})}
  const rebind=positionalMentionRebinds(node,inputAssets).map(item=>`${item.token} 已改为指向 ${item.name}`).join('；'),rebindText=mentionNotice||rebind
  const issueText=editor?.mentionError||editor?.mentionIssues.join('；')
  return <div className="cv-generation-body" data-testid="properties-generation">
-  {(failure||node.upstreamStale||recovery)&&<Section id={`cv-prop-status-${node.id}`} title="状态">
-   {failure&&<div className={`cv-task-failure ${resultUnknown||task.status==='unknown'?'is-unknown':''}`} role={errorMessage&&errorMessage===task.error?undefined:'alert'} data-testid="node-task-error"><strong>{resultUnknown?'结果未知，可能已计费':task.status==='unknown'?'提交结果未知':(failureClass?.label||'生成失败')}{(resultUnknown||task.status==='unknown')&&<span> · 请求可能已发出，请先核查；不会自动重试</span>}</strong>{failureClass?.hint&&<p className="cv-task-failure-hint" data-testid="panel-failure-hint" data-failure-category={failureClass.category||undefined}>{failureClass.hint}</p>}<p title={task.error||undefined}>{task.error||'服务端未返回失败原因'}</p>{failureClass&&failureClass.action!=='none'&&<div className="cv-task-failure-actions">{failureClass.action==='regenerate_confirm'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="regenerate_confirm" disabled={!!disabledReason} title={disabledReason?`无法生成：${disabledReason}`:'重新生成会提交新任务并再次计费，需先确认'} onClick={()=>setRegenerateConfirm(true)}>{FAILURE_ACTION_LABELS.regenerate_confirm}</button>}{failureClass.action==='edit_params'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="edit_params" onClick={showOutput}>{FAILURE_ACTION_LABELS.edit_params}</button>}{failureClass.action==='check_task'&&task.id&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="check_task" onClick={()=>onOpenTask?.(task)}>{FAILURE_ACTION_LABELS.check_task}</button>}</div>}{task.id&&<span className="cv-task-check">任务 #{task.id} · 可在任务记录中按编号核查<button type="button" title="复制任务编号" aria-label={`复制任务编号 ${task.id}`} onClick={()=>{navigator.clipboard?.writeText(String(task.id)).then(()=>setCopied(true)).catch(()=>{})}}><Copy size={12}/>{copied?'已复制':'复制编号'}</button></span>}</div>}
+  {(inFlight||failure||node.upstreamStale||recovery)&&<Section id={`cv-prop-status-${node.id}`} title="状态">
+   {inFlight&&<div className="cv-task-active" data-testid="panel-task-active" data-task-status={task.status}>
+    <div className="cv-task-active-head">
+     <span className="cv-task-active-meta">
+      <strong>{taskStatusLabel(task.status)}</strong>
+      {task.id&&onOpenTask&&<button type="button" className="cv-prop-link" title={`在任务中心查看 #${task.id}`} onClick={()=>onOpenTask(task)}>#{task.id}</button>}
+      {task.id&&!onOpenTask&&<span>#{task.id}</span>}
+     </span>
+     {cancellable&&onCancelTask&&<button type="button" className="btn btn-secondary btn-sm cv-cancel-task" data-testid="panel-cancel-task" disabled={cancelling} title={cancelling?'正在发送取消请求…':`取消任务 #${task.id}`} onClick={()=>onCancelTask(node.id)}>{cancelling?'取消中…':'取消任务'}</button>}
+     {task.status==='cancel_requested'&&<button type="button" className="btn btn-secondary btn-sm cv-cancel-task" data-testid="panel-cancel-task" disabled title="已提交取消请求，等待执行器停止">取消中</button>}
+    </div>
+    {task.status==='submitting'&&<p className="cv-task-active-note">正在提交到服务端，尚未取得任务编号，暂不可取消。</p>}
+    {task.status==='cancel_requested'&&<p className="cv-task-active-note">已请求取消，等待执行器停止；若请求已发往外部服务，可能仍会产生部分费用。</p>}
+    {cancellable&&groupRunActive&&<p className="cv-task-active-note">该节点属于运行中节点组；单节点取消将阻断其下游节点，其他分支继续运行。</p>}
+   </div>}
+   {failure&&<div className={`cv-task-failure ${resultUnknown||task.status==='unknown'?'is-unknown':''}`} role={errorMessage&&errorMessage===task.error?undefined:'alert'} data-testid="node-task-error"><strong>{resultUnknown?'结果未知，可能已计费':task.status==='unknown'?'提交结果未知':(failureClass?.label||'生成失败')}{(resultUnknown||task.status==='unknown')&&<span> · 请求可能已发出，请先核查；不会自动重试</span>}</strong>{failureClass?.hint&&<p className="cv-task-failure-hint" data-testid="panel-failure-hint" data-failure-category={failureClass.category||undefined}>{failureClass.hint}</p>}<p title={formatTaskError(task.error)||undefined}>{formatTaskError(task.error)||'服务端未返回失败原因'}</p>{failureClass&&failureClass.action!=='none'&&<div className="cv-task-failure-actions">{failureClass.action==='regenerate_confirm'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="regenerate_confirm" disabled={!!disabledReason} title={disabledReason?`无法生成：${disabledReason}`:'重新生成会提交新任务并再次计费，需先确认'} onClick={()=>setRegenerateConfirm(true)}>{FAILURE_ACTION_LABELS.regenerate_confirm}</button>}{failureClass.action==='edit_params'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="edit_params" onClick={showOutput}>{FAILURE_ACTION_LABELS.edit_params}</button>}{failureClass.action==='check_task'&&task.id&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="check_task" onClick={()=>onOpenTask?.(task)}>{FAILURE_ACTION_LABELS.check_task}</button>}</div>}{task.id&&<span className="cv-task-check">任务 #{task.id} · 可在任务记录中按编号核查<button type="button" title="复制任务编号" aria-label={`复制任务编号 ${task.id}`} onClick={()=>{navigator.clipboard?.writeText(String(task.id)).then(()=>setCopied(true)).catch(()=>{})}}><Copy size={12}/>{copied?'已复制':'复制编号'}</button></span>}</div>}
    {node.upstreamStale&&<div className="cv-stale-notice" role="status"><span>上游已更新：此节点的结果基于旧输入，重新生成成功后标记消失；不会自动生成。</span>{onDismissStale&&<button type="button" onClick={onDismissStale}>忽略标记</button>}</div>}
    {recovery&&<div className="cv-task-recovery"><span>请核查并关联已有任务，不会重新生成。</span><label>本地任务编号<input type="number" min="1" value={taskNumber} onChange={e=>setTaskNumber(e.target.value)}/></label><button type="button" disabled={!taskNumber} onClick={()=>onLinkTask(taskNumber)}>关联已有任务</button></div>}
   </Section>}
@@ -188,7 +355,7 @@ function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets
    </div>
    :node.type==='image'?<div className="cv-image-parameters"><ImageOutputControls variant="panel" fieldPrefix={imagePrefix} Advanced={PropAdvanced} provider={imageAdapter} params={params} model={provider?.capability_model||provider?.model} references={imageMetadata.references} dimensions={imageDimensions} issues={imageIssues} metadataError={imageMetadata.error} onChange={patch=>onChange({params:{...params,...patch}})}/></div>
    :<div className="cv-pf-fields">
-    <Field label="画幅" prefix={<RatioGlyph value={ratio.value}/>}><select aria-label="视频画幅" disabled={ratio.locked} title={ratio.locked?'Seedance 2.5 首尾帧自动保持首帧比例':undefined} value={ratio.value} onChange={e=>setParam('ratio',e.target.value)}>{VIDEO_RATIOS.map(v=><option key={v} value={v}>{v==='adaptive'?'自动匹配':v}</option>)}</select></Field>
+    <Field label="画幅" prefix={<RatioGlyph value={ratio.value}/>}><select aria-label="视频画幅" disabled={ratio.locked} title={ratio.locked?'Seedance 2.5 首尾帧自动保持首帧比例':undefined} value={ratio.value} onChange={e=>setParam('ratio',e.target.value)}>{VIDEO_RATIOS.map(v=><option key={v} value={v}>{videoRatioLabel(v)}</option>)}</select></Field>
     <Field label="分辨率"><select aria-label="视频分辨率" value={params.resolution||'720p'} onChange={e=>setParam('resolution',e.target.value)}>{(spec?.resolutions||[params.resolution||'720p']).map(v=><option key={v}>{v}</option>)}</select></Field>
     <Field label="时长" prefix={<Clock3 size={14}/>}><select aria-label="视频时长" value={params.duration??5} onChange={e=>setParam('duration',Number(e.target.value))}>{!videoDurations(model).includes(Number(params.duration??5))&&<option value={params.duration??5}>原时长不支持，请选择</option>}{videoDurations(model).map(v=><option key={v} value={v}>{v===-1?'Auto':`${v}s`}</option>)}</select></Field>
     {provider?.provider==='cupsy'&&<Field label="任务类型"><select aria-label="任务类型" disabled={params.video_mode==='keyframe'} title={params.video_mode==='keyframe'?'仅全能参考模式使用任务类型':'选择生成任务类型'} value={params.omni_reference_task_type||'auto'} onChange={e=>setParam('omni_reference_task_type',e.target.value)}><option value="auto">自动</option><option value="reference">参考生成</option><option value="edit">视频编辑</option><option value="extend">视频延长</option></select></Field>}
@@ -197,7 +364,7 @@ function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets
   {audioIssue&&<div className="cv-reference-warning" role="status" data-testid="audio-param-issue">{audioIssue}</div>}{imageInvalid&&<div className="cv-reference-warning" role="status">图片参数不适用于当前接口。<button type="button" onClick={showOutput}>处理输出参数</button></div>}
   </section>
   <Section id={`cv-prop-refs-${node.id}`} title={`参考${inputAssets.length?`（${inputAssets.length}）`:''}`} className="cv-pf-section cv-pf-refs" actions={<LibraryUploadMenu onLibrary={onLibrary} onUpload={onUpload}/>}>
-   {inputAssets.length>0?<ReferenceThumbnails assets={inputAssets} frames={frames} onReorder={onReorderReferences}/>:<p className="cv-prop-hint">连线或添加素材作为参考</p>}
+   {inputAssets.length>0?<ReferenceThumbnails assets={inputAssets} frames={frames} onReorder={onReorderReferences} onRemove={onRemoveReference} onPreview={onPreviewReference}/>:<p className="cv-prop-hint">连线或添加素材作为参考</p>}
    {portWarnings.length>0&&<div className="cv-reference-warning cv-port-limit" role="status" data-testid="reference-over-limit"><span>{portWarnings.join('；')}。超出的参考已标红，生成已禁用；不会自动删除。</span>{overLimitCount>0&&onRemoveOverLimit&&<button type="button" className="btn btn-secondary btn-sm" onClick={onRemoveOverLimit}>移除超出的 {overLimitCount} 个参考</button>}</div>}
    {node.referenceGroups?.map(group=><small key={group.id}>旧素材组：{group.title}</small>)}
    {node.type==='video'&&params.video_mode==='keyframe'&&frames.issues.length>0&&<div className="cv-panel-frames">{frames.issues.map(issue=><span key={issue} role="status">{issue}</span>)}</div>}

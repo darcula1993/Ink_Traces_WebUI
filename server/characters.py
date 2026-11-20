@@ -37,6 +37,7 @@ import tasks
 MAX_IMAGES = 8
 MAX_VOICE_SECONDS = 30.0
 MAX_DESCRIPTION = 300
+KINDS = ('character', 'prop')
 NAME_FORBIDDEN = re.compile(r'[\s@\[\]()（）]')
 NAME_RESERVED = re.compile(r'^(图片|视频|音频)\d+$')
 HEX_ID = re.compile(r'^[0-9a-f]{32}$')
@@ -48,7 +49,8 @@ def init_characters_db():
     db.executescript('''
     CREATE TABLE IF NOT EXISTS characters (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
-        description TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        description TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'character',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS character_media (
         character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
         local_id TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('image','voice')),
@@ -59,6 +61,8 @@ def init_characters_db():
     columns = {row[1] for row in db.execute('PRAGMA table_info(characters)')}
     if 'description' not in columns:  # forward-compatible additive migration
         db.execute("ALTER TABLE characters ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+    if 'kind' not in columns:
+        db.execute("ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'character'")
     db.commit()
 
 
@@ -87,6 +91,14 @@ def description_value(value):
         raise store.CanvasError(f'角色描述不能超过{MAX_DESCRIPTION}个字')
     if any(ord(c) < 32 and c not in '\n\t' for c in value):
         raise store.CanvasError('角色描述包含无效字符')
+    return value
+
+
+def kind_value(value):
+    if value is None:
+        return 'character'
+    if not isinstance(value, str) or value not in KINDS:
+        raise store.CanvasError('角色卡类型无效（仅支持 character 或 prop）')
     return value
 
 
@@ -165,7 +177,8 @@ MEDIA_SQL = '''SELECT m.*, x.name, x.mime_type, x.kind, x.relpath FROM character
 def _public(row, media):
     images = sorted((m for m in media if m['role'] == 'image'), key=lambda m: (m['position'], m['created_at'], m['local_id']))
     voice = next((m for m in media if m['role'] == 'voice'), None)
-    return {'id': row['id'], 'name': row['name'], 'description': row['description'],
+    kind = row['kind'] if 'kind' in row.keys() and row['kind'] in KINDS else 'character'
+    return {'id': row['id'], 'name': row['name'], 'description': row['description'], 'kind': kind,
             'voice': voice_public(voice) if voice else None, 'images': [image_public(m) for m in images],
             'created_at': row['created_at'], 'updated_at': row['updated_at']}
 
@@ -368,21 +381,22 @@ def _discard(sources):
 # ---- mutations --------------------------------------------------------------------
 
 def create_character(data):
-    if set(data) - {'name', 'description'}:
+    if set(data) - {'name', 'description', 'kind'}:
         raise store.CanvasError('未知角色字段')
-    name, description = name_value(data.get('name')), description_value(data.get('description'))
+    name, description, kind = name_value(data.get('name')), description_value(data.get('description')), kind_value(data.get('kind'))
     ident, now = uuid.uuid4().hex, tasks.utcnow()
     try:
         with store.write_transaction() as db:
             _ensure_unique(db, name)
-            db.execute('INSERT INTO characters VALUES (?,?,?,?,?,?)', (ident, name, name.casefold(), description, now, now))
+            db.execute('INSERT INTO characters (id, name, name_key, description, kind, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
+                       (ident, name, name.casefold(), description, kind, now, now))
     except sqlite3.IntegrityError as error:
         raise store.CanvasError('角色名已存在', 409) from error
     return get_character(ident)
 
 
 def update_character(character_id, data):
-    if not data or set(data) - {'name', 'description', 'voice', 'image_order'}:
+    if not data or set(data) - {'name', 'description', 'kind', 'voice', 'image_order'}:
         raise store.CanvasError('角色更新字段无效')
     try:
         with store.write_transaction() as db:
@@ -398,6 +412,12 @@ def update_character(character_id, data):
                 description = description_value(data['description'])
                 if description != row['description']:
                     db.execute('UPDATE characters SET description=? WHERE id=?', (description, character_id))
+                    changed = True
+            if 'kind' in data:
+                kind = kind_value(data['kind'])
+                current_kind = row['kind'] if 'kind' in row.keys() else 'character'
+                if kind != current_kind:
+                    db.execute('UPDATE characters SET kind=? WHERE id=?', (kind, character_id))
                     changed = True
             if 'voice' in data:
                 current = _media(db, character_id, 'voice')

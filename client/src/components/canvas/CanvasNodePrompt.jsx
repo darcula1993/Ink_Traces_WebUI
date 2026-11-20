@@ -4,8 +4,25 @@ import {ArrowUp,AtSign,Maximize2,X} from 'lucide-react'
 import PromptMentionTextarea from '../PromptMentionTextarea'
 import PromptLibraryPicker,{insertPromptText} from './PromptLibraryPicker'
 import {referenceTokenState} from '../../lib/canvasReferences'
+import {referenceTokenRanges} from '../../lib/referenceMedia'
 import {useCanvasEstimate} from './CanvasVideoEstimate'
 import './cardPrompt.css'
+
+// P1-CANVAS-WORKFLOW-20261120 (P2): render @mentions with the same valid/invalid tint in read-only card previews.
+export function renderPromptPreviewTokens(text, tokenState) {
+ const safe = String(text || '')
+ const ranges = referenceTokenRanges(safe)
+ if (!ranges.length) return safe
+ const parts = []
+ let cursor = 0
+ for (const range of ranges) {
+  if (range.start > cursor) parts.push(safe.slice(cursor, range.start))
+  parts.push(<mark key={range.start} className={`prompt-reference-token is-${tokenState(range.token)}`}>{safe.slice(range.start, range.end)}</mark>)
+  cursor = range.end
+ }
+ if (cursor < safe.length) parts.push(safe.slice(cursor))
+ return parts
+}
 
 // FIX-B2B-20261114: prompt placeholder per node type. CARD-PROMPT-READABLE-20261118 (user 11-18): one short wording
 // for image / video / audio (card, read-only preview and the large dialog); text nodes keep their own.
@@ -38,8 +55,9 @@ export default function CanvasNodePrompt({node,editable,inputAssets=[],editor,on
  // User 11-18: the menu opened by the card's @角色卡 button lists character cards only; a typed @ keeps the full menu
  // (references + character cards). Only the mention that starts at the button's own "@" is filtered.
  const charactersOnly=(items,mention)=>characterAt.current!=null&&mention.start===characterAt.current?items.filter(item=>item.type==='character'):items
+ const previewContent=text?(node.type==='text'?text:renderPromptPreviewTokens(text,referenceTokenState(node,inputAssets))):(node.type==='text'?'点击输入文本':PROMPT_PLACEHOLDER)
  const editorBox=editable?<PromptEditor node={node} inputAssets={inputAssets} editor={editor} onText={onText} className="cv-card-prompt" filterMentionItems={charactersOnly} onBlur={()=>{characterAt.current=null}} onKeyDown={event=>{if(event.key==='@')characterAt.current=null;if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();event.stopPropagation();rootRef.current?.closest('.cv-node')?.focus({preventScroll:true})}}}/>
-  :<button type="button" className={`cv-node-prompt-preview ${text?'':'is-empty'}`} aria-label={`编辑 ${node.title} ${node.type==='text'?'文本':'提示词'}`} title={text||(node.type==='text'?'点击输入文本':PROMPT_PLACEHOLDER)} onClick={event=>{event.stopPropagation();onActivate?.()}}>{text||(node.type==='text'?'点击输入文本':PROMPT_PLACEHOLDER)}</button>
+  :<button type="button" className={`cv-node-prompt-preview ${text?'':'is-empty'}`} aria-label={`编辑 ${node.title} ${node.type==='text'?'文本':'提示词'}`} title={text||(node.type==='text'?'点击输入文本':PROMPT_PLACEHOLDER)} onClick={event=>{event.stopPropagation();onActivate?.()}}>{previewContent}</button>
  // Legacy text nodes keep the plain editor (read-only compatibility, no new entry points).
  if(node.type==='text')return <div ref={rootRef} className={`cv-node-prompt ${editable?'is-editable':''}`} data-testid="node-prompt" onWheel={editable?stop:undefined}>{editorBox}</div>
  const textarea=()=>rootRef.current?.querySelector('textarea.cv-card-prompt')
@@ -76,7 +94,7 @@ function GenerateButton({nodeId,label,disabledReason,estimate,onGenerate}) {
 // "扩大编辑提示词" dialog: reachable at any zoom (card at low zoom, panel button). Focus trap, Esc, and the undo
 // isolation of the old expanded panel are kept: browser undo/redo outside the dialog is blocked while it is open.
 export function CanvasPromptDialog({node,inputAssets,editor,onText,onClose}) {
- const ref=useRef(null),opener=useRef(typeof document!=='undefined'?document.activeElement:null)
+ const ref=useRef(null),characterAt=useRef(null),opener=useRef(typeof document!=='undefined'?document.activeElement:null)
  useEffect(()=>{
   ref.current?.querySelector('textarea')?.focus()
   const guard=event=>{if(['historyUndo','historyRedo'].includes(event.inputType)&&!ref.current?.contains(event.target))event.preventDefault()}
@@ -84,6 +102,9 @@ export function CanvasPromptDialog({node,inputAssets,editor,onText,onClose}) {
   return()=>document.removeEventListener('beforeinput',guard,true)
  },[])
  const close=()=>{onClose();const card=document.querySelector(`.cv-node[data-node-id="${CSS.escape(node.id)}"]`),fromExpand=!!opener.current?.closest?.('[data-testid=card-prompt-expand]'),back=(fromExpand&&card?.querySelector('[data-testid=card-prompt-expand]'))||card?.querySelector('.cv-node-prompt-preview,textarea.cv-card-prompt')||card||opener.current;requestAnimationFrame(()=>back?.focus?.({preventScroll:true}))}
+ const dialogTextarea=()=>ref.current?.querySelector('textarea.cv-dialog-prompt')
+ const charactersOnly=(items,mention)=>characterAt.current!=null&&mention.start===characterAt.current?items.filter(item=>item.type==='character'):items
+ const mentionCharacter=event=>{event.stopPropagation();const field=dialogTextarea();if(!field)return;const text=node.text||'';characterAt.current=field.selectionStart??text.length;insertPromptText(field,'@',{value:text,onFallback:value=>{editor?.setMentionError('');onText(value)}})}
  const keyDown=event=>{
   if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s')return
   event.stopPropagation()
@@ -93,8 +114,11 @@ export function CanvasPromptDialog({node,inputAssets,editor,onText,onClose}) {
  return createPortal(<div className="canvas-studio cv-expanded-host"><div className="cv-editor-backdrop" onPointerDown={event=>{event.preventDefault();event.stopPropagation()}}/>
   <div ref={ref} className="cv-prompt-dialog" role="dialog" aria-modal="true" aria-label={`编辑${promptLabel(node)}`} tabIndex={-1} onKeyDown={keyDown} onPointerDown={event=>event.stopPropagation()} onWheel={event=>event.stopPropagation()}>
    <header><span>{node.title} · {node.type==='text'?'文本':'提示词'}</span><button type="button" className="btn btn-icon btn-sm" aria-label="关闭提示词编辑" title="关闭 (Esc)" onClick={close}><X size={14}/></button></header>
-   <PromptEditor node={node} inputAssets={inputAssets} editor={editor} onText={onText} className="cv-dialog-prompt"/>
-   {node.type!=='text'&&<PromptLibraryPicker getTextarea={()=>ref.current?.querySelector('textarea.cv-dialog-prompt')} value={node.text||''} onInsertFallback={value=>{editor?.setMentionError('');onText(value)}}/>}
+   <PromptEditor node={node} inputAssets={inputAssets} editor={editor} onText={onText} className="cv-dialog-prompt" filterMentionItems={charactersOnly} onBlur={()=>{characterAt.current=null}} onKeyDown={event=>{if(event.key==='@')characterAt.current=null}}/>
+   {node.type!=='text'&&<div className="cv-dialog-prompt-tools">
+    <PromptLibraryPicker getTextarea={dialogTextarea} value={node.text||''} onInsertFallback={value=>{editor?.setMentionError('');onText(value)}}/>
+    {editor&&<button type="button" className="cv-card-tool cv-card-mention" data-testid="dialog-mention-character" aria-label={`@角色卡（插入到 ${node.title}）`} title="输入 @ 选择角色卡或已接入素材" disabled={!!editor.characterBusy} onPointerDown={event=>event.stopPropagation()} onMouseDown={event=>event.preventDefault()} onClick={mentionCharacter}><AtSign size={15} aria-hidden="true"/><span>角色卡</span></button>}
+   </div>}
    {node.type!=='text'&&editor&&(editor.mentionError||editor.mentionIssues.length>0)&&<div className="cv-reference-warning" role="alert">{editor.mentionError||editor.mentionIssues.join('；')}</div>}
   </div></div>,document.body)
 }

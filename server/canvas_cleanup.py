@@ -163,6 +163,152 @@ def _protected(path, digest, protection):
     return False
 
 
+BULK_DELETE_MAX = 200
+
+
+def _active_group_run_count(db, owners):
+    if not owners or not db.execute("SELECT 1 FROM sqlite_master WHERE name='canvas_group_runs'").fetchone():
+        return 0
+    marks = ','.join('?' * len(owners))
+    return db.execute(
+        f"SELECT COUNT(*) FROM canvas_group_runs WHERE workflow_id IN ({marks}) AND status IN ('running', 'awaiting_confirm')",
+        tuple(owners),
+    ).fetchone()[0]
+
+
+def _validate_bulk_project_ids(raw_ids):
+    if not isinstance(raw_ids, list) or not raw_ids:
+        raise store.CanvasError('请选择要删除的项目')
+    if len(raw_ids) > 1000:
+        raise store.CanvasError(f'单次最多批量处理 {BULK_DELETE_MAX} 个项目')
+    seen, ids = set(), []
+    for item in raw_ids:
+        if not isinstance(item, str) or not item.strip():
+            raise store.CanvasError('项目编号无效')
+        pid = item.strip()
+        if pid not in seen:
+            seen.add(pid)
+            ids.append(pid)
+    if len(ids) > BULK_DELETE_MAX:
+        raise store.CanvasError(f'单次最多批量处理 {BULK_DELETE_MAX} 个项目')
+    return ids
+
+
+def preview_bulk_delete_projects(raw_ids):
+    ids = _validate_bulk_project_ids(raw_ids)
+    init_cleanup_db()
+    db = tasks.get_db()
+    deleted_projects = {r['id'] for r in db.execute("SELECT id FROM canvas_deletions WHERE scope='project'")}
+    deleted_workflows = {r['id'] for r in db.execute("SELECT id FROM canvas_deletions WHERE scope='workflow'")}
+    projects_by_id = {
+        r['id']: dict(r)
+        for r in db.execute('SELECT id, title FROM canvas_projects')
+        if r['id'] not in deleted_projects
+    }
+    project_workflows, live_workflow_counts, workflow_tasks = {}, {}, {}
+    for row in db.execute('SELECT id, project_id, document FROM canvas_workflows'):
+        pid, wid = row['project_id'], row['id']
+        project_workflows.setdefault(pid, set()).add(wid)
+        if wid not in deleted_workflows:
+            live_workflow_counts[pid] = live_workflow_counts.get(pid, 0) + 1
+        workflow_tasks.setdefault(wid, set()).update(_doc_tasks(json.loads(row['document'])))
+    for relation in db.execute('SELECT workflow_id, task_id FROM canvas_workflow_tasks'):
+        workflow_tasks.setdefault(relation['workflow_id'], set()).add(relation['task_id'])
+    for task in db.execute('SELECT id, params FROM tasks'):
+        wid = json.loads(task['params'] or '{}').get('canvas_workflow_id')
+        if wid:
+            workflow_tasks.setdefault(wid, set()).add(task['id'])
+    active_task_ids = {
+        r['id']
+        for r in db.execute(
+            "SELECT id FROM tasks WHERE status NOT IN ('succeeded','failed','cancelled') OR (lease_owner IS NOT NULL AND lease_owner != '')"
+        )
+    }
+    active_runs_by_wf = {}
+    if db.execute("SELECT 1 FROM sqlite_master WHERE name='canvas_group_runs'").fetchone():
+        for row in db.execute(
+            "SELECT workflow_id, COUNT(*) AS cnt FROM canvas_group_runs WHERE status IN ('running','awaiting_confirm') GROUP BY workflow_id"
+        ):
+            active_runs_by_wf[row['workflow_id']] = row['cnt']
+
+    results = []
+    for pid in ids:
+        project = projects_by_id.get(pid)
+        if project is None:
+            results.append({
+                'id': pid,
+                'title': '',
+                'workflow_count': 0,
+                'has_active_tasks': False,
+                'active_task_count': 0,
+                'can_delete': False,
+                'reason': '项目不存在',
+            })
+            continue
+        owners = project_workflows.get(pid, set())
+        own_tasks = set().union(*(workflow_tasks.get(wid, ()) for wid in owners)) if owners else set()
+        active_count = len(own_tasks & active_task_ids)
+        active_runs = sum(active_runs_by_wf.get(wid, 0) for wid in owners)
+        has_active = bool(active_count or active_runs)
+        if active_count:
+            reason = '画布存在活动任务，请先取消并等待任务结束'
+        elif active_runs:
+            reason = '画布存在运行中的节点组，请先取消并等待结束'
+        else:
+            reason = None
+        results.append({
+            'id': pid,
+            'title': project['title'],
+            'workflow_count': live_workflow_counts.get(pid, 0),
+            'has_active_tasks': has_active,
+            'active_task_count': active_count,
+            'can_delete': not has_active,
+            'reason': reason,
+        })
+    return results
+
+
+def bulk_delete_projects(raw_ids, cleanup=False):
+    ids = _validate_bulk_project_ids(raw_ids)
+    if type(cleanup) is not bool:
+        raise store.CanvasError('cleanup_assets必须是布尔值')
+    init_cleanup_db()
+    db = tasks.get_db()
+    deleted, skipped = [], []
+    for pid in ids:
+        existing = db.execute(
+            'SELECT completed, manifest FROM canvas_deletions WHERE scope=? AND id=?',
+            ('project', pid),
+        ).fetchone()
+        if existing:
+            plan = json.loads(existing['manifest'])
+            pending = not bool(existing['completed'])
+            skipped.append({
+                'id': pid,
+                'title': plan.get('title', ''),
+                'error': '该项目已有待完成的删除清理，请到待完成删除中重试' if pending else '项目不存在',
+                'cleanup_pending': pending,
+            })
+            continue
+        proj_row = db.execute('SELECT title FROM canvas_projects WHERE id=?', (pid,)).fetchone()
+        title = proj_row['title'] if proj_row else ''
+        try:
+            result = delete_scope('project', pid, cleanup)
+            deleted.append({'id': pid, 'title': title, **result})
+        except store.CanvasError as error:
+            row = db.execute(
+                'SELECT completed FROM canvas_deletions WHERE scope=? AND id=?',
+                ('project', pid),
+            ).fetchone()
+            skipped.append({
+                'id': pid,
+                'title': title,
+                'error': str(error),
+                'cleanup_pending': bool(row and not row['completed']),
+            })
+    return {'deleted': deleted, 'skipped': skipped}
+
+
 def delete_scope(scope, identifier, cleanup=False):
     if type(cleanup) is not bool:
         raise store.CanvasError('cleanup_assets必须是布尔值')
@@ -202,6 +348,8 @@ def delete_scope(scope, identifier, cleanup=False):
                 task = tasks.get_task(tid)
                 if task and (task['status'] not in ('succeeded','failed','cancelled') or task.get('lease_owner')):
                     raise store.CanvasError('画布存在活动任务，请先取消并等待任务结束', 409)
+            if _active_group_run_count(db, owners):
+                raise store.CanvasError('画布存在运行中的节点组，请先取消并等待结束', 409)
             own_assets = [dict(r) for r in db.execute('SELECT * FROM canvas_assets') if r['workflow_id'] in owners]
             hashes = {r['sha256'] for r in own_assets}
             library = [dict(r) for r in db.execute('SELECT * FROM canvas_library_assets WHERE project_id=?', (project,)) if scope == 'project' or r['sha256'] in hashes]
@@ -272,7 +420,8 @@ def delete_scope(scope, identifier, cleanup=False):
 
 
 def register_cleanup_routes(blueprint, body):
-    from flask import jsonify
+    from flask import jsonify, request
+    from local_delete import require_same_origin
     @blueprint.route('/api/canvas/deletions', methods=['GET'])
     def pending_deletions():
         init_cleanup_db()
@@ -291,6 +440,17 @@ def register_cleanup_routes(blueprint, body):
     @blueprint.route('/api/canvas/projects/<identifier>', methods=['DELETE'])
     def delete_project(identifier):
         return respond('project',identifier)
+    @blueprint.route('/api/canvas/projects/bulk-delete-preview', methods=['POST'])
+    def bulk_delete_projects_preview():
+        require_same_origin(request)
+        init_cleanup_db()
+        return jsonify(success=True, projects=preview_bulk_delete_projects(body().get('ids')))
+    @blueprint.route('/api/canvas/projects/bulk-delete', methods=['POST'])
+    def bulk_delete_projects_route():
+        require_same_origin(request)
+        init_cleanup_db()
+        data = body()
+        return jsonify(success=True, **bulk_delete_projects(data.get('ids'), data.get('cleanup_assets', False)))
     @blueprint.route('/api/canvas/workflows/<identifier>', methods=['DELETE'])
     def delete_workflow(identifier):
         return respond('workflow',identifier)

@@ -56,7 +56,7 @@ def workflow():
 def test_crud_name_rules_uniqueness_and_description(client):
     c = create(client, ' 林 ', description='  黑发，青色长衫  ')
     assert c['name'] == '林' and c['description'] == '黑发，青色长衫' and c['images'] == [] and c['voice'] is None
-    assert set(c) == {'id', 'name', 'description', 'voice', 'images', 'created_at', 'updated_at'}
+    assert set(c) == {'id', 'name', 'description', 'kind', 'voice', 'images', 'created_at', 'updated_at'}
     assert client.post('/api/characters', json={'name': '林'}).status_code == 409
     alice = create(client, 'Alice')
     r = client.post('/api/characters', json={'name': 'alice'})
@@ -378,6 +378,20 @@ def test_character_change_does_not_touch_canvas(client):
     assert after['revision'] == before['revision'] and after['document'] == before['document']
     assert client.get(imported['assets'][0]['url']).status_code == 200
     assert tasks.get_db().execute('SELECT count(*) FROM tasks').fetchone()[0] == 0
+
+
+def test_character_prop_kind_create_and_update(client):
+    """V2-REAL-USE F11: character cards support 'character' (default) and 'prop' (物件) template kinds."""
+    default_card = create(client, '林')
+    assert default_card['kind'] == 'character'
+    prop_card = client.post('/api/characters', json={'name': '青铜灯笼', 'description': '锈迹斑驳', 'kind': 'prop'}).json['character']
+    assert prop_card['kind'] == 'prop' and prop_card['description'] == '锈迹斑驳'
+    patched = client.patch(f"/api/characters/{prop_card['id']}", json={'kind': 'character'}).json['character']
+    assert patched['kind'] == 'character'
+    patched_back = client.patch(f"/api/characters/{prop_card['id']}", json={'kind': 'prop'}).json['character']
+    assert patched_back['kind'] == 'prop'
+    assert client.post('/api/characters', json={'name': '坏类型', 'kind': 'scene'}).status_code == 400
+    assert client.patch(f"/api/characters/{prop_card['id']}", json={'kind': 'invalid'}).status_code == 400
 
 
 # ---- node.characterRefs 白名单与校验 ------------------------------------------------------

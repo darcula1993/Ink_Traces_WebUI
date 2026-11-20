@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Maximize2, UploadCloud, X, Plus, RotateCw } from 'lucide-react'
 import SortableReferenceItem, { moveArrayItem } from './SortableReferenceItem'
 import { persistWorkspaceBlob, workspaceImageFields } from '../lib/useWorkspaceState'
+import { DropTargetReticle } from './art/ShellEmptyArt'
 
 const IMAGE_EXTENSION = /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i
 let nextReferenceId = 0
@@ -129,8 +130,13 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, createPrev
         <input ref={fileInputRef} aria-label="选择参考图片" type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
 
         {isDragging && (
-          <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded border border-dashed border-nexus-green bg-[#07120d]/95 text-nexus-green backdrop-blur-sm">
-            <UploadCloud size={24} />
+          <div className="drop-reticle-overlay" data-testid="reference-drop-overlay" aria-hidden="true">
+            <span className="drop-reticle-corner is-tl" />
+            <span className="drop-reticle-corner is-tr" />
+            <span className="drop-reticle-corner is-bl" />
+            <span className="drop-reticle-corner is-br" />
+            <DropTargetReticle size={24} />
+            <span className="drop-reticle-label">松开以添加参考图片</span>
           </div>
         )}
         

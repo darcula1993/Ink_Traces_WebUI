@@ -219,9 +219,18 @@ export function serverItem(task) {
   const result = task.result || {}
   const params = task.params || {}
   const entries = taskMediaEntries(result)
+  const rawLayerUrls = task.type === 'layer'
+    ? [...new Set([
+        ...(result.local_images || []),
+        ...(result.base_image ? [result.base_image] : []),
+        ...(Array.isArray(result.layers) ? result.layers.map(layer => layer?.local_url) : []),
+      ].filter(Boolean))]
+    : []
   const imageOutputs = task.type === 'image' || !task.type
     ? taskOutputs((result.local_images || []).map(url => taskDisplayUrl(task.id, url)), entries.filter(entry => !entry.kind || entry.kind === 'image'))
-    : []
+    : task.type === 'layer'
+      ? taskOutputs(rawLayerUrls.map(url => taskDisplayUrl(task.id, url)), entries.filter(entry => !entry.kind || entry.kind === 'image'))
+      : []
   const mainUrl = task.type === 'video' ? taskDisplayUrl(task.id, result.local_video) : task.type === 'audio' ? result.local_audio : null
   const mainOutputs = task.type === 'video' || task.type === 'audio'
     ? taskOutputs([mainUrl], entries.filter(entry => !entry.kind || entry.kind === task.type))
@@ -231,6 +240,8 @@ export function serverItem(task) {
   const deletedCount = outputs.filter(output => output.deleted).length
   const resultDeleted = outputs.length > 0 && deletedCount === outputs.length
   const liveMain = mainOutputs.find(output => !output.deleted)
+  const layers = Array.isArray(result.layers) ? result.layers : []
+  const layerCount = Number.isFinite(Number(result.layer_count)) ? Number(result.layer_count) : layers.length
   return {
     key: `task-${task.id}`,
     kind: 'history',
@@ -250,23 +261,31 @@ export function serverItem(task) {
     resultUnknownReason: task.status === 'failed' && isResultUnknown(task) ? resultUnknownReason(task) : '',
     params,
     images: imageOutputs.filter(output => !output.deleted).map(output => output.url),
+    layers,
+    layerCount,
+    layerProjectId: result.project_id ?? params.project_id ?? null,
     outputs,
     libraryMedia,
     deletedCount,
     resultDeleted,
     remoteHosts: Array.isArray(result.source_urls) ? result.source_urls.map(remoteResultHost) : [],
-    thumbnail: resultDeleted ? null : (imageOutputs.length && imageOutputs[0].deleted ? null : (result.local_thumbnail || result.local_thumbnails?.[0] || null)),
+    thumbnail: resultDeleted ? null : (imageOutputs.length && imageOutputs[0].deleted ? null : (result.local_thumbnail || result.local_thumbnails?.[0] || (task.type === 'layer' ? result.base_image : null) || null)),
     video: task.type === 'video' ? (liveMain?.url || null) : (taskDisplayUrl(task.id, result.local_video) || null),
     audio: task.type === 'audio' ? (liveMain?.url || null) : (result.local_audio || null),
     poster: task.type === 'video' && resultDeleted ? null : (taskDisplayUrl(task.id, result.local_last_frame) || null),
     refs: result.local_refs || [],
     refTypes: result.local_ref_types || [],
+    canvasSource: task.canvas_source || null,
     source: task,
   }
 }
 
 export function taskTypeLabel(type) {
-  return type === 'video' ? '视频' : type === 'audio' ? '音频' : '图片'
+  if (type === 'all') return '全部'
+  if (type === 'video') return '视频'
+  if (type === 'audio') return '音频'
+  if (type === 'layer') return '图层'
+  return '图片'
 }
 
 export function selectionToken(item) {

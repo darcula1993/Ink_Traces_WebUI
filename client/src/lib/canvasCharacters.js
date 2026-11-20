@@ -29,13 +29,21 @@ export function characterUsage(nodeType, character) {
 
 const characterRef = (character, added) => ({ name: character.name, assetIds: [...new Set(added.map(asset => asset.id))], ...(typeof character.updated_at === 'string' && character.updated_at ? { updatedAt: character.updated_at } : {}) })
 
-// Lines of one character (imageTokens / audioToken are the tokens or placeholders to write).
-export function characterLines(name, { imageTokens = [], audioToken = null, description = '' } = {}) {
+// Lines of one character/prop (imageTokens / audioToken are the tokens or placeholders to write).
+export function characterLines(name, { imageTokens = [], audioToken = null, description = '', kind = 'character' } = {}) {
   const lines = []
-  if (imageTokens.length === 1) lines.push(`${name}对应${imageTokens[0]}，只采用五官、发型和服装，不采用图片背景。`)
-  else if (imageTokens.length > 1) lines.push(`${name}对应${imageTokens.join('、')}，只采用五官、发型和服装，不采用图片背景；${COUNT[imageTokens.length] || imageTokens.length}张参考共同定义同一人物，不生成多个副本。`)
-  if (description) lines.push(`${name}的外貌设定：${description}`)
-  if (audioToken) lines.push(`${audioToken}用于${name}的音色和台词。`)
+  const isProp = kind === 'prop'
+  if (imageTokens.length === 1) {
+    lines.push(isProp
+      ? `${name}对应${imageTokens[0]}，只采用物件外形、材质和细节，不采用图片背景。`
+      : `${name}对应${imageTokens[0]}，只采用五官、发型和服装，不采用图片背景。`)
+  } else if (imageTokens.length > 1) {
+    lines.push(isProp
+      ? `${name}对应${imageTokens.join('、')}，只采用物件外形、材质和细节，不采用图片背景；${COUNT[imageTokens.length] || imageTokens.length}张参考共同定义同一物件，不生成多个副本。`
+      : `${name}对应${imageTokens.join('、')}，只采用五官、发型和服装，不采用图片背景；${COUNT[imageTokens.length] || imageTokens.length}张参考共同定义同一人物，不生成多个副本。`)
+  }
+  if (description) lines.push(isProp ? `${name}的外观设定：${description}` : `${name}的外貌设定：${description}`)
+  if (audioToken) lines.push(isProp ? `${audioToken}用于${name}的声音效果。` : `${audioToken}用于${name}的音色和台词。`)
   return lines
 }
 
@@ -48,7 +56,7 @@ export function splitCharacterBlock(text) {
 }
 
 const REF = '(?:@(?:图片|视频|音频)[1-9]\\d*|\\u0000\\d+\\u0000)'
-const OWNER_PATTERNS = [new RegExp(`^(.+?)对应${REF}`), /^(.+?)的外貌设定：/, new RegExp(`^${REF}用于(.+?)的音色和台词。$`)]
+const OWNER_PATTERNS = [new RegExp(`^(.+?)对应${REF}`), /^(.+?)的外[貌观]设定：/, new RegExp(`^${REF}用于(.+?)的(?:音色和台词|声音效果)。$`)]
 export function characterLineOwner(line) {
   for (const pattern of OWNER_PATTERNS) { const match = String(line).match(pattern); if (match) return match[1] }
   return null
@@ -109,6 +117,7 @@ function rewriteCharacter({ node, assets, character, imported, removeIds = new S
     imageTokens: (imported.assets || []).map(asset => mark(asset.id)),
     audioToken: usage.voice ? mark(imported.voice.id) : null,
     description: usage.description,
+    kind: character.kind || 'character',
   })
   text = writeCharacterLines(text, character.name, lines, removeName)
   const mentions = {}
@@ -178,8 +187,8 @@ export function characterNotices(node, characters) {
 // @ menu entries for the character library (shown after the node's own references).
 export function characterMentionItems(characters = []) {
   return characters.map(character => ({
-    id: `character-${character.id}`, type: 'character', characterId: character.id,
-    label: character.name, alias: '', token: character.name, name: character.description || '角色卡',
+    id: `character-${character.id}`, type: 'character', characterId: character.id, kind: character.kind || 'character',
+    label: character.name, alias: '', token: character.name, name: character.description || (character.kind === 'prop' ? '物件卡' : '角色卡'),
     preview: character.images?.[0]?.thumbnail_url || character.images?.[0]?.url || null,
   }))
 }

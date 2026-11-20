@@ -22,11 +22,11 @@ def validate_field(kind, key, value):
         raise store.CanvasError('自定义宽高必须为正整数')
 
 
-def capabilities():
+def capabilities(ark_model=None):
     import app
     providers={}
     for provider in ('ark','cupsy'):
-        modern=provider=='ark' and seedream55_capabilities.enabled()
+        modern=provider=='ark' and seedream55_capabilities.enabled(ark_model)
         size_map=app.ARK_SEEDREAM_PRO_SIZE_MAP if provider=='ark' else app.CUPSY_SEEDREAM_SIZE_MAP
         if modern: size_map={**size_map, '1.5K':seedream55_capabilities.SIZES}
         providers[provider]={'ratios': list(size_map['1K'])+(['auto','custom'] if provider=='ark' else ['custom']),
@@ -39,9 +39,9 @@ def capabilities():
     return providers
 
 
-def normalized_saved(params, provider):
+def normalized_saved(params, provider, effective_model=None):
     import app
-    spec=capabilities()[provider]
+    spec=capabilities(effective_model if provider=='ark' else None)[provider]
     values={key:params.get(key,default) for key,default in spec['defaults'].items()}
     # Old empty generic ratio/resolution fields used the previous canvas fallbacks.
     values['ratio']=values['ratio'] or '1:1'
@@ -76,7 +76,7 @@ def validate_submission(data, provider, effective_model):
     node=next((n for n in saved['document']['nodes'] if n['id']==data['canvas_node_id']),None)
     if not node or node['type']!='image': raise store.CanvasError('图像节点不存在',404)
     params=node.get('params',{})
-    expected=normalized_saved(params,provider)
+    expected=normalized_saved(params,provider,effective_model)
     actual={
         'ratio':str(data.get('aspect_ratio','1:1')).strip().lower(),
         'resolution':str(data.get('resolution','1K')).upper(),

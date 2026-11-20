@@ -24,11 +24,11 @@
   --btn-fill-press: rgba(0, 0, 0, .14);
   --btn-text: #e4e5e7;
   --btn-text-muted: #a1a4a9;
-  --btn-primary-fill: #1c3d2d;
-  --btn-primary-fill-hover: #224834;
-  --btn-primary-fill-press: #183426;
-  --btn-primary-rim: rgba(79, 196, 140, .32);
-  --btn-primary-text: #eef7f1;
+  --btn-primary-fill: #246646;
+  --btn-primary-fill-hover: #2c7a54;
+  --btn-primary-fill-press: #1d5238;
+  --btn-primary-rim: rgba(94, 214, 155, .56);
+  --btn-primary-text: #f4fbf7;
   --btn-active-fill: rgba(69, 192, 136, .10);
   --btn-active-rim: rgba(79, 196, 140, .30);
   --btn-active-text: #9fe0c0;
@@ -81,9 +81,9 @@
 .btn.btn-lg svg { width: 16px; height: 16px; }
 .btn.btn-block { display: flex; width: 100%; }
 
-/* primary: low-saturation deep green fill; green stays an accent */
+/* primary: clear enabled deep-green fill on dark neutral ground; green stays an accent */
 .btn.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); }
-.btn.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(79, 196, 140, .45); background: var(--btn-primary-fill-hover); color: #fff; }
+.btn.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(110, 224, 168, .75); background: var(--btn-primary-fill-hover); color: #fff; }
 .btn.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); }
 
 /* secondary is the base look */
@@ -106,6 +106,8 @@
 .btn.btn-icon.btn-outlined { border-color: var(--btn-rim); background: var(--btn-fill); box-shadow: var(--btn-highlight); }
 .btn.btn-icon.btn-outlined:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); }
 .btn.btn-icon.btn-danger { color: var(--btn-danger-text); }
+.btn.btn-icon.btn-danger:hover:not(:disabled):not([aria-disabled=true]),
+.btn.btn-icon.btn-outlined.btn-danger:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-danger-rim-hover); background: var(--btn-danger-fill-hover); color: #efb3b7; }
 .btn.btn-icon.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); }
 .btn.btn-icon.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(79, 196, 140, .45); background: var(--btn-primary-fill-hover); color: #fff; }
 .btn.btn-icon.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); }
@@ -124,18 +126,4 @@
   .btn.btn-primary { border-color: Highlight; }
   .btn:focus-visible { outline: 2px solid Highlight; }
   .btn.is-active, .btn[aria-pressed=true] { outline: 2px solid Highlight; outline-offset: -2px; }
-}
-
-/* UI-ITER-R2B: >=2200px viewports scale the shell chrome (top bar, canvas sidebar) one step up so
- * 12px labels stay legible on 2560x1440; 1280-1920 are untouched. */
-@media (min-width: 2200px) {
-  /* zoom also scales the 10px side margin to 12.5px; use 8px so the bar lines up with the 10px sidebar/studio edges. */
-  .app-header { zoom: 1.25; margin-left: 8px; margin-right: 8px; }
-  .canvas-studio .cv-sidebar-shell>.cv-sidebar { zoom: 1.2; width: 100%; height: 100%; }
-  /* UI-ITER-R2-FIX M2: canvas chrome, dialogs and portal menus join the same step. */
-  .canvas-studio .cv-topbar, .canvas-studio .cv-tools, .canvas-studio .cv-bottom, .canvas-studio .cv-hint { zoom: 1.2; }
-  .cv-sidebar-menu { zoom: 1.2; }
-  .ul-library { zoom: 1.2; width: min(calc(clamp(960px, 86vw, 1680px) / 1.2), calc(100% / 1.2)); height: min(calc(100% / 1.2), calc(clamp(640px, 90vh, 1240px) / 1.2)); }
-  .ul-subdialog>section { zoom: 1.2; }
-  .provider-settings { zoom: 1.2; width: min(calc(clamp(960px, 72vw, 1280px) / 1.2), calc(100% / 1.2)); height: min(calc(clamp(640px, 82vh, 1000px) / 1.2), calc((100dvh - 16px) / 1.2)); }
 }

@@ -1,1 +1,144 @@
-.ca-overlay{position:absolute;inset:0;z-index:60;background:#11111199;display:flex;justify-content:center;padding:24px;box-sizing:border-box}.ca-dialog{width:min(100%,1000px);height:100%;display:flex;flex-direction:column;gap:12px;outline:none;color:#eeeeee;min-height:0}.ca-toolbar,.ca-text{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#262626;border:1px solid #444444;border-radius:16px;padding:10px 14px;box-shadow:0 8px 28px #00000055}.ca-toolbar button:where(:not(.btn)),.ca-text input,.ca-text textarea{background:#333333;color:#eeeeee;border:1px solid #555555;border-radius:8px;padding:8px}.ca-toolbar button:where(:not(.btn))[aria-pressed=true]{background:#555555;border-color:#aaaaaa}.ca-toolbar label,.ca-text label{display:flex;align-items:center;gap:6px;font-size:12px}.ca-toolbar input[type=color]{width:32px;height:32px;padding:0;border:0;background:transparent}.ca-toolbar input[type=range]{width:80px}.ca-toolbar .ca-save{margin-left:auto;background:white;color:#111111}.ca-toolbar button:where(:not(.btn)):disabled{opacity:.4}.ca-preview{min-height:0;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none}.ca-text textarea{flex:1;min-width:180px;max-height:100px;resize:vertical}.ca-text input{width:68px}.ca-dialog [role=alert]{background:#2f2c2c;color:#f0d9d9;padding:8px;margin:0}.ca-dialog :focus-visible{outline:2px solid #9fe0c0;outline-offset:2px}
+.ca-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, .68);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-5);
+  box-sizing: border-box;
+}
+
+.ca-dialog {
+  width: min(100%, 1000px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  outline: none;
+  color: var(--text);
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  min-height: 0;
+}
+
+.ca-toolbar,
+.ca-text {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  background: var(--overlay-fill);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  box-shadow: var(--shadow-2);
+}
+
+.ca-toolbar label,
+.ca-text label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-caption);
+  color: var(--text-2);
+}
+
+.ca-toolbar input[type=color] {
+  width: 30px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+  cursor: pointer;
+}
+
+.ca-toolbar input[type=range] {
+  width: 88px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ca-toolbar .ca-save {
+  margin-left: auto;
+}
+
+.ca-preview {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+  background: var(--bg, #0c0d0e);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 2px 16px rgba(0, 0, 0, .45);
+}
+
+/* T2-5: dark subtle alpha checkerboard on the annotator image stage so transparent PNGs never leak canvas noise. */
+.ca-preview .konvajs-content {
+  background-color: var(--checker-dark, #131416);
+  background-image: conic-gradient(
+    var(--checker-light, #1a1c1e) 90deg,
+    var(--checker-dark, #131416) 90deg 180deg,
+    var(--checker-light, #1a1c1e) 180deg 270deg,
+    var(--checker-dark, #131416) 270deg
+  );
+  background-size: var(--checker-size-lg, 14px) var(--checker-size-lg, 14px);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, .14));
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .38), 0 8px 28px rgba(0, 0, 0, .42);
+}
+
+.ca-text textarea,
+.ca-text input {
+  background: var(--field);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  padding: 6px 10px;
+  font-size: var(--fs-control);
+}
+
+.ca-text textarea {
+  flex: 1;
+  min-width: 180px;
+  max-height: 100px;
+  resize: vertical;
+}
+
+.ca-text input {
+  width: 68px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-text textarea:focus-visible,
+.ca-text input:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--ring-focus);
+}
+
+.ca-dialog [role=alert] {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid rgba(223, 138, 144, .25);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-caption);
+  margin: 0;
+}
+
+.ca-dialog :focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.ca-dialog .btn:focus-visible {
+  outline: none;
+  box-shadow: var(--btn-highlight), var(--btn-ring);
+}

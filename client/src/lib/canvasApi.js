@@ -21,6 +21,7 @@ export const createCanvasProject = async title => (await data(axios.post(`${base
 export const renameCanvasProject = async (id, title) => (await data(axios.patch(projectUrl(id), { title }))).project
 export const listCanvasWorkflows = async id => (await data(axios.get(`${projectUrl(id)}/workflows`))).workflows
 export const createCanvasWorkflow = async (id, title) => (await data(axios.post(`${projectUrl(id)}/workflows`, { title }))).workflow
+export const duplicateCanvasWorkflow = async (id, title) => (await data(axios.post(`${workflowUrl(id)}/duplicate`, title ? { title } : {}))).workflow
 export const getCanvasWorkflow = async id => (await data(axios.get(workflowUrl(id)))).workflow
 // CANVAS-WRITEBACK-20261114 C: a PUT whose base revision is only behind server
 // write-backs is merged by the server and answered with {merged:true, revision, document}
@@ -88,27 +89,49 @@ export async function importCharacterAssets(workflowId, characterId, { imageIds 
   return { assets, voice: voice ? result.voice : null }
 }
 
-export async function getCanvasCapabilities() {
-  const [image, video, audio, saved] = await Promise.all([
-    data(axios.get('/api/provider')), data(axios.get('/api/video/provider')), data(axios.get('/api/audio/provider')),
-    data(axios.get('/api/provider-profiles')),
-  ])
-  const available = info => Object.entries(info.providers || {}).filter(([, value]) => value.available)
+export function buildCapabilities(image, video, audio, saved) {
+  const available = info => Object.entries(info?.providers || {}).filter(([, value]) => value.available && !value.managed_by_profiles)
   const legacy = {
     image: available(image).map(([id, p]) => ({ id, provider: id, name: `${p.name || id}（原配置）`, model: p.model, capability_model: p.capability_model })),
     video: available(video).map(([id, p]) => ({ id, provider: id, name: `${id === 'ark' ? 'BytePlus Ark' : 'Cupsy'}（原配置）`, models: (p.models || []).map(model => ({ id: model, name: videoModelLabel(model) })) })),
     audio: available(audio).map(([id, p]) => ({ id, provider: id, name: 'Cupsy（原配置）', model: p.models?.[0] || CUPSY_AUDIO_MODEL })),
   }
-  const profiles = (saved.profiles || []).filter(p => p.enabled && p.has_api_key).sort((a, b) => Number(b.is_default) - Number(a.is_default))
-  return Object.fromEntries(['image', 'video', 'audio'].map(kind => [kind, [
-    ...profiles.filter(p => p.kind === kind).map(p => ({
-      id: `profile:${p.id}`, provider: p.adapter, profile_id: p.id, is_default: !!p.is_default,
-      name: `${p.name}${p.is_default ? ' · 默认' : ''}`, revision: p.revision,
-      capability_model: p.adapter==='ark' && p.settings.model===image.providers?.ark?.model ? image.providers.ark.capability_model : p.settings.model,
-      model: kind === 'video' ? (p.adapter === 'cupsy' ? p.settings.model || 'seedance-2.5' : 'seedance-2.0') : p.settings.model || (kind === 'audio' ? CUPSY_AUDIO_MODEL : image.providers?.[p.adapter]?.model),
-      ...(kind === 'video' ? { models: (video.providers?.[p.adapter]?.models || (p.adapter === 'cupsy' ? ['seedance-2.5', 'seedance-2.5-moderated'] : ['seedance-2.0', 'seedance-2.5'])).map(id => ({ id, name: videoModelLabel(id) })) } : {}),
-    })), ...legacy[kind],
-  ]]))
+  const profiles = (saved?.profiles || []).filter(p => p.enabled && p.has_api_key).sort((a, b) => Number(b.is_default) - Number(a.is_default))
+  return Object.fromEntries(['image', 'video', 'audio'].map(kind => {
+    const kindProfiles = profiles.filter(p => p.kind === kind).map(p => {
+      const settings = p.settings || {}
+      const imageDefault = p.adapter === 'cupsy' ? 'seedream-5.0-pro' : 'seedream-5-0-pro'
+      const capabilityModel = p.capability_model !== undefined && p.capability_model !== null
+        ? p.capability_model
+        : p.adapter === 'ark' && settings.model && settings.model === image?.providers?.ark?.model
+          ? image.providers.ark.capability_model
+          : kind === 'image'
+            ? (settings.model || imageDefault)
+            : settings.model
+      return {
+        id: `profile:${p.id}`, provider: p.adapter, profile_id: p.id, is_default: !!p.is_default,
+        ...(p.source_key ? { source_key: p.source_key } : {}),
+        name: `${p.name}${p.is_default ? ' · 默认' : ''}`, revision: p.revision,
+        capability_model: capabilityModel,
+        model: kind === 'video' ? (p.adapter === 'cupsy' ? settings.model || 'seedance-2.5' : 'seedance-2.0') : (settings.model || (kind === 'audio' ? CUPSY_AUDIO_MODEL : imageDefault)),
+        ...(kind === 'video' ? { models: (video?.providers?.[p.adapter]?.models || (p.adapter === 'cupsy' ? ['seedance-2.5', 'seedance-2.5-moderated'] : ['seedance-2.0', 'seedance-2.5'])).map(id => ({ id, name: videoModelLabel(id) })) } : {}),
+      }
+    })
+    const importedAdapters = new Set(kindProfiles.filter(p => p.source_key === `config:${kind}:${p.provider}`).map(p => p.provider))
+    return [kind, [...kindProfiles, ...legacy[kind].filter(item => !importedAdapters.has(item.provider))]]
+  }))
+}
+
+export async function getToolCapabilities() {
+  const [image, video, audio, saved] = await Promise.all([
+    data(axios.get('/api/provider')), data(axios.get('/api/video/provider')), data(axios.get('/api/audio/provider')),
+    data(axios.get('/api/provider-profiles')),
+  ])
+  return { capabilities: buildCapabilities(image, video, audio, saved), image, video, audio, saved }
+}
+
+export async function getCanvasCapabilities() {
+  return (await getToolCapabilities()).capabilities
 }
 
 function invalid(message) {
@@ -166,7 +189,7 @@ export async function submitCanvasGeneration(workflowId, node, nodes, edges) {
   if (assets.some(a => !['image', 'video', 'audio'].includes(a.kind))) invalid('不支持的参考素材类型')
   let path
   const adapter = provider.provider || provider.id
-  const fields = { prompt, canvas_workflow_id: workflowId, canvas_node_id:node.id, ...(node.title ? { result_name: String(node.title) } : {}), canvas_workflow_revision:workflow.revision, provider: adapter, ...(provider.profile_id ? { profile_id: provider.profile_id } : {}) }
+  const fields = { prompt, canvas_workflow_id: workflowId, canvas_node_id:node.id, ...(node.title ? { result_name: String(node.title) } : {}), canvas_workflow_revision:workflow.revision, provider: adapter, ...(savedNode.providerSelection?.profile_id && provider.profile_id ? { profile_id: provider.profile_id } : {}) }
   if (node.type === 'image') {
     if (videos.length || audios.length) invalid('图像生成只接受图片参考；请调整素材或素材组')
     let references=images
@@ -236,6 +259,22 @@ export async function getTaskDetail(taskId) {
   return { id: task.id, status: task.status, error: task.error, resultUnknown: task.status === 'failed' && task.result?.result_unknown === true }
 }
 
+export async function cancelCanvasTask(taskId) {
+  const id = Number(taskId)
+  if (!Number.isInteger(id) || id <= 0) invalid('任务编号无效，无法取消')
+  const result = await data(axios.post(`/api/tasks/${encodeURIComponent(id)}/cancel`))
+  const rawStatus = result.task?.status ?? result.status
+  const status = isServerTaskStatus(rawStatus) ? rawStatus : null
+  return {
+    id: Number(result.task?.id || id),
+    status,
+    invalidStatus: status ? null : (rawStatus ? String(rawStatus) : null),
+    error: result.task?.error || null,
+    resultUnknown: status === 'failed' && result.task?.result?.result_unknown === true,
+    task: result.task || null,
+  }
+}
+
 export async function getCanvasTask(workflowId, taskId) {
   const { task } = await data(axios.get(`/api/tasks/${taskId}`))
   let assets = []
@@ -267,6 +306,8 @@ export const updateProjectFolder = async (id,folderId,value) => (await data(axio
 export const deleteProjectFolder = (id,folderId) => data(axios.delete(`${projectUrl(id)}/folders/${encodeURIComponent(folderId)}`))
 export const updateProjectAsset = (id,assetId,value) => data(axios.patch(`${projectUrl(id)}/assets/${encodeURIComponent(assetId)}`,value))
 export const deleteCanvasObject = (kind,id,cleanup_assets=false) => data(axios.delete(kind==='project'?projectUrl(id):workflowUrl(id),{data:{cleanup_assets}}))
+export const previewBulkDeleteProjects = ids => data(axios.post(`${base}/projects/bulk-delete-preview`, { ids }))
+export const bulkDeleteProjects = (ids, cleanup_assets = false) => data(axios.post(`${base}/projects/bulk-delete`, { ids, cleanup_assets }))
 export const listPendingCanvasDeletions = async () => (await data(axios.get(`${base}/deletions`))).deletions
 export async function downloadProjectFolder(id,folderId,title) {
   const response=await fetch(`${projectUrl(id)}/folders/${encodeURIComponent(folderId)}/download`)

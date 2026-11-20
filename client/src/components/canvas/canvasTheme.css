@@ -288,7 +288,7 @@
   border-radius: var(--r-lg);
 }
 
-.canvas-studio :is(.cv-topbar, .cv-tools, .cv-bottom, .cv-image-toolbar,
+.canvas-studio :is(.cv-tools, .cv-bottom, .cv-image-toolbar,
   .cv-sidebar-tabs, .cv-sidebar-search, .cv-reference-thumb) {
   border-radius: var(--r-md);
 }
@@ -506,8 +506,8 @@
 
 /* CANVAS-UX-20261112: one-row top bar,readable failures,stale markers. */
 .cv-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.canvas-studio .cv-topbar { flex-wrap: nowrap; gap: 8px; min-width: 0; }
-.canvas-studio .cv-topbar .cv-project-name { min-width: 80px; flex: 0 1 320px; text-overflow: ellipsis; }
+.canvas-studio .cv-topbar { height: 44px; min-height: 44px; padding: 0 14px; border-radius: 0; box-shadow: none; flex-wrap: nowrap; gap: 8px; min-width: 0; }
+.canvas-studio .cv-topbar .cv-project-name { min-width: 80px; min-height: 30px; height: 30px; padding: 2px 8px; flex: 0 1 320px; text-overflow: ellipsis; }
 .canvas-studio .cv-topbar .cv-save-state { white-space: nowrap; font-size: 12px; }
 .canvas-studio .cv-edit-tools { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
 .canvas-studio .cv-retry-save { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--cv-warning); border-color: var(--cv-warning); font-size: 12px; }
@@ -663,5 +663,8 @@
 .canvas-studio .cv-node.is-drop-target { outline: 2px dashed var(--cv-focus); outline-offset: 3px; }
 .canvas-studio .cv-port-out { cursor: crosshair; touch-action: none; }
 
-/* Informational overlap notice: neutral, parked at the top so it never covers node panel price/generate. */
-.canvas-studio .cv-alert.cv-alert-info{top:12px;bottom:auto;background:var(--cv-glass-solid);border-color:var(--cv-border);color:var(--cv-secondary)}
+/* Informational overlap notice: neutral, parked at the top so it never covers node panel price/generate;
+   uses its own class so .cv-alert stays reserved for actual error/status alerts. */
+.canvas-studio .cv-overlap-notice{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:9;background:var(--cv-glass-solid);border:1px solid var(--cv-border);border-radius:8px;padding:10px 14px;max-width:min(440px,calc(100% - 32px));display:flex;flex-direction:column;align-items:flex-start;gap:4px;color:var(--cv-secondary);pointer-events:none}
+.canvas-studio .cv-overlap-notice :is(button,a){pointer-events:auto}
+.canvas-studio .cv-overlap-notice button:where(:not(.btn)){font-size:12px;align-self:flex-end}

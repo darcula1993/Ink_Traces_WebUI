@@ -81,13 +81,29 @@ export function copyCanvasSelection(document,ids,workflowId) {
   return {workflowId,groups:clone((document.groups||[]).filter(group=>group.nodeIds.every(id=>selected.has(id)))),nodes:clone(document.nodes.filter(n=>selected.has(n.id))).map(({upstreamStale,...n})=>({...n,task:null})),edges:clone(document.edges.filter(e=>selected.has(e.source)&&selected.has(e.target)))}
 }
 // selectionFor(type) fills a concrete interface into copied legacy generation nodes that have none.
-export function pasteCanvasSelection(document,clipboard,workflowId,uid,offset=40,selectionFor=null) {
-  if(!clipboard||clipboard.workflowId!==workflowId)throw new Error('选区只能粘贴到原画布，请重新复制。')
+// P1-CANVAS-WORKFLOW-20261120 (P1-2): supports pasting across canvases (same or different project).
+// Cross-canvas pastes strip generation runtime/output state (task, asset, candidates, selectedCandidateId,
+// upstreamStale) while keeping global library media_id on asset nodes & referenceAssets intact.
+export function pasteCanvasSelection(document,clipboard,workflowId,uid,offset=40,selectionFor=null,options={}) {
+  if(!clipboard||!Array.isArray(clipboard.nodes)||!clipboard.nodes.length)throw new Error('剪贴板中没有可粘贴的节点。')
   if(document.nodes.length+clipboard.nodes.length>500||document.edges.length+clipboard.edges.length>2000)throw new Error('粘贴会超过画布上限（500节点／2000连线），请减少选区。')
-  if(clipboard.nodes.some(n=>!Number.isFinite(n.x+offset)||!Number.isFinite(n.y+offset)||Math.abs(n.x+offset)>1e6||Math.abs(n.y+offset)>1e6))throw new Error('粘贴位置超出画布坐标范围，请先移动原选区再复制。')
-  const ids=new Map(clipboard.nodes.map(n=>[n.id,uid()])),nodes=clone(clipboard.nodes).map(n=>({...n,id:ids.get(n.id),x:n.x+offset,y:n.y+offset,title:`${n.title.slice(0,237)} 副本`,task:null})).map(n=>withProviderSelection(n,selectionFor))
+  const crossWorkflow=clipboard.workflowId!==workflowId
+  const anchor=options?.anchor
+  let dx=offset,dy=offset
+  if(anchor&&Number.isFinite(anchor.x)&&Number.isFinite(anchor.y)){
+    const minX=Math.min(...clipboard.nodes.map(n=>n.x)),minY=Math.min(...clipboard.nodes.map(n=>n.y))
+    dx=Math.round(anchor.x-minX);dy=Math.round(anchor.y-minY)
+  }
+  if(clipboard.nodes.some(n=>!Number.isFinite(n.x+dx)||!Number.isFinite(n.y+dy)||Math.abs(n.x+dx)>1e6||Math.abs(n.y+dy)>1e6))throw new Error('粘贴位置超出画布坐标范围，请先移动原选区再复制。')
+  const ids=new Map(clipboard.nodes.map(n=>[n.id,uid()]))
+  const nodes=clone(clipboard.nodes).map(({upstreamStale,...n})=>{
+    const title=crossWorkflow?String(n.title||'').slice(0,240):`${String(n.title||'').slice(0,237)} 副本`
+    let next={...n,id:ids.get(n.id),x:n.x+dx,y:n.y+dy,title,task:null}
+    if(crossWorkflow&&GENERATION_TYPES.has(n.type))next={...next,asset:null,candidates:[],selectedCandidateId:null}
+    return withProviderSelection(next,selectionFor)
+  })
   const edges=clone(clipboard.edges).map(e=>({...e,id:uid(),source:ids.get(e.source),target:ids.get(e.target)}))
-  const groups=(clipboard.groups||[]).map(group=>({...group,id:uid(),title:group.title.slice(0,97)+' 副本',nodeIds:group.nodeIds.map(id=>ids.get(id)),...(group.keyframeNodeId?{keyframeNodeId:ids.get(group.keyframeNodeId)}:{})}))
+  const groups=(clipboard.groups||[]).map(group=>({...group,id:uid(),title:crossWorkflow?String(group.title||'').slice(0,100):group.title.slice(0,97)+' 副本',nodeIds:group.nodeIds.map(id=>ids.get(id)),...(group.keyframeNodeId?{keyframeNodeId:ids.get(group.keyframeNodeId)}:{})}))
   return {document:{...document,...(groups.length?{groups:[...(document.groups||[]),...groups]}:{}),nodes:[...document.nodes,...nodes],edges:[...document.edges,...edges]},ids:nodes.map(n=>n.id)}
 }
 // V140 #6: duplicating one generation node keeps its references (direct

@@ -24,9 +24,9 @@
 
 .canvas-studio.cv-sidebar-menu-portal .cv-sidebar-menu{max-width:min(var(--cv-nav-menu-max-width,267px),calc(100vw - 16px))}
 
-.canvas-studio .cv-sidebar-name-editor{min-width:0;flex:1;max-width:55%}
-.canvas-studio .cv-sidebar-name-editor input{width:100%;min-width:0;height:32px;border:1px solid #959e9a;border-radius:8px;background:#1d1f1f;color:inherit;padding:3px 6px;font:inherit}
-.canvas-studio .cv-sidebar-name-editor [role=alert]{position:absolute;top:52px;left:10px;right:10px;background:#262928;color:#e7c0c0;font-size:12px;padding:5px 8px;border-radius:8px;z-index:20;white-space:normal;overflow-wrap:anywhere}
+.canvas-studio .cv-sidebar-name-editor{position:relative;min-width:0;flex:1;max-width:100%}
+.canvas-studio .cv-sidebar-name-editor input{width:100%;min-width:0;height:28px;border:1px solid var(--cv-focus,#4fc48c);border-radius:6px;background:var(--cv-field,#1d1f1f);color:inherit;padding:2px 7px;font-size:13px;font-family:inherit}
+.canvas-studio .cv-sidebar-name-editor [role=alert]{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface-raised,#262928);border:1px solid rgba(223,138,144,.35);color:#f0c9cc;font-size:12px;padding:5px 8px;border-radius:6px;z-index:20;white-space:normal;overflow-wrap:anywhere;box-shadow:var(--shadow-2)}
 
 .canvas-studio .cv-sidebar-top{position:relative}
 /* V140 #3: the canvas chip keeps its natural width (up to half the row) so a long project name

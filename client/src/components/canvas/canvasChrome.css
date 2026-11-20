@@ -37,24 +37,41 @@
 .canvas-studio .cv-layout { position: relative; z-index: 0; isolation: isolate; }
 .cv-rail {
   flex: 0 0 var(--cv-rail-width); width: var(--cv-rail-width); display: flex; flex-direction: column;
-  justify-content: space-between; align-items: center; padding: 8px 0; gap: 8px; z-index: 31;
+  justify-content: space-between; align-items: center; padding: 10px 0 10px; gap: 8px; z-index: 31;
   background: var(--surface-1); border-right: 1px solid var(--cv-border);
 }
-.cv-rail-group { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.cv-rail .cv-rail-button {
-  position: relative; width: 36px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--cv-secondary); cursor: pointer;
+.cv-rail-group { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.cv-rail-group.is-bottom { gap: 4px; }
+.canvas-studio .cv-rail .cv-rail-button {
+  position: relative; width: 42px; height: 34px; padding: 0; display: inline-flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px;
+  border: 1px solid transparent; border-radius: 8px; background-color: transparent; color: var(--cv-secondary); cursor: pointer;
+  transition: color var(--dur-fast, 120ms) ease, background-color var(--dur-fast, 120ms) ease;
 }
-.cv-rail .cv-rail-button:hover:not(:disabled) { background: var(--cv-green-hover); color: var(--cv-text); }
-.cv-rail .cv-rail-button:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 1px; }
-.cv-rail .cv-rail-button:disabled { opacity: .4; cursor: default; }
-.cv-rail .cv-rail-button.is-active, .cv-rail .cv-rail-button[aria-pressed="true"] { color: var(--cv-text); background: var(--cv-green-hover); }
-.cv-rail .cv-rail-button.is-active::before {
-  content: ""; position: absolute; left: -6px; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--cv-green);
+.canvas-studio .cv-rail .cv-rail-button.has-label { height: 48px; }
+.canvas-studio .cv-rail .cv-rail-icon {
+  width: 30px; height: 30px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; transition: background-color var(--dur-fast, 120ms) ease;
+}
+.canvas-studio .cv-rail .cv-rail-label {
+  font-size: 10px; line-height: 12px; font-weight: 500; white-space: nowrap; letter-spacing: 0;
+}
+.canvas-studio .cv-rail .cv-rail-button:hover:not(:disabled) { background-color: transparent; border-color: transparent; color: var(--cv-text); }
+.canvas-studio .cv-rail .cv-rail-button:hover:not(:disabled) .cv-rail-icon { background: rgba(255, 255, 255, .08); }
+.canvas-studio .cv-rail .cv-rail-button:active:not(:disabled) { background-color: transparent; border-color: transparent; }
+.canvas-studio .cv-rail .cv-rail-button:not(.has-label):hover:not(:disabled) { background-color: rgba(255, 255, 255, .07); border-color: transparent; }
+.canvas-studio .cv-rail .cv-rail-button:not(.has-label):hover:not(:disabled) .cv-rail-icon { background: transparent; }
+.canvas-studio .cv-rail .cv-rail-button:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 0; }
+.canvas-studio .cv-rail .cv-rail-button:disabled { opacity: .4; cursor: default; }
+.canvas-studio .cv-rail .cv-rail-button.is-active { color: var(--cv-text); background-color: transparent; border-color: transparent; }
+.canvas-studio .cv-rail .cv-rail-button.is-active .cv-rail-icon { background: rgba(255, 255, 255, .13); color: var(--cv-text); }
+.canvas-studio .cv-rail .cv-rail-button[aria-pressed="true"] { color: var(--cv-text); background-color: rgba(255, 255, 255, .09); border-color: transparent; }
+.canvas-studio .cv-rail .cv-rail-button.is-active::before {
+  content: ""; position: absolute; left: -3px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--cv-green);
 }
 .cv-rail-badge {
-  position: absolute; top: 2px; right: 2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
-  font-size: 10px; line-height: 14px; text-align: center; background: var(--cv-green); color: #08130d;
+  position: absolute; top: 1px; right: 3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+  font-size: 10px; line-height: 14px; text-align: center; background: var(--cv-green); color: #08130d; font-weight: 600;
 }
 
 /* ---- Pop-out panel ------------------------------------------------------------------------------------- */
@@ -68,29 +85,151 @@
 .cv-rail-panel-shell.is-floating .cv-rail-panel {
   /* Opaque surface (no backdrop blur): a 96% glass fill let nodes/minimap below show through as a blurred ghost
    * along the panel (11-18 observation). Still reads as a floating layer via border + shadow. */
-  background: var(--surface-solid); border: 1px solid var(--cv-border-strong); border-left: 0;
+  background: var(--surface-solid); border: 1px solid var(--cv-border-strong); border-top: 0; border-left: 0;
   box-shadow: var(--shadow-2);
 }
-.cv-rail-panel-head { display: flex; align-items: center; gap: 4px; height: 44px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--cv-border); flex: 0 0 auto; }
-.cv-rail-panel-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-rail-panel-head { display: flex; align-items: center; gap: 4px; height: 44px; min-height: 44px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--cv-border); flex: 0 0 auto; }
+.cv-rail-panel-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 600; color: var(--cv-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-rail-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 /* The body carries .cv-sidebar so the existing node-list / asset-tree styles apply; undo the old shell layout. */
 .canvas-studio .cv-rail-panel .cv-rail-panel-body.cv-sidebar {
   width: auto; flex: 1 1 auto; display: flex; padding: 0; gap: 0; background: transparent; border: 0; box-shadow: none; overflow: hidden;
 }
 .cv-rail-panel-body > * { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.cv-panel-project, .cv-panel-assets, .cv-panel-tasks, .cv-panel-prompts { overflow: auto; }
+.cv-panel-assets, .cv-panel-tasks { overflow: auto; }
+.cv-panel-prompts { overflow: hidden; }
+.cv-panel-project { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .cv-panel-assets { padding: 0 4px; }
 .cv-panel-footer { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; color: var(--cv-secondary); border-top: 1px solid var(--cv-border); }
 .cv-panel-empty, .cv-panel-hint { margin: 12px; font-size: 12px; color: var(--cv-secondary); }
 .cv-panel-hint { margin: 0 12px; }
 .cv-panel-status { min-height: 16px; padding: 0 12px 8px; font-size: 12px; color: var(--cv-secondary); }
+.cv-panel-status:empty { min-height: 0; padding: 0; }
+
+/* ---- Project / Canvas panel (LEFT-CANVAS-PANEL-20261120) ---------------------------------------------- */
+.cv-project-row {
+  position: relative; flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
+  min-height: 42px; padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--cv-border); min-width: 0;
+}
+.canvas-studio .cv-panel-project .cv-project-name {
+  flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 6px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--cv-text); font-size: 13px; font-weight: 500;
+  justify-content: flex-start; text-align: left; display: block;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.canvas-studio .cv-panel-project .cv-project-name:hover:not(:disabled) { background: rgba(255, 255, 255, .05); }
+.cv-project-row-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.canvas-studio .cv-panel-project .cv-project-switch,
+.canvas-studio .cv-panel-project .cv-sidebar-more {
+  width: 26px; height: 26px; flex: 0 0 26px; padding: 0; border-radius: 6px;
+  color: var(--cv-secondary); background: transparent;
+}
+.canvas-studio .cv-panel-project .cv-project-switch:hover:not(:disabled),
+.canvas-studio .cv-panel-project .cv-sidebar-more:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .07); color: var(--cv-text);
+}
+
+.cv-panel-section { display: flex; flex-direction: column; min-width: 0; }
+.cv-pages-section { flex: 0 1 auto; max-height: 44%; min-height: 0; padding: 10px 0 10px; }
+.cv-pages-section.is-collapsed { padding-bottom: 6px; }
+.cv-nodes-section { flex: 1 1 0; min-height: 0; border-top: 1px solid var(--cv-border); padding-top: 10px; }
+.cv-nodes-section.is-collapsed { flex: 0 0 auto; }
+
+.cv-section-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 2px 10px 6px 14px; min-width: 0;
+}
+.cv-section-title {
+  margin: 0; flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; line-height: 20px; font-weight: 600; color: var(--cv-text); cursor: pointer; user-select: none;
+}
+.cv-section-count {
+  font-size: 11px; line-height: 16px; font-weight: 500; color: var(--cv-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.cv-section-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.canvas-studio .cv-panel-project .cv-section-btn {
+  width: 26px; height: 26px; padding: 0; border-radius: 6px; color: var(--cv-secondary); background: transparent;
+}
+.canvas-studio .cv-panel-project .cv-section-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .07); color: var(--cv-text);
+}
+
+.cv-workflow-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 2px; padding: 2px 10px 4px;
+}
+.cv-workflow-item {
+  position: relative; display: flex; align-items: center; gap: 4px; min-width: 0;
+  height: 34px; min-height: 34px; padding: 0 6px 0 10px; border-radius: 8px;
+  color: rgba(228, 229, 231, .84); transition: background-color var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
+}
+.cv-workflow-item:hover:not(.is-active) { background: rgba(255, 255, 255, .045); color: var(--cv-text); }
+.cv-workflow-item.is-active { background: rgba(255, 255, 255, .09); color: var(--cv-text); }
+.canvas-studio .cv-panel-project .cv-workflow-item-main {
+  flex: 1 1 auto; min-width: 0; height: 34px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; justify-content: flex-start; text-align: left;
+  font-size: 13px; font-weight: 400; cursor: pointer;
+}
+.canvas-studio .cv-panel-project .cv-workflow-item.is-active .cv-workflow-item-main { font-weight: 500; }
+.canvas-studio .cv-panel-project .cv-workflow-item-main:hover:not(:disabled) { background: transparent; }
+.cv-workflow-item-main span { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-workflow-item-actions {
+  flex: 0 0 auto; display: flex; align-items: center; opacity: 0; transition: opacity var(--dur-fast, 120ms) ease;
+}
+.cv-workflow-item:hover .cv-workflow-item-actions,
+.cv-workflow-item:focus-within .cv-workflow-item-actions,
+.cv-workflow-item.is-menu-open .cv-workflow-item-actions { opacity: 1; }
+.canvas-studio .cv-panel-project .cv-workflow-item-actions button {
+  width: 24px; height: 24px; padding: 0; border-radius: 6px; color: var(--cv-secondary); background: transparent;
+}
+.canvas-studio .cv-panel-project .cv-workflow-item-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, .08); color: var(--cv-text);
+}
+.cv-workflow-empty {
+  margin: 0; padding: 8px 10px; font-size: 12px; color: var(--cv-secondary);
+}
+.cv-nodes-section-body {
+  flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
 
 /* Prompt panel */
-.cv-panel-prompts { gap: 8px; padding-top: 8px; }
-.cv-panel-prompts-search { display: flex; flex-direction: column; gap: 6px; padding: 0 8px; min-height: 120px; flex: 1 1 auto; }
-.cv-panel-prompts-search .cv-prompt-library-list { flex: 1; overflow: auto; }
-.cv-panel-prompts-preview { flex: 0 0 auto; max-height: 160px; overflow: auto; margin: 0 8px; padding: 8px; border: 1px solid var(--cv-border); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
+.cv-panel-prompts { gap: 8px; padding: 8px 0 8px; }
+.cv-panel-prompts-search { display: flex; flex-direction: column; gap: 6px; padding: 0 8px; min-height: 0; flex: 1 1 0; overflow: hidden; }
+.cv-panel-prompts-search .cv-prompt-library-list { flex: 1 1 0; min-height: 0; max-height: none; overflow-y: auto; margin-top: 2px; padding-right: 2px; }
+.canvas-studio .cv-panel-prompts button.cv-prompt-library-option {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  justify-content: flex-start;
+  align-items: flex-start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--cv-text);
+  background: transparent;
+}
+.canvas-studio .cv-panel-prompts button.cv-prompt-library-option:hover {
+  background: rgba(255, 255, 255, .05);
+}
+.canvas-studio .cv-panel-prompts button.cv-prompt-library-option.is-active {
+  border-color: var(--cv-focus);
+  background: var(--cv-green-soft);
+}
+.cv-panel-prompts-preview { flex: 0 0 auto; max-height: min(30vh, 220px); overflow: auto; margin: 0 8px; padding: 8px; border: 1px solid var(--cv-border); border-radius: 6px; font-size: 12px; white-space: pre-wrap; }
 .cv-panel-prompts-preview p { margin: 0; }
 .cv-panel-prompts-actions { display: flex; gap: 4px; padding: 0 8px; flex: 0 0 auto; }
 .cv-panel-prompts-actions .btn-primary { flex: 1; }
@@ -126,25 +265,64 @@
 .cv-node-toolbar .cv-node-toolbar-button:disabled, .cv-node-toolbar .cv-node-toolbar-button[aria-disabled=true] { opacity: .4; cursor: default; }
 .cv-node-toolbar .cv-node-toolbar-button[aria-expanded=true] { background: var(--cv-green-hover); }
 
-/* ---- Bottom-left viewport cluster + minimap ------------------------------------------------------------- */
-.cv-viewport-tools { position: absolute; left: 16px; bottom: 16px; z-index: 11; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-/* The column wrapper is wider than the minimap: only the bar and the minimap take pointer events, not the gap beside it. */
-.cv-viewport-tools { pointer-events: none; }
+/* ---- Bottom safe dock: viewport cluster + minimap + bottom tools ---------------------------------------- */
+/* Grid keeps .cv-tools centred when room allows, and lets col 3 yield before col 1 & col 2 can collide. */
+.canvas-studio .cv-bottom-dock {
+  position: absolute;
+  left: calc(16px + var(--cv-float-panel, 0px));
+  right: 16px;
+  bottom: 16px;
+  z-index: 11;
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  column-gap: 12px;
+  pointer-events: none;
+  container: cv-bottom-dock / inline-size;
+}
+.cv-viewport-tools { position: absolute; left: 16px; bottom: 16px; z-index: 11; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; pointer-events: none; }
 .cv-viewport-tools > * { pointer-events: auto; }
+.canvas-studio .cv-bottom-dock .cv-viewport-tools {
+  position: static;
+  left: auto;
+  bottom: auto;
+  z-index: auto;
+  grid-column: 1;
+  justify-self: start;
+  align-self: end;
+}
+.canvas-studio .cv-bottom-dock .cv-tools {
+  position: static;
+  top: auto;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  z-index: auto;
+  grid-column: 2;
+  justify-self: center;
+  align-self: end;
+  pointer-events: auto;
+}
 .cv-viewport-bar {
   display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 4px; border-radius: 8px;
   background: var(--surface-1); border: 1px solid var(--cv-border); box-shadow: var(--shadow-1);
 }
+.canvas-studio .cv-viewport-bar button,
 .cv-viewport-bar button {
-  height: 28px; min-width: 28px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;
+  height: 28px; min-height: 28px; min-width: 28px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;
   border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--cv-text); font-size: 12px; cursor: pointer;
 }
-.cv-viewport-bar button:hover:not(:disabled) { background: var(--cv-green-hover); }
+.canvas-studio .cv-viewport-bar button:hover:not(:disabled),
+.cv-viewport-bar button:hover:not(:disabled) { background: var(--cv-green-hover); border-color: transparent; }
+.canvas-studio .cv-viewport-bar button[aria-pressed="true"],
 .cv-viewport-bar button[aria-pressed="true"] { color: var(--cv-green); }
+.canvas-studio .cv-viewport-bar button:disabled,
 .cv-viewport-bar button:disabled { opacity: .4; cursor: default; }
+.canvas-studio .cv-viewport-bar button:focus-visible,
 .cv-viewport-bar button:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 0; }
 .cv-viewport-sep { width: 1px; height: 16px; margin: 0 2px; background: var(--cv-border); }
 .cv-zoom-presets { position: relative; }
+.canvas-studio .cv-viewport-bar .cv-zoom-value,
 .cv-zoom-value { min-width: 52px !important; font-variant-numeric: tabular-nums; }
 .cv-zoom-menu {
   position: absolute; bottom: calc(100% + 6px); left: 0; display: flex; flex-direction: column; min-width: 104px; padding: 4px;
@@ -162,7 +340,7 @@
 .cv-minimap-frame { position: absolute; border: 1px solid var(--cv-green); border-radius: 2px; background: rgba(69, 192, 136, .08); pointer-events: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cv-rail .cv-rail-button, .cv-minimap-frame, .cv-node-toolbar { transition: none; }
+  .cv-rail .cv-rail-button, .cv-rail .cv-rail-icon, .cv-workflow-item, .cv-workflow-item-actions, .cv-minimap-frame, .cv-node-toolbar { transition: none; }
 }
 @media (prefers-reduced-transparency: reduce) {
   .cv-rail-panel-shell.is-floating .cv-rail-panel, .canvas-studio .cv-image-toolbar.cv-node-toolbar, .cv-minimap, .cv-zoom-menu {
@@ -198,28 +376,27 @@
 }
 .canvas-studio .cv-reference-add:hover { border-color: var(--cv-focus); }
 .canvas-studio .cv-reference-add:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 1px; }
-/* A floating (unpinned) panel overlays the left of the canvas column: the bottom-left cluster and minimap move to its
- * right edge instead of sitting under the glass (11-18 observation: occluded cluster + blurred minimap ghost). */
-.canvas-studio .cv-viewport-tools { left: calc(16px + var(--cv-float-panel, 0px)); }
 /* Pinned panel sits in the flex row between the rail and the canvas column. */
 .canvas-studio .cv-rail-panel-shell.is-pinned { position: relative; z-index: 2; }
-/* >= 2200px: the panel content and the bottom-left cluster join the existing one-step chrome zoom (buttons.css). */
-@media (min-width: 2200px) {
-  .canvas-studio .cv-rail-panel-shell > .cv-rail-panel { zoom: 1.2; width: 100%; height: 100%; }
-  .canvas-studio .cv-viewport-tools { zoom: 1.2; left: calc((16px + var(--cv-float-panel, 0px)) / 1.2); }
-}
-/* Narrow canvas column (1280/1366 with a pinned panel): compact the bottom-left cluster and the bottom tools so they
- * sit side by side inside a 640–760px canvas (spec 3.4). */
+/* Narrow canvas column (1280/1366 with a pinned or floating panel): compact the bottom-left cluster and the bottom
+ * tools so they sit side by side cleanly inside a 640–760px canvas with zero overlap or clipping (spec 3.4). */
 @container cv-main (max-width: 760px) {
-  .canvas-studio .cv-viewport-bar { gap: 1px; padding: 0 3px; }
-  .canvas-studio .cv-viewport-bar button { min-width: 24px; height: 26px; padding: 0 2px; }
-  .canvas-studio .cv-viewport-bar .cv-zoom-value { min-width: 46px !important; }
-  .canvas-studio .cv-tools { padding: 4px; }
-  .canvas-studio .cv-tools button:where(:not(.btn)) { width: 30px; height: 30px; }
+  .canvas-studio .cv-bottom-dock { left: calc(12px + var(--cv-float-panel, 0px)); right: 12px; }
 }
-/* Spec 1.5: canvas width = viewport − rail 48 − pinned panel − right panel. The canvas page is full-bleed under the
- * app header (no workspace side/bottom gutters), so 1280×800 gives a 944px canvas column. */
-.app-shell.is-canvas .workspace-main { padding-left: 0; padding-right: 0; padding-bottom: 0; }
+@container cv-bottom-dock (max-width: 680px) {
+  .canvas-studio .cv-viewport-bar { gap: 1px; padding: 0 3px; height: 34px; }
+  .canvas-studio .cv-viewport-bar button { min-width: 24px; height: 26px; min-height: 26px; padding: 0 2px; }
+  .canvas-studio .cv-viewport-bar .cv-zoom-value { min-width: 44px !important; }
+  .canvas-studio .cv-viewport-sep { margin: 0 1px; }
+  .canvas-studio .cv-tools { padding: 4px; gap: 3px; }
+  .canvas-studio .cv-tools button:where(:not(.btn)) { width: 30px; height: 30px; min-height: 30px; }
+  .canvas-studio .cv-tools hr { margin: 0 2px; }
+}
+@container cv-bottom-dock (max-width: 520px) {
+  .canvas-studio .cv-viewport-bar button[aria-label="画布快捷键帮助"] { display: none; }
+}
+/* Full-bleed canvas under the 48px app header (zero side/top/bottom gutters). */
+.app-shell.is-canvas .workspace-main { padding: 0; }
 
 /* ---- Version popover (NODE-TOOLBAR-VERSIONS-20261118) --------------------------------------------------- */
 .canvas-studio .cv-history-popover.cv-version-popover { width: 296px; max-width: calc(100% - 16px); max-height: min(420px, calc(100% - 16px)); flex-direction: column; flex-wrap: nowrap; gap: 8px; padding: 8px; z-index: 20; }

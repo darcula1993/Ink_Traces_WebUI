@@ -5,10 +5,11 @@ const media='/api/canvas/media',data=async request=>(await request).data
 export const MEDIA_SELECT_MAX=5000,MEDIA_CHUNK=500
 const chunks=(ids,size=MEDIA_CHUNK)=>Array.from({length:Math.ceil(ids.length/size)},(_,i)=>ids.slice(i*size,(i+1)*size))
 
-// Filters: {folder_id:undefined(all)|'root'|id, include_subfolders, kind, q}. Page is 1-based.
-export const mediaParams=({folder_id,include_subfolders,kind,q}={})=>({...(folder_id?{folder_id}:{}),...(folder_id&&include_subfolders?{include_subfolders:1}:{}),...(kind&&kind!=='all'?{kind}:{}),...(q?{q}:{})})
+// Filters: {folder_id:undefined(all)|'root'|id, include_subfolders, kind, q, sort}. Page is 1-based.
+export const mediaParams=({folder_id,include_subfolders,kind,q,sort}={})=>({...(folder_id?{folder_id}:{}),...(folder_id&&include_subfolders?{include_subfolders:1}:{}),...(kind&&kind!=='all'?{kind}:{}),...(q?{q}:{}),...(sort&&sort!=='newest'?{sort}:{})})
 export const listMedia=(filters,{page=1,limit=40}={},signal)=>data(axios.get(media,{params:{...mediaParams(filters),page,limit},signal}))
 export const selectMediaIds=(filters,signal)=>data(axios.get(`${media}/ids`,{params:mediaParams(filters),signal}))
+export const getMediaReferences=(id,signal)=>data(axios.get(`${media}/${encodeURIComponent(id)}/references`,{signal}))
 export async function uploadMedia(file,{folderId=null,origin='upload'}={}){const body=new FormData();body.append('file',file);if(folderId)body.append('folder_id',folderId);if(origin!=='upload')body.append('origin',origin);return data(axios.post(media,body))}
 export const mediaDownloadUrl=id=>`${media}/${encodeURIComponent(id)}?download=1`
 // refs: media ids (or legacy refs). Items: {ref,status:'ok'|'deleted'|'missing',media_id,media?}.

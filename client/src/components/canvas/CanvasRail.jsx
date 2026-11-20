@@ -5,6 +5,7 @@ import {RAIL_ITEMS,RAIL_PANEL_IDS,RAIL_PANEL_MAX,RAIL_PANEL_MIN,railFocusIndex,r
 import './canvasChrome.css'
 
 const ICONS={project:FolderKanban,assets:Images,characters:Users,prompts:Library,tasks:ListChecks}
+const SHORT_LABELS={project:'画布',assets:'素材',characters:'角色',prompts:'提示词',tasks:'任务'}
 export const RAIL_PANEL_TITLES=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,item.label]))
 const panelDomId=id=>`cv-rail-panel-${id}`
 
@@ -28,13 +29,13 @@ export function useCanvasRail({canPin}={}) {
  return {panel:state.panel,pinned:state.pinned,autoFocus:state.focus,open,toggle,close,togglePin,consumeFocus,iconRefs,focusIcon}
 }
 
-// Vertical icon rail (48px). Props: active (panel id|null), pinned, onToggle(id), onCharacters(),
-// onShortcuts(), onTogglePin(), iconRefs (from useCanvasRail), badges {tasks: n} (optional).
-export default function CanvasRail({active=null,pinned=false,onToggle,onCharacters,onShortcuts,onTogglePin,iconRefs,badges={},disabled={}}) {
+// Vertical icon rail (48px). Props: active (panel id|null), onToggle(id), onCharacters(),
+// onShortcuts(), iconRefs (from useCanvasRail), badges {tasks: n} (optional).
+// P1-CANVAS-WORKFLOW-20261120 (P2): pin/unpin button lives only in CanvasRailPanel's header (no duplicate rail entry).
+export default function CanvasRail({active=null,onToggle,onCharacters,onShortcuts,iconRefs,badges={},disabled={}}) {
  const [focusIndex,setFocusIndex]=useState(0),bar=useRef(null)
- const entries=[...RAIL_ITEMS.map(item=>({...item,Icon:ICONS[item.id]})),{id:'shortcuts',label:'快捷键帮助',kind:'action',Icon:CircleHelp,bottom:true},{id:'pin',label:pinned?'取消钉住面板':'钉住面板',kind:'pin',Icon:pinned?PinOff:Pin,bottom:true}]
+ const entries=[...RAIL_ITEMS.map(item=>({...item,Icon:ICONS[item.id]})),{id:'shortcuts',label:'快捷键帮助',kind:'action',Icon:CircleHelp,bottom:true}]
  const onKeyDown=event=>{
-  // Disabled entries (钉住 without an open panel) are skipped.
   const all=[...bar.current.querySelectorAll('button[data-rail-item]')],buttons=all.filter(button=>!button.disabled),index=buttons.indexOf(document.activeElement),next=railFocusIndex(index<0?Math.max(0,buttons.indexOf(all[focusIndex])):index,buttons.length,event.key)
   if(next==null)return
   event.preventDefault();event.stopPropagation();setFocusIndex(all.indexOf(buttons[next]));buttons[next]?.focus()
@@ -43,17 +44,17 @@ export default function CanvasRail({active=null,pinned=false,onToggle,onCharacte
   if(entry.kind==='panel')onToggle?.(entry.id)
   else if(entry.id==='characters')onCharacters?.()
   else if(entry.id==='shortcuts')onShortcuts?.()
-  else if(entry.kind==='pin')onTogglePin?.()
  }
  const button=(entry,index)=>{
-  const isPanel=entry.kind==='panel',isActive=isPanel&&active===entry.id
+  const isPanel=entry.kind==='panel',isActive=isPanel&&active===entry.id,shortLabel=SHORT_LABELS[entry.id]
   return <button key={entry.id} type="button" data-rail-item={entry.id} ref={el=>{if(iconRefs&&isPanel)iconRefs.current[entry.id]=el}}
-   className={`cv-rail-button${isActive?' is-active':''}`} aria-label={entry.label} title={entry.label}
+   className={`cv-rail-button${shortLabel?' has-label':''}${isActive?' is-active':''}`} aria-label={entry.label} title={entry.label}
    tabIndex={index===focusIndex?0:-1} onFocus={()=>setFocusIndex(index)}
    {...(isPanel?{'aria-expanded':isActive,'aria-controls':isActive?panelDomId(entry.id):undefined}:{})}
-   {...(entry.kind==='pin'?{'aria-pressed':pinned}:{})}
-   disabled={disabled[entry.id]||(entry.kind==='pin'&&!active)} onClick={()=>run(entry)}>
-   <entry.Icon size={18} aria-hidden="true"/>{badges[entry.id]>0&&<span className="cv-rail-badge" aria-hidden="true">{badges[entry.id]>99?'99+':badges[entry.id]}</span>}
+   disabled={disabled[entry.id]} onClick={()=>run(entry)}>
+   <span className="cv-rail-icon" aria-hidden="true"><entry.Icon size={shortLabel?17:16} aria-hidden="true"/></span>
+   {shortLabel&&<span className="cv-rail-label" aria-hidden="true">{shortLabel}</span>}
+   {badges[entry.id]>0&&<span className="cv-rail-badge" aria-hidden="true">{badges[entry.id]>99?'99+':badges[entry.id]}</span>}
   </button>
  }
  return <nav ref={bar} className="cv-rail" role="toolbar" aria-orientation="vertical" aria-label="画布导航" onKeyDown={onKeyDown}>
@@ -71,8 +72,7 @@ const PORTAL_SELECTOR='.cv-sidebar-menu-portal,[role=dialog],[role=alertdialog],
 export function CanvasRailPanel({id,title=RAIL_PANEL_TITLES[id],pinned=false,autoFocus=false,onFocused,onClose,onTogglePin,pinDisabledReason='',onWidth,children}) {
  const root=useRef(null),dragging=useRef(false)
  const viewport=typeof window!=='undefined'?window.innerWidth:1440
- // Spec 1.5 widths are on-screen px: ResizableSidebar scales its default by 1.2 at >= 2200 (chrome zoom), so undo that
- // here to keep the default panel 320 wide at 2560 (canvas 1832 when pinned).
+ // Spec 1.5 widths are on-screen px across all desktop viewports (no per-region zoom).
  useEffect(()=>{
   if(!autoFocus)return
   const target=root.current?.querySelector('.cv-rail-panel-body :is(button,input,select,textarea,[tabindex]):not([disabled]):not([tabindex="-1"])')||root.current?.querySelector('.cv-rail-panel-head button')
@@ -83,7 +83,7 @@ export function CanvasRailPanel({id,title=RAIL_PANEL_TITLES[id],pinned=false,aut
   const outside=event=>{
    if(dragging.current)return
    const target=event.target
-   if(!(target instanceof Element)||root.current?.contains(target)||target.closest('.cv-rail')||target.closest(PORTAL_SELECTOR))return
+   if(!(target instanceof Element)||root.current?.contains(target)||target.closest('.cv-rail-panel-shell,.cv-sidebar-resizer,.cv-rail,[data-canvas-rail-toggle]')||target.closest(PORTAL_SELECTOR))return
    onClose?.({returnFocus:false,reason:'outside'})
   }
   const start=event=>{if(root.current?.contains(event.target))dragging.current=true}
@@ -97,7 +97,7 @@ export function CanvasRailPanel({id,title=RAIL_PANEL_TITLES[id],pinned=false,aut
   if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();onClose?.({returnFocus:true,reason:'escape'})}
   event.stopPropagation()
  }
- return <ResizableSidebar className={`cv-rail-panel-shell ${pinned?'is-pinned':'is-floating'}`} minWidth={RAIL_PANEL_MIN} maxWidth={RAIL_PANEL_MAX} defaultWidth={railPanelDefaultWidth(viewport)/(viewport>=2200?1.2:1)} reserve={640} label={`调整${title}面板宽度`} onWidth={onWidth}>
+ return <ResizableSidebar className={`cv-rail-panel-shell ${pinned?'is-pinned':'is-floating'}`} minWidth={RAIL_PANEL_MIN} maxWidth={RAIL_PANEL_MAX} defaultWidth={railPanelDefaultWidth(viewport)} reserve={pinned?640:240} label={`调整${title}面板宽度`} onWidth={onWidth}>
   <section ref={root} id={panelDomId(id)} className="cv-rail-panel" data-panel={id} data-panel-bounds="" aria-label={title} onKeyDown={onKeyDown}>
    <header className="cv-rail-panel-head"><h2>{title}</h2>
     <button type="button" className="btn btn-ghost btn-sm btn-icon" aria-label={pinned?'取消钉住面板':'钉住面板'} aria-pressed={pinned} title={pinDisabledReason||(pinned?'取消钉住（改为浮层）':'钉住（停靠在左侧，挤压画布）')} disabled={!!pinDisabledReason&&!pinned} onClick={onTogglePin}>{pinned?<PinOff size={14} aria-hidden="true"/>:<Pin size={14} aria-hidden="true"/>}</button>

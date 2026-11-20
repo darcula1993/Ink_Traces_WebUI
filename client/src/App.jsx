@@ -4,9 +4,10 @@ const TextToImage = lazyPanel(() => import('./components/TextToImage'))
 const ImageToImage = lazyPanel(() => import('./components/ImageToImage'))
 import ImageOutputControls from './components/image-parameters/ImageOutputControls'
 import useImageDimensionDraft from './components/image-parameters/useImageDimensionDraft'
-import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imageRequestFields,imageSizeSummary as getImageSizeSummary} from './lib/imageGenerationRules'
+import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imageRequestFields,imageSizeSummary as getImageSizeSummary,isSeedream55} from './lib/imageGenerationRules'
 const PromptCollection = lazyPanel(() => import('./components/PromptCollection'))
 const TaskGallery = lazyPanel(() => import('./components/TaskGallery'))
+const GlobalTaskCenter = lazyPanel(() => import('./components/GlobalTaskCenter'))
 const PngInfoModal = lazyPanel(() => import('./components/PngInfoModal'))
 import useModalFocus, { isTopModal } from './components/ui/useModalFocus'
 const ReferenceMediaModal = lazyPanel(() => import('./components/ReferenceMediaModal'))
@@ -14,11 +15,12 @@ const ToolAssetLibrary = lazyPanel(() => import('./components/library/ToolAssetL
 import PromptMentionTextarea from './components/PromptMentionTextarea'
 import SortableReferenceItem, { moveArrayItem } from './components/SortableReferenceItem'
 import IconButton from './components/ui/IconButton'
+import BrandMark from './components/ui/BrandMark'
 import SegmentedControl from './components/ui/SegmentedControl'
 import ToggleSwitch from './components/ui/ToggleSwitch'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Library, Plus, SlidersHorizontal, Braces, AudioLines, CircleAlert, FileSearch, Layers3 } from 'lucide-react'
+import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Images, Library, ListTodo, Plus, SlidersHorizontal, AudioLines, CircleAlert, FileSearch, Layers3 } from 'lucide-react'
 import {videoCapabilities as getVideoCapabilities,videoDurations,videoRatio,VIDEO_RATIOS,VIDEO_AUTO_DURATION} from './lib/videoGenerationRules.js'
 import { estimateBytePlusVideoCost, formatUsdEstimate, formatWanTokens } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceObjectUrls, useWorkspaceState, workspaceImageFields } from './lib/useWorkspaceState'
@@ -27,6 +29,9 @@ import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CU
 import { currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile, readFileDataUrl, videoDropZoneHandlers } from './lib/referenceMedia.js'
 import { makeImgTab, makeVideoTab, DEFAULT_AUDIO_FORM, IMAGE_WORKSPACE_OPTIONS, VIDEO_WORKSPACE_OPTIONS } from './lib/workspaceTabs.js'
 import { TASK_CENTER_EVENT, TASK_CENTER_MODES } from './lib/taskCenterLink.js'
+import { getToolCapabilities } from './lib/canvasApi.js'
+import { resolveToolProvider, optionById, selectionFromOption, isVideoFastAvailable, toolSubmitProfileFields } from './lib/toolProviderSelection.js'
+import { CANVAS_LOCATE_NODE_EVENT, CANVAS_RAIL_STATE_EVENT, LAYER_OPEN_SOURCE_EVENT, queueCanvasPngInfo, requestCanvasPngInfo, requestCanvasTogglePrompts, takePendingLayerSource } from './lib/canvasBridge.js'
 
 // Keep loading boundaries local so navigation and existing forms stay usable.
 function lazyPanel(load) {
@@ -49,6 +54,8 @@ function App({ onLogout }) {
   }
 
   const [showPromptCollection, setShowPromptCollection] = useState(false)
+  const [canvasRailPanel, setCanvasRailPanel] = useState(null)
+  const [showGlobalLibrary, setShowGlobalLibrary] = useState(false)
   const [showPngInfo, setShowPngInfo] = useState(false)
   const [referenceMedia, setReferenceMedia] = useState(null)
   const [showFullEditor, setShowFullEditor] = useState(false)
@@ -60,6 +67,7 @@ function App({ onLogout }) {
   const [notification, setNotification] = useState(null)
   const notificationTimer = useRef(null)
   const [appMode, setTabAppMode] = useState(initialTabMode)
+  const [globalTaskCenterType, setGlobalTaskCenterType] = useState('all')
   const appShellRef = useRef(null)
 
   const notify = useCallback((message, tone = 'success') => {
@@ -94,6 +102,10 @@ function App({ onLogout }) {
   const [apiProvider, setApiProvider] = useState('ark')
   const [providerInfoReady, setProviderInfoReady] = useState(false)
   const [imageProviders, setImageProviders] = useState({})
+  const [toolCapabilities, setToolCapabilities] = useState({ image: [], video: [], audio: [] })
+  const [toolRawProviders, setToolRawProviders] = useState({ image: null, video: null, audio: null, saved: null })
+  const [capabilitiesReady, setCapabilitiesReady] = useState(false)
+  const capabilitiesFetchSeq = useRef(0)
 
   // 图片生成表单。沿用旧 workspace key，在加载后收敛为单一表单。
   const [imgTabs, setImgTabs, imgWorkspace] = useWorkspaceState('img_tabs', [makeImgTab(1)], IMAGE_WORKSPACE_OPTIONS)
@@ -118,22 +130,60 @@ function App({ onLogout }) {
   const setAppMode = useCallback(mode => { setTabAppMode(mode); writeTabMode(mode); setServerAppMode(mode) }, [setServerAppMode])
   const canvasBeforeLeave = useRef(null), modeSwitchPending = useRef(false)
   async function changeAppMode(mode) {
-    if (mode === appMode || modeSwitchPending.current) return
+    if (mode === appMode) return true
+    if (modeSwitchPending.current) return false
     modeSwitchPending.current = true
     try {
-      if (appMode === 'canvas' && canvasBeforeLeave.current && !await canvasBeforeLeave.current()) return
+      if (appMode === 'canvas' && canvasBeforeLeave.current && !await canvasBeforeLeave.current()) return false
       setAppMode(mode)
-    } catch (error) { notify(error?.message || '暂时无法切换工具，请重试', 'error') }
+      return true
+    } catch (error) { notify(error?.message || '暂时无法切换工具，请重试', 'error'); return false }
     finally { modeSwitchPending.current = false }
   }
   // NODE-ECHO-20261115: canvas task number → that tool's task center; TaskGallery opens the pending task.
   const changeAppModeRef = useRef(changeAppMode)
   changeAppModeRef.current = changeAppMode
   useEffect(() => {
-    const open = event => { const type = event.detail?.type; if (!TASK_CENTER_MODES.includes(type)) return; event.preventDefault(); changeAppModeRef.current(type) }
+    const open = event => {
+      const type = event.detail?.type
+      if (type === 'tasks' || type === 'all') {
+        event.preventDefault()
+        setGlobalTaskCenterType('all')
+        changeAppModeRef.current('tasks')
+        return
+      }
+      if (type === 'layer') {
+        event.preventDefault()
+        setGlobalTaskCenterType('layer')
+        changeAppModeRef.current('tasks')
+        return
+      }
+      if (!TASK_CENTER_MODES.includes(type)) return
+      event.preventDefault()
+      changeAppModeRef.current(type)
+    }
+    const locateCanvas = event => { if (!event.detail?.target?.workflowId) return; event.preventDefault(); changeAppModeRef.current('canvas') }
+    const onRailState = event => { setCanvasRailPanel(event.detail?.panel || null) }
+    const onOpenLayer = event => {
+      event.preventDefault()
+      Promise.resolve(changeAppModeRef.current('layer')).then(switched => {
+        if (!switched) takePendingLayerSource()
+      })
+    }
     window.addEventListener(TASK_CENTER_EVENT, open)
-    return () => window.removeEventListener(TASK_CENTER_EVENT, open)
+    window.addEventListener(CANVAS_LOCATE_NODE_EVENT, locateCanvas)
+    window.addEventListener(CANVAS_RAIL_STATE_EVENT, onRailState)
+    window.addEventListener(LAYER_OPEN_SOURCE_EVENT, onOpenLayer)
+    return () => {
+      window.removeEventListener(TASK_CENTER_EVENT, open)
+      window.removeEventListener(CANVAS_LOCATE_NODE_EVENT, locateCanvas)
+      window.removeEventListener(CANVAS_RAIL_STATE_EVENT, onRailState)
+      window.removeEventListener(LAYER_OPEN_SOURCE_EVENT, onOpenLayer)
+    }
   }, [])
+  useEffect(() => {
+    if (appMode === 'canvas') setShowPromptCollection(false)
+  }, [appMode])
 
 
   const [videoFastAvailable, setVideoFastAvailable] = useState(false)
@@ -165,7 +215,21 @@ function App({ onLogout }) {
   const [audioProvider, setAudioProvider] = useState({ available: false, sourceReady: false })
   const [audioUploading, setAudioUploading] = useState(false)
 
-  const activeVideoProvider = activeTab.provider === 'cupsy' ? 'cupsy' : 'ark'
+  const videoSelectionState = resolveToolProvider(toolCapabilities, 'video', {
+    selection: activeTab.providerSelection,
+    legacyProvider: activeTab.providerSelection ? null : activeTab.provider,
+    ready: capabilitiesReady,
+  })
+  const activeVideoOption = videoSelectionState.option
+  const activeVideoProvider = activeVideoOption?.provider || activeTab.providerSelection?.provider || (activeTab.provider === 'cupsy' ? 'cupsy' : 'ark')
+  const activeVideoFastAvailable = activeVideoOption
+    ? isVideoFastAvailable(activeVideoOption, toolRawProviders.video, toolRawProviders.saved?.profiles)
+    : videoFastAvailable
+  const audioSelectionState = resolveToolProvider(toolCapabilities, 'audio', {
+    selection: audioForm.providerSelection,
+    ready: capabilitiesReady,
+  })
+  const activeAudioOption = audioSelectionState.option
   const effectiveVideoModel = activeVideoProvider === 'cupsy'
     ? (CUPSY_VIDEO_MODELS.includes(activeTab.model) ? activeTab.model : SEEDANCE_25)
     : activeTab.model === SEEDANCE_25 ? SEEDANCE_25 : SEEDANCE_20
@@ -211,9 +275,15 @@ function App({ onLogout }) {
     })
   }, [activeTab.id, activeVideoProvider, updateTab])
 
-  const handleVideoProviderChange = useCallback((provider) => {
+  const handleVideoProviderChange = useCallback((optionId) => {
+    const option = optionById(toolCapabilities, 'video', optionId)
+    if (!option) return
+    const provider = option.provider
+    const selection = selectionFromOption(option)
+    const nextFastAvailable = isVideoFastAvailable(option, toolRawProviders.video, toolRawProviders.saved?.profiles)
     updateTab(activeTab.id, tab => provider === 'cupsy' ? {
       provider: 'cupsy',
+      providerSelection: selection,
       model: CUPSY_VIDEO_MODELS.includes(tab.model) ? tab.model : SEEDANCE_25,
       duration: tab.duration,
       resolution: VIDEO_MODEL_CAPABILITIES[SEEDANCE_25].resolutions.includes(tab.resolution)
@@ -222,9 +292,17 @@ function App({ onLogout }) {
       fast: false, outputFormat: 'mp4', returnLastFrame: false,
     } : {
       provider: 'ark',
+      providerSelection: selection,
       model: tab.model === SEEDANCE_20 ? SEEDANCE_20 : SEEDANCE_25,
+      ...(nextFastAvailable ? {} : { fast: false }),
     })
-  }, [activeTab.id, updateTab])
+  }, [activeTab.id, toolCapabilities, toolRawProviders.saved, toolRawProviders.video, updateTab])
+
+  const handleAudioProviderChange = useCallback((optionId) => {
+    const option = optionById(toolCapabilities, 'audio', optionId)
+    if (!option) return
+    updateAudioForm({ providerSelection: selectionFromOption(option) })
+  }, [toolCapabilities, updateAudioForm])
 
   const moveVideoReference = useCallback((tabId, field, fromIndex, toIndex) => {
     setVideoTabs(prev => prev.map(tab => tab.id === tabId ? {
@@ -507,6 +585,7 @@ function App({ onLogout }) {
         const body = new FormData()
         body.append('file', file)
         body.append('kind', kind)
+        if (activeAudioOption?.profile_id) body.append('profile_id', activeAudioOption.profile_id)
         const response = await axios.post('/api/cupsy/assets', body, { timeout: 300000 })
         const asset = response.data.asset
         uploaded.push({
@@ -529,7 +608,7 @@ function App({ onLogout }) {
     } finally {
       setAudioUploading(false)
     }
-  }, [audioForm.referenceMode, audioForm.references.length, audioForm.speaker, notify, updateAudioForm])
+  }, [activeAudioOption?.profile_id, audioForm.referenceMode, audioForm.references.length, audioForm.speaker, notify, updateAudioForm])
   const [taskGalleryRevision, setTaskGalleryRevision] = useState(0)
 
   useEffect(() => {
@@ -546,13 +625,22 @@ function App({ onLogout }) {
     setActiveVideoTabId(selected.id)
   }, [activeVideoTabId, setActiveVideoTabId, setVideoTabs, videoTabs, videoWorkspace.ready])
 
-  const isArk = apiProvider === 'ark'
-  const isCupsyImage = apiProvider === 'cupsy'
+  const imageSelectionState = resolveToolProvider(toolCapabilities, 'image', {
+    selection: activeImgTab.providerSelection,
+    sessionProvider: apiProvider,
+    ready: capabilitiesReady,
+  })
+  const activeImageOption = imageSelectionState.option
+  const effectiveImageProvider = activeImageOption?.provider || activeImgTab.providerSelection?.provider || apiProvider || 'ark'
+  const isArk = effectiveImageProvider === 'ark'
+  const isCupsyImage = effectiveImageProvider === 'cupsy'
   const isSeedream = isArk || isCupsyImage
-  const imageCapabilityModel = imageProviders[apiProvider]?.capability_model || imageProviders[apiProvider]?.model
-  const imageSpec = imageCapabilities(apiProvider,imageCapabilityModel)
+  const imageCapabilityModel = activeImageOption
+    ? (activeImageOption.capability_model || activeImageOption.model)
+    : (imageProviders[effectiveImageProvider]?.capability_model || imageProviders[effectiveImageProvider]?.model || '')
+  const imageSpec = imageCapabilities(effectiveImageProvider, imageCapabilityModel)
   const aspectRatios = imageSpec.ratios, resolutions = imageSpec.resolutions
-  const imageParams = imageTabParams(apiProvider, activeImgTab)
+  const imageParams = imageTabParams(effectiveImageProvider, activeImgTab)
   const imageReferences = (activeImgTab.uploadedImages || []).map((image, index) => ({
     id: String(index), name: image.name || image.file?.name || `参考素材 ${index + 1}`,
     width: image.width, height: image.height, has_alpha: image.hasAlpha,
@@ -560,8 +648,8 @@ function App({ onLogout }) {
   }))
   const changeImageParams = patch => updateImgTab(activeImgTab.id, imageTabPatch(patch))
   const imageDimensions = useImageDimensionDraft(imageParams, changeImageParams, activeImgTab.id)
-  const imageIssues = imageParameterIssues(apiProvider, imageParams, imageReferences,imageCapabilityModel)
-  const imageSizeSummary = getImageSizeSummary(apiProvider, imageParams)
+  const imageIssues = imageParameterIssues(effectiveImageProvider, imageParams, imageReferences, imageCapabilityModel)
+  const imageSizeSummary = getImageSizeSummary(effectiveImageProvider, imageParams)
 
   const handleApplyPngInfo = metadata => {
     const params = metadata?.params || {}
@@ -605,16 +693,54 @@ function App({ onLogout }) {
     notify(skipped.length ? `PNG Info 已载入，已忽略不兼容的${skipped.join('、')}` : 'PNG Info 已载入')
   }
 
-  useEffect(() => {
-    fetchProviderInfo()
-    fetchVideoProviderInfo()
-    fetchAudioProviderInfo()
+  const handleApplyPngInfoToCanvas = async metadata => {
+    if (appMode === 'canvas') {
+      requestCanvasPngInfo(metadata)
+      return
+    }
+    queueCanvasPngInfo(metadata)
+    await changeAppMode('canvas')
+  }
+
+  const fetchAllProviderCapabilities = useCallback(async () => {
+    const seq = ++capabilitiesFetchSeq.current
+    try {
+      const bundle = await getToolCapabilities()
+      if (seq !== capabilitiesFetchSeq.current) return
+      setToolCapabilities(bundle.capabilities)
+      setToolRawProviders({ image: bundle.image, video: bundle.video, audio: bundle.audio, saved: bundle.saved })
+      if (bundle.image?.success !== false) {
+        setApiProvider(['ark', 'cupsy'].includes(bundle.image?.current_provider) ? bundle.image.current_provider : 'ark')
+        setImageProviders(bundle.image?.providers || {})
+      }
+      if (bundle.video?.success !== false) {
+        setVideoFastAvailable(bundle.video?.fast_available !== false)
+        if (bundle.video?.providers) setVideoProviders(bundle.video.providers)
+      }
+      if (bundle.audio?.success !== false) {
+        setAudioProvider({
+          available: Boolean(bundle.audio?.providers?.cupsy?.available),
+          sourceReady: bundle.audio?.providers?.cupsy?.source_ready !== false,
+        })
+      }
+    } catch (error) {
+      console.error('Failed to fetch provider capabilities:', error)
+    } finally {
+      if (seq === capabilitiesFetchSeq.current) {
+        setProviderInfoReady(true)
+        setCapabilitiesReady(true)
+      }
+    }
   }, [])
 
   useEffect(() => {
-    if (videoFastAvailable || !activeTab.fast) return
+    fetchAllProviderCapabilities()
+  }, [fetchAllProviderCapabilities])
+
+  useEffect(() => {
+    if (!capabilitiesReady || activeVideoFastAvailable || !activeTab.fast) return
     updateTab(activeTab.id, { fast: false })
-  }, [activeTab.fast, activeTab.id, updateTab, videoFastAvailable])
+  }, [activeTab.fast, activeTab.id, activeVideoFastAvailable, capabilitiesReady, updateTab])
 
   const fullEditorRef = useRef(null)
   useModalFocus(fullEditorRef, showFullEditor)
@@ -625,54 +751,16 @@ function App({ onLogout }) {
     return () => window.removeEventListener('keydown', handleEsc)
   }, [showFullEditor])
 
-  const fetchProviderInfo = async () => {
-    try {
-      const response = await axios.get('/api/provider')
-      if (response.data.success) {
-        setApiProvider(['ark', 'cupsy'].includes(response.data.current_provider) ? response.data.current_provider : 'ark')
-        setImageProviders(response.data.providers || {})
-      }
-    } catch (error) {
-      console.error('Failed to fetch provider info:', error)
-    } finally {
-      setProviderInfoReady(true)
+  const handleImageProviderChange = async (optionId) => {
+    const option = optionById(toolCapabilities, 'image', optionId)
+    if (!option) return
+    const selection = selectionFromOption(option)
+    updateImgTab(activeImgTab.id, { providerSelection: selection })
+    setApiProvider(option.provider)
+    // Keep legacy session provider in sync on a best-effort basis without blocking custom profiles.
+    if (!option.profile_id || option.source_key === `config:image:${option.provider}`) {
+      axios.post('/api/provider', { provider: option.provider }).catch(() => {})
     }
-  }
-
-  const fetchVideoProviderInfo = async () => {
-    try {
-      const response = await axios.get('/api/video/provider')
-      if (response.data.success) {
-        setVideoFastAvailable(response.data.fast_available !== false)
-        if (response.data.providers) setVideoProviders(response.data.providers)
-      }
-    } catch (error) {
-      console.error('Failed to fetch video provider info:', error)
-    }
-  }
-
-  const fetchAudioProviderInfo = async () => {
-    try {
-      const response = await axios.get('/api/audio/provider')
-      if (response.data.success) {
-        setAudioProvider({
-          available: Boolean(response.data.providers?.cupsy?.available),
-          sourceReady: response.data.providers?.cupsy?.source_ready !== false,
-        })
-      }
-    } catch (error) {
-      console.error('Failed to fetch audio provider info:', error)
-    }
-  }
-
-  const handleImageProviderChange = async (newProvider) => {
-    if (newProvider === apiProvider) return
-    try {
-      const response = await axios.post('/api/provider', { provider: newProvider })
-      if (response.data.success) {
-        setApiProvider(newProvider)
-      }
-    } catch (error) { notify(`切换失败：${error.response?.data?.error || error.message}`, 'error') }
   }
   
   const handleSavePrompt = async () => {
@@ -687,16 +775,21 @@ function App({ onLogout }) {
 
   const handleGenerate = async () => {
     const tab = activeImgTab
+    if (!activeImageOption) {
+      notify(imageSelectionState.unavailableReason || '所选接口不可用，请重新选择', 'error')
+      return
+    }
     if (!tab.prompt.trim()) {
       notify('请先填写图片描述', 'error')
       return
     }
-    const issues = imageParameterIssues(apiProvider, imageTabParams(apiProvider, tab), imageReferences,imageCapabilityModel)
+    const issues = imageParameterIssues(effectiveImageProvider, imageTabParams(effectiveImageProvider, tab), imageReferences, imageCapabilityModel)
     if (issues.length || (isSeedream && imageDimensions.error)) {
       notify(issues[0] || imageDimensions.error, 'error')
       return
     }
-    const imageOptions = imageRequestFields(apiProvider, imageTabParams(apiProvider, tab))
+    const imageOptions = imageRequestFields(effectiveImageProvider, imageTabParams(effectiveImageProvider, tab))
+    const submitProfile = toolSubmitProfileFields(activeImageOption)
     const revealTimer = window.setTimeout(
       () => setTaskGalleryRevision(revision => revision + 1),
       500,
@@ -706,7 +799,7 @@ function App({ onLogout }) {
       let response
       if (tab.uploadedImages.length === 0) {
         response = await axios.post('/api/generate', {
-          prompt: tab.prompt, provider: apiProvider, ...imageOptions,
+          prompt: tab.prompt, ...submitProfile, ...imageOptions,
         })
       } else {
         const imageUrls = await Promise.all(tab.uploadedImages.map(async image => {
@@ -725,7 +818,7 @@ function App({ onLogout }) {
           return asset.url
         }))
         response = await axios.post('/api/generate', {
-          prompt: tab.prompt, provider: apiProvider, ...imageOptions,
+          prompt: tab.prompt, ...submitProfile, ...imageOptions,
           image_urls: imageUrls,
         })
       }
@@ -811,10 +904,15 @@ function App({ onLogout }) {
 
   const handleVideoGenerate = async () => {
     const tab = activeTab
+    if (!activeVideoOption) {
+      notify(videoSelectionState.unavailableReason || '所选接口不可用，请重新选择', 'error')
+      return
+    }
     if (!videoTabHasInput(tab)) {
       notify('请填写视频提示词或添加参考素材', 'error')
       return
     }
+    const submitProfile = toolSubmitProfileFields(activeVideoOption)
     const readyRefVideos = tab.refVideos.filter(video => video.url && !video.uploading)
     if (tab.mode === 'keyframe' && tab.lastFrame && !tab.firstFrame) {
       notify('设置尾帧时必须同时提供首帧', 'error')
@@ -867,7 +965,8 @@ function App({ onLogout }) {
         formData.append('generate_audio', tab.audio)
         formData.append('return_last_frame', tab.returnLastFrame)
         formData.append('video_mode', tab.mode)
-        formData.append('provider', activeVideoProvider)
+        formData.append('provider', submitProfile.provider)
+        if (submitProfile.profile_id) formData.append('profile_id', submitProfile.profile_id)
         if (cupsyAssets.length) formData.append('cupsy_assets', JSON.stringify(cupsyAssets))
         const pendingFetches = []
         if (tab.mode === 'keyframe') {
@@ -911,7 +1010,7 @@ function App({ onLogout }) {
           output_format: tab.outputFormat || 'mp4', fast: tab.fast, generate_audio: tab.audio,
           return_last_frame: tab.returnLastFrame,
           video_mode: tab.mode,
-          provider: activeVideoProvider,
+          ...submitProfile,
           ref_video_urls: videoUrls.length ? videoUrls : undefined,
           cupsy_assets: cupsyAssets.length ? cupsyAssets : undefined,
         }, { timeout: 300000 })
@@ -932,12 +1031,12 @@ function App({ onLogout }) {
   }
 
   const handleAudioGenerate = async () => {
-    if (!audioForm.prompt.trim()) {
-      notify('请填写音频提示词', 'error')
+    if (!activeAudioOption) {
+      notify(audioSelectionState.unavailableReason || '所选接口不可用，请重新选择', 'error')
       return
     }
-    if (!audioProvider.available) {
-      notify('Cupsy 音频端点未配置', 'error')
+    if (!audioForm.prompt.trim()) {
+      notify('请填写音频提示词', 'error')
       return
     }
     if (audioForm.referenceMode === 'image' && audioForm.references.length !== 1) {
@@ -948,11 +1047,13 @@ function App({ onLogout }) {
       notify('最多使用 3 个音频或声线参考', 'error')
       return
     }
+    const submitProfile = toolSubmitProfileFields(activeAudioOption)
     const revealTimer = window.setTimeout(() => setTaskGalleryRevision(revision => revision + 1), 500)
     try {
       const response = await axios.post('/api/audio/generate', {
         prompt: audioForm.prompt,
-        model: CUPSY_AUDIO_MODEL,
+        ...submitProfile,
+        model: activeAudioOption.model || CUPSY_AUDIO_MODEL,
         output_format: audioForm.outputFormat,
         sample_rate: Number(audioForm.sampleRate),
         enable_subtitle: Boolean(audioForm.enableSubtitle),
@@ -991,6 +1092,7 @@ function App({ onLogout }) {
         .map(reference => ({ preview: reference.url, name: reference.name }))
       const tab = {
         ...makeImgTab(id),
+        ...(task.provider ? { providerSelection: { provider: task.provider, profile_id: params.profile_id || null } } : {}),
         prompt: task.prompt || '',
         aspectRatio: params.aspect_ratio || '1:1',
         resolution: params.resolution || '1K',
@@ -1005,6 +1107,7 @@ function App({ onLogout }) {
       setImgTabs([tab])
       setActiveImgTabId(id)
       setAppMode('image')
+      if (appMode === 'tasks') notify(`已复用图片任务 #${task.id} 参数并切换到图片工具`)
     } else if (task.type === 'video') {
       const id = activeTab.id || 1
       const knownVideoUrls = new Set(restoredReferences.filter(reference => reference.type === 'video').map(reference => reference.url))
@@ -1047,6 +1150,7 @@ function App({ onLogout }) {
         ...makeVideoTab(id),
         prompt: task.prompt || '',
         provider: task.provider === 'cupsy' ? 'cupsy' : 'ark',
+        ...(task.provider ? { providerSelection: { provider: task.provider === 'cupsy' ? 'cupsy' : 'ark', profile_id: params.profile_id || null } } : {}),
         model: params.model || SEEDANCE_20,
         ratio: params.ratio || 'adaptive',
         duration: params.duration ?? 5,
@@ -1071,6 +1175,7 @@ function App({ onLogout }) {
       setVideoTabs([tab])
       setActiveVideoTabId(id)
       setAppMode('video')
+      if (appMode === 'tasks') notify(`已复用视频任务 #${task.id} 参数并切换到视频工具`)
     } else if (task.type === 'audio') {
       const refs = restoredReferences
         .filter(reference => ['reference_audio', 'reference_image'].includes(reference.role))
@@ -1084,6 +1189,7 @@ function App({ onLogout }) {
         .filter(reference => reference.cupsyAssetId)
       updateAudioForm({
         ...DEFAULT_AUDIO_FORM,
+        ...(task.provider ? { providerSelection: { provider: task.provider, profile_id: params.profile_id || null } } : {}),
         prompt: task.prompt || '',
         outputFormat: params.output_format || 'mp3',
         sampleRate: Number(params.sample_rate) || 44100,
@@ -1094,8 +1200,11 @@ function App({ onLogout }) {
         references: refs,
       })
       setAppMode('audio')
+      if (appMode === 'tasks') notify(`已复用音频任务 #${task.id} 参数并切换到音频工具`)
+    } else if (task.type === 'layer') {
+      notify('图层分解任务不支持回填独立生成表单，请前往「图层」工作室查看或重新分解', 'info')
     }
-  }, [activeImgTab.id, activeTab.id, setImgTabs, setActiveImgTabId, setVideoTabs, setActiveVideoTabId, setAppMode, updateAudioForm])
+  }, [activeImgTab.id, activeTab.id, appMode, notify, setImgTabs, setActiveImgTabId, setVideoTabs, setActiveVideoTabId, setAppMode, updateAudioForm])
 
   const handleDragStart = (e) => {
     e.preventDefault()
@@ -1125,13 +1234,31 @@ function App({ onLogout }) {
   }
 
   const handleSelectSavedPrompt = (prompt) => {
+    if (appMode === 'canvas') {
+      setShowPromptCollection(false)
+      return
+    }
+    if (appMode === 'layer' || appMode === 'tasks') {
+      navigator.clipboard?.writeText(prompt).catch(() => {})
+      notify(appMode === 'tasks' ? '任务中心无对应表单，已复制提示词到剪贴板' : '图层页无对应表单，已复制提示词到剪贴板')
+      setShowPromptCollection(false)
+      return
+    }
     if (appMode === 'video') updateTab(activeTab.id, { prompt })
     else if (appMode === 'audio') updateAudioForm({ prompt })
     else updateImgTab(activeImgTab.id, { prompt })
     setShowPromptCollection(false)
   }
+  const handleTogglePromptLibrary = () => {
+    if (appMode === 'canvas') {
+      setShowPromptCollection(false)
+      requestCanvasTogglePrompts()
+      return
+    }
+    setShowPromptCollection(value => !value)
+  }
   const imageModelValue = isSeedream
-    ? (isCupsyImage ? 'seedream-5.0-pro' : imageProviders.ark?.model || 'seedream-5-0-pro')
+    ? (activeImageOption?.model || (isCupsyImage ? 'seedream-5.0-pro' : imageProviders.ark?.model || 'seedream-5-0-pro'))
     : ''
   const currentEditorPrompt = appMode === 'video'
     ? activeTab.prompt
@@ -1150,12 +1277,12 @@ function App({ onLogout }) {
       <header className="app-header liquid-glass flex items-center justify-between px-3 z-50 shrink-0">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex shrink-0 items-center gap-2">
-            <div className="brand-mark flex size-8 items-center justify-center text-nexus-green">
-              <Braces size={15} />
+            <div className="brand-mark flex size-8 items-center justify-center">
+              <BrandMark size={20} variant="default" />
             </div>
             <div className="leading-tight">
-              <div className="text-sm font-semibold text-white">Ink Traces</div>
-              <div className="brand-version font-mono text-xs text-nexus-muted">VISUAL WORKSPACE</div>
+              <div className="text-sm font-semibold tracking-[-0.01em] text-white">Ink Traces</div>
+              <div className="brand-version text-[11px] text-nexus-muted">视觉创作台</div>
             </div>
           </div>
           <SegmentedControl
@@ -1168,26 +1295,35 @@ function App({ onLogout }) {
               { value: 'layer', label: '图层', icon: Layers3 },
               { value: 'video', label: '视频', icon: Film },
               { value: 'audio', label: '音频', icon: AudioLines },
+              { value: 'tasks', label: '任务中心', icon: ListTodo },
             ]}
           />
         </div>
         <div className="header-actions flex min-w-0 items-center gap-1.5">
           <div className="glass-control-group flex items-center gap-0.5">
+            <IconButton label="全局素材库" data-testid="header-library-button" onClick={() => setShowGlobalLibrary(true)} className={showGlobalLibrary ? 'is-active' : ''}><Images size={16} /></IconButton>
             <IconButton label="接口管理" onClick={() => setShowProviderSettings(true)}><Settings size={16} /></IconButton>
             <IconButton label="PNG Info" onClick={() => setShowPngInfo(true)}><FileSearch size={16} /></IconButton>
-            <IconButton label="提示词库" onClick={() => setShowPromptCollection(value => !value)} className={showPromptCollection ? 'is-active' : ''}><Library size={16} /></IconButton>
+            <IconButton label="提示词库" data-canvas-rail-toggle="prompts" onClick={handleTogglePromptLibrary} className={(appMode === 'canvas' ? canvasRailPanel === 'prompts' : showPromptCollection) ? 'is-active' : ''}><Library size={16} /></IconButton>
             <IconButton label="退出登录" onClick={handleLogout}><LogOut size={16} /></IconButton>
           </div>
         </div>
       </header>
 
       {/* 主工作区 */}
-      <main className="workspace-main flex-grow relative" style={appMode === 'canvas' ? { display: 'flex', backgroundImage: 'none' } : { '--prompt-user-width': `${panelWidth}px` }}>
+      <main className="workspace-main flex-grow relative" style={(appMode === 'canvas' || appMode === 'tasks') ? { display: 'flex', backgroundImage: 'none' } : { '--prompt-user-width': `${panelWidth}px` }}>
 
       {appMode === 'canvas' ? (
         <React.Suspense fallback={<div className="p-6 text-nexus-text">正在载入创作画布…</div>}>
           <CanvasStudio beforeLeaveRef={canvasBeforeLeave} notify={notify} providerRevision={providerRevision} />
         </React.Suspense>
+      ) : appMode === 'tasks' ? (
+        <GlobalTaskCenter
+          activeType={globalTaskCenterType}
+          onTypeChange={setGlobalTaskCenterType}
+          refreshToken={taskGalleryRevision}
+          onReuseTask={handleLoadTask}
+        />
       ) : appMode === 'image' ? (<>
         
         {/* 左侧：提示词输入 */}
@@ -1205,8 +1341,15 @@ function App({ onLogout }) {
 
           {/* 执行按钮区 */}
           <div className="prompt-actions p-3 border-t border-nexus-border z-10">
+            {capabilitiesReady && imageSelectionState.unavailableReason && (
+              <div role="alert" data-testid="image-provider-action-alert" className="mb-2 text-xs text-nexus-red leading-5">
+                {imageSelectionState.unavailableReason}
+              </div>
+            )}
             <button
               onClick={handleGenerate}
+              disabled={!capabilitiesReady || !activeImageOption}
+              title={imageSelectionState.unavailableReason || ''}
               className="btn btn-primary btn-lg btn-block"
             >
               <Play size={14} fill="currentColor" /> <span>生成图片</span>
@@ -1255,19 +1398,32 @@ function App({ onLogout }) {
                   <span className="field-label">端点</span>
                   <select
                     aria-label="图片端点"
-                    value={apiProvider}
-                    disabled={!providerInfoReady}
+                    value={imageSelectionState.selectValue}
+                    disabled={!capabilitiesReady || (!imageSelectionState.options.length && !imageSelectionState.staleOptionLabel)}
                     onChange={event => handleImageProviderChange(event.target.value)}
                     className="field-select min-w-0"
                   >
-                    <option value="ark" disabled={imageProviders.ark?.available === false} className="bg-nexus-bg">
-                      BytePlus Ark{imageProviders.ark?.available === false ? ' · 未配置' : ''}
-                    </option>
-                    <option value="cupsy" disabled={imageProviders.cupsy?.available === false} className="bg-nexus-bg">
-                      Cupsy{imageProviders.cupsy?.available === false ? ' · 未配置' : ''}
-                    </option>
+                    {!capabilitiesReady && <option value="" className="bg-nexus-bg">读取中…</option>}
+                    {capabilitiesReady && imageSelectionState.staleOptionLabel && (
+                      <option value={imageSelectionState.selectValue} disabled className="bg-nexus-bg">
+                        {imageSelectionState.staleOptionLabel}
+                      </option>
+                    )}
+                    {capabilitiesReady && !imageSelectionState.options.length && !imageSelectionState.staleOptionLabel && (
+                      <option value="" className="bg-nexus-bg">暂无可用接口</option>
+                    )}
+                    {imageSelectionState.options.map(option => (
+                      <option key={option.id} value={option.id} className="bg-nexus-bg">
+                        {option.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
+                {capabilitiesReady && imageSelectionState.unavailableReason && (
+                  <div role="alert" data-testid="image-provider-alert" className="text-xs text-nexus-red leading-5">
+                    {imageSelectionState.unavailableReason}
+                  </div>
+                )}
                 <div className="inspector-field-row">
                   <span className="field-label">模型</span>
                   <select
@@ -1278,7 +1434,7 @@ function App({ onLogout }) {
                     className="field-select min-w-0"
                   >
                     {isSeedream ? (
-                      <option value={imageModelValue} className="bg-nexus-bg">{imageCapabilityModel==='dola-seedream-5-5-261028'?'Seedream 5.5':'Seedream 5.0 Pro'}</option>
+                      <option value={imageModelValue} className="bg-nexus-bg">{isSeedream55(imageCapabilityModel) ? 'Seedream 5.5' : 'Seedream 5.0 Pro'}</option>
                     ) : (
                       <option value="">—</option>
                     )}
@@ -1289,18 +1445,18 @@ function App({ onLogout }) {
             
             <div className="inspector-section">
               <div className="inspector-title"><Settings size={14}/> 输出设置</div>
-              <ImageOutputControls model={imageCapabilityModel} provider={apiProvider} params={imageParams} onChange={changeImageParams}
+              <ImageOutputControls model={imageCapabilityModel} provider={effectiveImageProvider} params={imageParams} onChange={changeImageParams}
                 references={imageReferences} dimensions={imageDimensions} issues={imageIssues}>
               </ImageOutputControls>
             </div>
 
             {/* SOURCE NODE */}
             <div className="inspector-section">
-              <div className="inspector-title">
-                <HardDrive size={14} className="text-nexus-violet" /> 参考素材
+              <div className="inspector-title justify-between">
+                <span className="flex items-center gap-2"><HardDrive size={14} className="text-nexus-violet" /> 参考素材</span>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13} /> 素材库</button>
               </div>
               <div className="flex-grow min-h-0">
-                 <button className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13}/>素材库</button>
                  <ImageToImage
                    uploadedImages={activeImgTab.uploadedImages}
                    createPreviewUrl={createReferencePreview}
@@ -1344,11 +1500,30 @@ function App({ onLogout }) {
                     placeholder="描述镜头、主体、动作、光线与节奏..."
                   />
                 </div>
+                <div className="absolute bottom-4 right-4 z-10">
+                  <button
+                    type="button"
+                    aria-label="保存到提示词库"
+                    title="保存到提示词库"
+                    onClick={handleSavePrompt}
+                    disabled={!activeTab.prompt.trim()}
+                    className="btn btn-icon btn-outlined"
+                  >
+                    <Save size={16} />
+                  </button>
+                </div>
               </div>
             </div>
             <div className="prompt-actions p-3 border-t border-nexus-border z-10">
+              {capabilitiesReady && videoSelectionState.unavailableReason && (
+                <div role="alert" data-testid="video-provider-action-alert" className="mb-2 text-xs text-nexus-red leading-5">
+                  {videoSelectionState.unavailableReason}
+                </div>
+              )}
               <button
                 onClick={handleVideoGenerate}
+                disabled={!capabilitiesReady || !activeVideoOption}
+                title={videoSelectionState.unavailableReason || ''}
                 className="btn btn-primary btn-lg btn-block"
               >
                 <Play size={14} fill="currentColor" /> <span>生成视频</span>
@@ -1397,16 +1572,32 @@ function App({ onLogout }) {
                     <span className="field-label">端点</span>
                     <select
                       aria-label="视频端点"
-                      value={activeVideoProvider}
+                      value={videoSelectionState.selectValue}
+                      disabled={!capabilitiesReady || (!videoSelectionState.options.length && !videoSelectionState.staleOptionLabel)}
                       onChange={event => handleVideoProviderChange(event.target.value)}
                       className="field-select min-w-0"
                     >
-                      <option value="ark" className="bg-nexus-bg">BytePlus Ark</option>
-                      <option value="cupsy" disabled={!videoProviders.cupsy?.available} className="bg-nexus-bg">
-                        Cupsy{videoProviders.cupsy?.available ? '' : ' · 未配置'}
-                      </option>
+                      {!capabilitiesReady && <option value="" className="bg-nexus-bg">读取中…</option>}
+                      {capabilitiesReady && videoSelectionState.staleOptionLabel && (
+                        <option value={videoSelectionState.selectValue} disabled className="bg-nexus-bg">
+                          {videoSelectionState.staleOptionLabel}
+                        </option>
+                      )}
+                      {capabilitiesReady && !videoSelectionState.options.length && !videoSelectionState.staleOptionLabel && (
+                        <option value="" className="bg-nexus-bg">暂无可用接口</option>
+                      )}
+                      {videoSelectionState.options.map(option => (
+                        <option key={option.id} value={option.id} className="bg-nexus-bg">
+                          {option.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
+                  {capabilitiesReady && videoSelectionState.unavailableReason && (
+                    <div role="alert" data-testid="video-provider-alert" className="text-xs text-nexus-red leading-5">
+                      {videoSelectionState.unavailableReason}
+                    </div>
+                  )}
                   <div className="inspector-field-row">
                     <span className="field-label">模型</span>
                     <select
@@ -1504,11 +1695,11 @@ function App({ onLogout }) {
                     </select>
                   </div>
                   {!isSeedance25 && (
-                    <div className="inspector-field-row">
-                      <span className="field-label" title={videoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}>
-                        快速模式{!videoFastAvailable && <span className="ml-1 text-xs text-nexus-muted">未配置</span>}
+                    <div className="inspector-field-row inspector-toggle-row">
+                      <span className="field-label" title={activeVideoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}>
+                        快速模式{!activeVideoFastAvailable && <span className="ml-1 text-xs text-nexus-muted">未配置</span>}
                       </span>
-                      <ToggleSwitch label="快速模式" checked={activeTab.fast} disabled={!videoFastAvailable} onChange={fast => updateTab(activeTab.id, { fast })} />
+                      <ToggleSwitch label="快速模式" checked={activeTab.fast} disabled={!activeVideoFastAvailable} onChange={fast => updateTab(activeTab.id, { fast })} />
                     </div>
                   )}
                   {isSeedance25 && activeVideoProvider === 'ark' && (
@@ -1525,11 +1716,11 @@ function App({ onLogout }) {
                       </select>
                     </div>
                   )}
-                  <div className="inspector-field-row">
+                  <div className="inspector-field-row inspector-toggle-row">
                     <span className="field-label">生成音频</span>
                     <ToggleSwitch label="生成音频" checked={activeTab.audio} onChange={audio => updateTab(activeTab.id, { audio })} />
                   </div>
-                  {activeVideoProvider === 'ark' && <div className="inspector-field-row">
+                  {activeVideoProvider === 'ark' && <div className="inspector-field-row inspector-toggle-row">
                     <span className="field-label">返回尾帧</span>
                     <ToggleSwitch label="返回尾帧" checked={activeTab.returnLastFrame} onChange={returnLastFrame => updateTab(activeTab.id, { returnLastFrame })} />
                   </div>}
@@ -1830,7 +2021,7 @@ function App({ onLogout }) {
         /* ============ AUDIO MODE ============ */
         <>
           <section className="prompt-pane relative z-20">
-            <div className="flex min-h-0 flex-grow flex-col">
+            <div className="relative flex min-h-0 flex-grow flex-col">
               <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
                 <span className="text-xs font-medium text-nexus-text-light">音频场景提示词</span>
                 <span className={`font-mono text-xs ${audioForm.prompt.length > 3000 ? 'text-nexus-red' : 'text-nexus-muted'}`}>{audioForm.prompt.length} / 3000</span>
@@ -1845,9 +2036,32 @@ function App({ onLogout }) {
                 className="absolute inset-0 resize-none bg-transparent px-4 py-4 text-sm leading-6 text-nexus-text-light outline-none custom-scrollbar placeholder:text-nexus-muted"
                 placeholder="描述对白、音乐、环境声、音效及时间关系..."
               />
+              <div className="absolute bottom-4 right-4 z-10">
+                <button
+                  type="button"
+                  aria-label="保存到提示词库"
+                  title="保存到提示词库"
+                  onClick={handleSavePrompt}
+                  disabled={!audioForm.prompt.trim()}
+                  className="btn btn-icon btn-outlined"
+                >
+                  <Save size={16} />
+                </button>
+              </div>
             </div>
             <div className="prompt-actions z-10 border-t border-nexus-border p-3">
-              <button type="button" onClick={handleAudioGenerate} className="btn btn-primary btn-lg btn-block">
+              {capabilitiesReady && audioSelectionState.unavailableReason && (
+                <div role="alert" data-testid="audio-provider-action-alert" className="mb-2 text-xs text-nexus-red leading-5">
+                  {audioSelectionState.unavailableReason}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handleAudioGenerate}
+                disabled={!capabilitiesReady || !activeAudioOption}
+                title={audioSelectionState.unavailableReason || ''}
+                className="btn btn-primary btn-lg btn-block"
+              >
                 <Play size={14} fill="currentColor" /> <span>生成音频</span>
               </button>
             </div>
@@ -1882,8 +2096,34 @@ function App({ onLogout }) {
               <div className="inspector-fields">
                 <div className="inspector-field-row">
                   <span className="field-label">端点</span>
-                  <select aria-label="音频端点" value="cupsy" disabled className="field-select"><option value="cupsy" className="bg-nexus-bg">Cupsy{audioProvider.available ? '' : ' · 未配置'}</option></select>
+                  <select
+                    aria-label="音频端点"
+                    value={audioSelectionState.selectValue}
+                    disabled={!capabilitiesReady || (!audioSelectionState.options.length && !audioSelectionState.staleOptionLabel)}
+                    onChange={event => handleAudioProviderChange(event.target.value)}
+                    className="field-select min-w-0"
+                  >
+                    {!capabilitiesReady && <option value="" className="bg-nexus-bg">读取中…</option>}
+                    {capabilitiesReady && audioSelectionState.staleOptionLabel && (
+                      <option value={audioSelectionState.selectValue} disabled className="bg-nexus-bg">
+                        {audioSelectionState.staleOptionLabel}
+                      </option>
+                    )}
+                    {capabilitiesReady && !audioSelectionState.options.length && !audioSelectionState.staleOptionLabel && (
+                      <option value="" className="bg-nexus-bg">暂无可用接口</option>
+                    )}
+                    {audioSelectionState.options.map(option => (
+                      <option key={option.id} value={option.id} className="bg-nexus-bg">
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+                {capabilitiesReady && audioSelectionState.unavailableReason && (
+                  <div role="alert" data-testid="audio-provider-alert" className="text-xs text-nexus-red leading-5">
+                    {audioSelectionState.unavailableReason}
+                  </div>
+                )}
                 <div className="inspector-field-row">
                   <span className="field-label">模型</span>
                   <select aria-label="音频模型" value={CUPSY_AUDIO_MODEL} disabled className="field-select"><option value={CUPSY_AUDIO_MODEL} className="bg-nexus-bg">Seed Audio 1.0</option></select>
@@ -1902,8 +2142,8 @@ function App({ onLogout }) {
                     {AUDIO_SAMPLE_RATES.map(rate => <option key={rate} value={rate} className="bg-nexus-bg">{rate === 44100 ? '44.1' : rate / 1000} kHz</option>)}
                   </select>
                 </div>
-                <div className="inspector-field-row"><span className="field-label">生成字幕</span><ToggleSwitch label="生成字幕" checked={audioForm.enableSubtitle} onChange={enableSubtitle => updateAudioForm({ enableSubtitle })} /></div>
-                <div className="inspector-field-row"><span className="field-label">可听水印</span><ToggleSwitch label="可听水印" checked={audioForm.watermark} onChange={watermark => updateAudioForm({ watermark })} /></div>
+                <div className="inspector-field-row inspector-toggle-row"><span className="field-label">生成字幕</span><ToggleSwitch label="生成字幕" checked={audioForm.enableSubtitle} onChange={enableSubtitle => updateAudioForm({ enableSubtitle })} /></div>
+                <div className="inspector-field-row inspector-toggle-row"><span className="field-label">可听水印</span><ToggleSwitch label="可听水印" checked={audioForm.watermark} onChange={watermark => updateAudioForm({ watermark })} /></div>
               </div>
             </div>
 
@@ -1964,9 +2204,9 @@ function App({ onLogout }) {
         </>
       )}
 
-      {/* 右侧抽屉：提示词库 */}
+      {/* 右侧抽屉：提示词库（仅独立工具页；画布模式联动左侧提示词面板） */}
       <AnimatePresence>
-        {showPromptCollection && (
+        {showPromptCollection && appMode !== 'canvas' && (
           <motion.aside
             initial={{ x: '100%', opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -1993,8 +2233,17 @@ function App({ onLogout }) {
         open={showPngInfo}
         onClose={() => setShowPngInfo(false)}
         onApply={handleApplyPngInfo}
+        onApplyCanvas={handleApplyPngInfoToCanvas}
+        preferCanvas={appMode === 'canvas'}
       />}
       {referenceMedia && <ReferenceMediaModal media={referenceMedia} onClose={() => setReferenceMedia(null)} />}
+      {showGlobalLibrary && <ToolAssetLibrary
+        browseOnly
+        remote
+        onClose={() => setShowGlobalLibrary(false)}
+        onPreview={setReferenceMedia}
+        notify={notify}
+      />}
       {showCupsyAssets && <ToolAssetLibrary
         onApply={useLocalLibraryItems}
         onRemoteApply={useRemoteLibraryItems}
@@ -2076,17 +2325,18 @@ function App({ onLogout }) {
       )}
 
       {showProviderSettings && <React.Suspense fallback={null}>
-        <ProviderSettings onClose={() => setShowProviderSettings(false)} onSaved={() => setProviderRevision(value => value + 1)} />
+        <ProviderSettings onClose={() => setShowProviderSettings(false)} onSaved={() => { setProviderRevision(value => value + 1); fetchAllProviderCapabilities() }} />
       </React.Suspense>}
       <AnimatePresence>
         {notification && (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
+            exit={{ opacity: 0, y: 8 }}
             role={notification.tone === 'error' ? 'alert' : 'status'}
             aria-live="polite"
-            className={`fixed top-[64px] right-4 z-[1200] pointer-events-none flex max-w-[calc(100vw-32px)] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
+            data-testid="app-notification"
+            className={`fixed bottom-[88px] left-1/2 -translate-x-1/2 z-[1200] pointer-events-none flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
           >
             {notification.tone === 'error' ? <CircleAlert size={15} /> : <Check size={15} className="text-nexus-green" />}
             {notification.message}

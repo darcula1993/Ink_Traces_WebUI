@@ -21,12 +21,13 @@ import CanvasNodeToolbar from './CanvasNodeToolbar'
 import CanvasVersionPopover from './CanvasVersionPopover'
 import {defaultVideoResolution} from '../../lib/videoGenerationRules'
 import CanvasMinimap,{CanvasViewportTools} from './CanvasMinimap'
-import {nodeToolbarVisible,nodeToolbarKind,nodeScreenRect,pinAllowed,PIN_REFUSED_MESSAGE,readMinimapPreference,writeMinimapPreference,summarizeCanvasTasks,railPanelDefaultWidth,RIGHT_PANEL_MIN,PIN_MIN_CANVAS,RAIL_WIDTH} from './canvasChrome'
+import {nodeToolbarVisible,nodeToolbarKind,nodeScreenRect,groupHeaderScreenRect,pinAllowed,PIN_REFUSED_MESSAGE,readMinimapPreference,writeMinimapPreference,summarizeCanvasTasks,railPanelDefaultWidth,RIGHT_PANEL_MIN,PIN_MIN_CANVAS,RAIL_WIDTH} from './canvasChrome'
 import {insertPromptText} from './PromptLibraryPicker'
 import SidebarNameDialog from './SidebarNameDialog'
 import CanvasShortcutHelp,{canvasModifier} from './CanvasShortcutHelp'
 import {CanvasEditHistory,copyCanvasSelection,pasteCanvasSelection,duplicateCanvasNode} from '../../lib/canvasEditHistory'
-import {freeNodePosition,freeNodePositionInView} from '../../lib/canvasPlacement'
+import {freeNodePosition,freeNodePositionInView,freeAssetNodePosition} from '../../lib/canvasPlacement'
+import {notifyLibraryChanged} from '../../lib/librarySync'
 import {readRememberedLocation,writeLastLocation,resolveCanvasLocation,MISSED_LOCATION_MESSAGE} from '../../lib/canvasLastLocation'
 import {writeDraft,readDraft,clearDraft,draftIncluded,mergeDraftDocument} from '../../lib/canvasDraftBackup'
 import PendingDeletions from './PendingDeletions'
@@ -38,16 +39,17 @@ import useCanvasMediaStatus from './useCanvasMediaStatus'
 import {uploadCanvasLibraryMedia,resolveLibraryMedia,lookupMedia,readUploadFolder,writeUploadFolder} from '../../lib/canvasMedia'
 import {isMediaAsset,isDeletedMedia,isTrashedMedia,markDeletedMedia} from '../../lib/canvasMediaStatus'
 import MediaPreview,{previewItems} from './MediaPreview'
+import {withPreviewPages} from './previewPages'
 import DeleteCanvasDialog from './DeleteCanvasDialog'
 const CanvasImageAnnotator = React.lazy(() => import('./CanvasImageAnnotator'))
 import useCanvasInteractions from './useCanvasInteractions'
 import {switchAssetVersion,rotateImageFile,downloadAsset} from '../../lib/canvasAssetVersions'
 import CanvasContextMenu from './CanvasContextMenu'
-import {reorderNodeReferences,reconcileReferenceMentions,insertNodeReferenceAt} from '../../lib/canvasReferenceOrder'
+import {reorderNodeReferences,reconcileReferenceMentions,insertNodeReferenceAt,removeNodeReference} from '../../lib/canvasReferenceOrder'
 import {deriveNodePorts,portAddError,pendingReferenceEdges,removeOverLimitReferences,PORT_KINDS} from '../../lib/canvasPorts'
 import {portLayout,overLimitMessages,overLimitBlock,portDropAnnouncement} from '../../lib/canvasPortLayout'
 import { canConnect, resolveNodeInputs, mediaKind } from '../../lib/canvasReferences'
-import { NODE_WIDTH, NODE_HEIGHT, nodeGeometry, nodeMediaKind, overlapsNode, fitViewport, LOD_ZOOM, resizableNode, clampNodeScale } from './canvasGeometry'
+import { NODE_WIDTH, NODE_HEIGHT, nodeGeometry, nodeMediaKind, overlapsNode, fitViewport, LOD_ZOOM, COMPACT_ZOOM, resizableNode, clampNodeScale, sameViewport } from './canvasGeometry'
 import CanvasPropertiesPanel,{usePropertiesPanelPrefs,canvasContent,multiContent,groupContent,textContent,assetContent,generationContent} from './CanvasPropertiesPanel'
 import CanvasNodePrompt,{CanvasPromptDialog} from './CanvasNodePrompt'
 import useNodeCharacters from './useNodeCharacters'
@@ -55,25 +57,33 @@ import useNodeGeneration,{quickGenerationBlock} from './useNodeGeneration'
 import {useCanvasEstimate} from './CanvasVideoEstimate'
 import CanvasLibrary from './CanvasLibrary'
 import {resolveLibraryItems} from '../../lib/libraryApi'
-import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, getCanvasCapabilities, submitCanvasGeneration, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject } from '../../lib/canvasApi'
+import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, duplicateCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, getCanvasCapabilities, submitCanvasGeneration, cancelCanvasTask, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject, bulkDeleteProjects } from '../../lib/canvasApi'
+import { applyBatchParamPatch, BATCH_FIELD_LABELS, homogeneousGenerationType } from '../../lib/canvasBatchParams'
+import { toSelection } from '../../lib/canvasProviderSelection'
 import './canvas.css'
 import ConfirmDialog from '../ui/ConfirmDialog'
+import askConfirm from '../ui/askConfirm'
 import './sidebar.css'
 import './canvasTheme.css'
 import './canvasNodeMedia.css'
 import {collectTaskUpdates,applyTaskUpdates,taskSyncPatches,mergeSavedDocument,sameServerDocument} from '../../lib/canvasTaskPolling'
-import {isActiveTaskStatus,isBusyTaskStatus,isFailureTaskStatus,isServerTaskStatus,documentTask,sanitizeDocumentTasks,INVALID_STATUS_LABEL} from '../../lib/taskStatus'
+import {isActiveTaskStatus,isBusyTaskStatus,isCancellableTask,isFailureTaskStatus,isServerTaskStatus,documentTask,sanitizeDocumentTasks,INVALID_STATUS_LABEL} from '../../lib/taskStatus'
 import {batchRunPlan,formatCostRange} from '../../lib/canvasBatchRun'
 import {referenceDropError} from '../../lib/canvasReferenceDrop'
 import {PROJECT_ASSET_DRAG} from './AssetTree'
+import {EmptyCanvasFlowArt,CanvasFileDropOverlay,isExternalFileDrag} from '../art/CanvasLibraryArt'
 import {clipboardFiles} from '../../lib/canvasClipboard'
 import {captureVideoFrame,frameFileName,formatFrameTime} from '../../lib/videoFrameCapture'
 import {markStaleDownstream,clearStale,serializableDocument} from '../../lib/canvasStaleness'
 import TaskDoneNotices from './TaskDoneNotices'
 import {requestTaskCenter} from '../../lib/taskCenterLink'
+import {CANVAS_APPLY_PNG_INFO_EVENT,CANVAS_LOCATE_NODE_EVENT,CANVAS_TOGGLE_PROMPTS_EVENT,announceCanvasRailPanel,buildCanvasPngInfoPatch,buildLayerSourceRequest,queueCanvasLocateNode,queueCanvasPngInfo,requestLayerSource,takePendingCanvasLocateNode,takePendingCanvasPngInfo} from '../../lib/canvasBridge'
+import {shouldHideTaskEcho} from '../../lib/canvasTaskEcho'
 import {completionNotices,noteActiveTasks,mergeNotices,baseTitle,titleWithCount,pageInForeground,readSystemSetting,writeSystemSetting,notificationPermission,shouldAskSystem,systemEnabled} from '../../lib/taskDoneNotify'
 
 const fresh = () => ({ version: 1, nodes: [], edges: [], viewport: { x: 100, y: 90, zoom: 1 } })
+// P1-CANVAS-WORKFLOW-20261120 (P1-2): keep copied canvas nodes across workflow/project switches within this session.
+let sessionClipboard = null
 const uid = () => globalThis.crypto?.randomUUID?.() || `n-${Date.now()}-${Math.random().toString(36).slice(2)}`
 const labels = { text: '文本', image: '画面生成', video: '视频生成', audio: '音频生成' }
 const activeTask = isActiveTaskStatus
@@ -128,11 +138,17 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   // CANVAS-INPUT-20261114 #2: drag-to-connect from an output port (runtime only, never saved).
   const [portDrag,setPortDrag] = useState(null), portDragRef = useRef(null), suppressPortClick = useRef(false)
   const [tool, setTool] = useState('select')
-  const editHistory=useRef(new CanvasEditHistory()),clipboard=useRef(null),pasteCount=useRef(0),editCommands=useRef(null)
+  const editHistory=useRef(new CanvasEditHistory()),clipboard=useRef(sessionClipboard),pasteCount=useRef(0),editCommands=useRef(null)
   const [historyRevision,setHistoryRevision]=useState(0),[shortcutsOpen,setShortcutsOpen]=useState(false),[moreMenu,setMoreMenu]=useState(null),moreTrigger=useRef(null)
+  const [fileDragging,setFileDragging]=useState(false),fileDragDepth=useRef(0)
+  useEffect(()=>{
+    const resetFileDrag=()=>{fileDragDepth.current=0;setFileDragging(false)}
+    window.addEventListener('dragend',resetFileDrag);window.addEventListener('drop',resetFileDrag)
+    return()=>{window.removeEventListener('dragend',resetFileDrag);window.removeEventListener('drop',resetFileDrag)}
+  },[])
   const refreshHistory=()=>setHistoryRevision(value=>value+1)
   const [saveState, setSaveState] = useState('尚未创建')
-  const [libraryTarget, setLibraryTarget] = useState(null),libraryOwner=useRef(null),[replaceOwner,setReplaceOwner]=useState(null),[characterTarget,setCharacterTarget]=useState(null),[movingAssets,setMovingAssets]=useState(null),[revealMedia,setRevealMedia]=useState(null)
+  const [libraryTarget, setLibraryTarget] = useState(null),libraryOwner=useRef(null),[replaceOwner,setReplaceOwner]=useState(null),[characterTarget,setCharacterTarget]=useState(null),[movingAssets,setMovingAssets]=useState(null),movingOpener=useRef(null),[revealMedia,setRevealMedia]=useState(null)
   // LIBRARY-GLOBAL S5: canvas uploads/pastes/frames/save-as go to the library root or this folder (per viewer).
   const [uploadFolder,setUploadFolderState]=useState(readUploadFolder),uploadFolderRef=useRef(uploadFolder)
   const setUploadFolder=id=>{uploadFolderRef.current=id||null;setUploadFolderState(id||null);writeUploadFolder(id||null)}
@@ -155,8 +171,10 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const version = useRef(0), savedVersion = useRef(0), contentVersion = useRef(0), savedContentVersion = useRef(0), queue = useRef(Promise.resolve()), drag = useRef(null), space = useRef(false)
   const creatingWorkflow = useRef(null), staleBaselines = useRef(new Map())
   const conflictRef = useRef(false), mounted = useRef(true), generationLocks = useRef(new Set()), polling = useRef(false)
+  const pollTasksNowRef = useRef(null), repollTasksRef = useRef(false)
+  const cancellingTasksRef = useRef(new Set()), [cancellingTasks, setCancellingTasks] = useState(() => new Set())
   // CANVAS-WRITEBACK-20261114: last document this window knows the server holds, and task-sync retry throttle (taskId -> time).
-  const serverDocRef = useRef(null), syncRetry = useRef(new Map())
+  const serverDocRef = useRef(null), serverTitleRef = useRef(''), syncRetry = useRef(new Map())
   // TASK-DONE-NOTIFY-20261114: completion reminders (runtime only, never saved).
   const [doneNotices,setDoneNotices]=useState([]),notifiedTasks=useRef(new Set()),watchedTasks=useRef(new Set()),unreadDone=useRef(0),titleBase=useRef(null)
   const [systemSetting,setSystemSetting]=useState(()=>readSystemSetting()),[permission,setPermission]=useState(()=>notificationPermission()),[askSystem,setAskSystem]=useState(false)
@@ -165,7 +183,11 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const showError = useCallback(error => { const msg = typeof error === 'string' ? error : messageOf(error); setError(msg) }, [])
   const edit = useCallback((transform,options={}) => {
     // UI-ITER-R2A #14: a pure viewport change (pan/zoom/fit/locate) is not an edit; it still autosaves, silently.
-    const before=docRef.current,raw=transform(before),viewOnly=raw!==before&&Object.keys({...raw,...before}).every(key=>key==='viewport'||raw[key]===before[key]),transformed=cleanGroups(raw);const staleAware=options.history!==false||options.runtime;let next = (staleAware?markStaleDownstream:(_,value)=>value)(before,reconcileReferenceMentions(before,options.history!==false?syncKeyframeGroups(before,transformed,uid):transformed),staleBaselines.current)
+    const before=docRef.current,raw=transform(before)
+    if(raw===before)return
+    const viewOnly=Object.keys({...raw,...before}).every(key=>key==='viewport'||raw[key]===before[key])
+    if(viewOnly&&sameViewport(before.viewport,raw.viewport))return
+    const transformed=cleanGroups(raw);const staleAware=options.history!==false||options.runtime;let next = (staleAware?markStaleDownstream:(_,value)=>value)(before,reconcileReferenceMentions(before,options.history!==false?syncKeyframeGroups(before,transformed,uid):transformed),staleBaselines.current)
     const created=next.groups?.find(group=>group.keyframeNodeId&&!before.groups?.some(old=>old.id===group.id));if(created&&options.history!==false&&rootRef.current){const bounds=groupBounds(created,next.nodes),rect=rootRef.current.getBoundingClientRect(),zoom=Math.min(next.viewport.zoom,(rect.width-80)/bounds.width,(rect.height-120)/bounds.height);next={...next,viewport:{x:rect.width/2-(bounds.x+bounds.width/2)*zoom,y:(rect.height-60)/2-(bounds.y+bounds.height/2)*zoom,zoom:Math.max(.15,zoom)}}}
     if(options.runtime)editHistory.current.rebaseReferenceAssets(before,next)
     // CANVAS-INPUT-20261114 #6: report mentions that followed a reference position (non-blocking panel notice).
@@ -201,8 +223,8 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const [groupDraft,setGroupDraft]=useState(null),[mentionNotice,setMentionNotice]=useState(null)
   const [focusedGroup,setFocusedGroup]=useState(null)
   // CANVAS-LAYOUT-1-20261117: right properties panel preferences (per browser) and the prompt editors' runtime state.
-  const panelToggle=useRef(null),chromeKeys=useRef({}),toolbarRef=useRef(null),railRef=useRef(null),toolsRef=useRef(null)
-  const [imageEditing,setImageEditing]=useState(null),[toolsLeft,setToolsLeft]=useState(null),[railPanelPx,setRailPanelPx]=useState(0)
+  const panelToggle=useRef(null),chromeKeys=useRef({}),toolbarRef=useRef(null),railRef=useRef(null)
+  const [imageEditing,setImageEditing]=useState(null),[railPanelPx,setRailPanelPx]=useState(0)
   const [cardGenerate,setCardGenerate]=useState(null)
   const panelPrefs=usePropertiesPanelPrefs(),[promptDialog,setPromptDialog]=useState(null),[promptFocus,setPromptFocus]=useState({id:null,n:0})
   // CANVAS-LAYOUT-2-WIRE-20261118: left icon rail + pop-out panel (spec 2.2). Pinning keeps the canvas >= 640 wide
@@ -217,6 +239,20 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     panelPrefs.setWidth(Math.max(RIGHT_PANEL_MIN,viewport-RAIL_WIDTH-panel-PIN_MIN_CANVAS));return null
   }})
   railRef.current=rail
+  useEffect(()=>{announceCanvasRailPanel(rail.panel);return()=>announceCanvasRailPanel(null)},[rail.panel])
+  const applyPngInfoRef=useRef(null),locateCanvasTargetRef=useRef(null),highlightTimerRef=useRef(null)
+  const [highlightedNodeId,setHighlightedNodeId]=useState(null)
+  useEffect(()=>()=>{if(highlightTimerRef.current)clearTimeout(highlightTimerRef.current)},[])
+  useEffect(()=>{
+    const onTogglePrompts=event=>{event.preventDefault();railRef.current?.toggle('prompts')}
+    const onApplyPngInfo=event=>{const metadata=event.detail?.metadata;if(!metadata)return;event.preventDefault();applyPngInfoRef.current?.(metadata)}
+    const onLocateNode=event=>{const target=event.detail?.target;if(!target?.workflowId)return;event.preventDefault();takePendingCanvasLocateNode();locateCanvasTargetRef.current?.(target)}
+    window.addEventListener(CANVAS_TOGGLE_PROMPTS_EVENT,onTogglePrompts)
+    window.addEventListener(CANVAS_APPLY_PNG_INFO_EVENT,onApplyPngInfo)
+    window.addEventListener(CANVAS_LOCATE_NODE_EVENT,onLocateNode)
+    return()=>{window.removeEventListener(CANVAS_TOGGLE_PROMPTS_EVENT,onTogglePrompts);window.removeEventListener(CANVAS_APPLY_PNG_INFO_EVENT,onApplyPngInfo);window.removeEventListener(CANVAS_LOCATE_NODE_EVENT,onLocateNode)}
+  },[])
+  useEffect(()=>{if(loading)return;const pending=takePendingCanvasPngInfo();if(pending)applyPngInfoRef.current?.(pending);const pendingLocate=takePendingCanvasLocateNode();if(pendingLocate)locateCanvasTargetRef.current?.(pendingLocate)},[loading])
   const togglePin=()=>{const message=rail.togglePin();if(message)notify?.(message,'info')}
   const [minimapOpen,setMinimapOpen]=useState(()=>readMinimapPreference(typeof window==='undefined'?1440:window.innerWidth-RAIL_WIDTH-panelPrefs.width))
   const [,setGestureTick]=useState(0)
@@ -233,7 +269,16 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     try { const renamed=await renameCanvasProject(projectIdRef.current,name); setProjects(items=>items.map(item=>item.id===renamed.id?renamed:item)) }
     finally { setBusy(false) }
   }
-  async function renameSidebarWorkflow(name) {
+  async function renameSidebarWorkflow(name, targetId) {
+    if (targetId != null && String(targetId) !== String(workflowRef.current?.id)) {
+      setBusy(true)
+      try {
+        const full = await getCanvasWorkflow(targetId)
+        const saved = await saveCanvasWorkflow(targetId, { title: name, document: full.document, revision: full.revision })
+        setWorkflows(items => items.map(item => String(item.id) === String(targetId) ? { ...item, title: saved.title || name, revision: saved.revision ?? item.revision } : item))
+      } finally { setBusy(false) }
+      return
+    }
     const previousTitle=titleRef.current
     setBusy(true)
     try { titleRef.current=name;setTitle(name);version.current+=1;contentVersion.current+=1;await save() }
@@ -260,6 +305,12 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       if (conflictRef.current) throw new Error('画布有版本冲突，请先保留本地内容并重新载入。')
       const savingVersion = version.current, savingContent = contentVersion.current, silent = savingContent === savedContentVersion.current
       const payload = { title: titleRef.current || '未命名画布', document: sanitizeDocumentTasks(serializableDocument(docRef.current)), revision: currentWorkflow.revision }
+      if (serverDocRef.current && payload.title === serverTitleRef.current && sameServerDocument(payload.document, serverDocRef.current)) {
+        savedVersion.current = savingVersion; savedContentVersion.current = savingContent; lastSaveFailed.current = false
+        if (contentVersion.current === savingContent) clearDraft(currentWorkflow.id)
+        if (mounted.current && !silent) setSaveState(contentVersion.current === savingContent ? '已保存' : '未保存')
+        return currentWorkflow
+      }
       const body = options.keepalive ? JSON.stringify(payload) : null, keepalive = !!body && keepaliveBodyFits(body)
       if (mounted.current && !silent) setSaveState('保存中…')
       if (keepalive) keepaliveVersion.current = savingVersion
@@ -273,6 +324,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
             if (merged !== docRef.current) edit(() => merged, { history: false, runtime: true, transient: true })
           }
           serverDocRef.current = result.merged && result.document ? result.document : payload.document
+          serverTitleRef.current = result.title || payload.title
           const { merged: _merged, ...stored } = result
           workflowRef.current = { ...currentWorkflow, ...stored, document: docRef.current }
           savedVersion.current = savingVersion; savedContentVersion.current = savingContent; lastSaveFailed.current = false
@@ -328,11 +380,11 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   }, [beforeLeaveRef, loading, save, showError])
 
   const installWorkflow = useCallback(value => {
-    editHistory.current.clear();clipboard.current=null;pasteCount.current=0;setHistoryRevision(value=>value+1)
+    editHistory.current.clear();pasteCount.current=0;setHistoryRevision(value=>value+1)
     const document = value.document || fresh()
     const hadSubmitting = document.nodes?.some(node => node.task?.status === 'submitting')
     const normalized = { ...fresh(), ...document, nodes: (document.nodes || []).map(node => node.task?.status === 'submitting' ? { ...node, task: { ...node.task, status: 'unknown', error: '上次提交被中断，请到任务记录核查。' } } : node), viewport: { ...fresh().viewport, ...document.viewport } }
-    workflowRef.current = value; docRef.current = normalized; titleRef.current = value.title; staleBaselines.current = new Map(); serverDocRef.current = document; syncRetry.current = new Map()
+    workflowRef.current = value; docRef.current = normalized; titleRef.current = value.title; staleBaselines.current = new Map(); serverDocRef.current = document; serverTitleRef.current = value.title || '未命名画布'; syncRetry.current = new Map()
     writeLastLocation({ projectId: value.project_id ?? projectIdRef.current, workflowId: value.id })
     version.current = hadSubmitting ? 1 : 0; savedVersion.current = 0; contentVersion.current = version.current; savedContentVersion.current = 0; conflictRef.current = false
     setOverlapCount(countOverlappingUnits(normalized)); setWorkflow(value); setDoc(normalized); setTitle(value.title); setSelected(null); setSelectedEdge(null); setConnection(null); setContextMenu(null); setNodeMenu(null);setHistoryNode(null);setPreview(null); setConflict(false); setSaveState(hadSubmitting ? '提交待核查' : '已保存')
@@ -407,17 +459,6 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     const observer = new ResizeObserver(([entry]) => setSurfaceSize({width:entry.contentRect.width,height:entry.contentRect.height}))
     observer.observe(rootRef.current); return () => observer.disconnect()
   }, [])
-  // Spec 3.2: bottom tools centred on the canvas, but never left of the bottom-left cluster's right edge + 12.
-  useLayoutEffect(() => {
-    const tools=toolsRef.current,bar=rootRef.current?.querySelector('.cv-viewport-bar')
-    if(!tools||!bar)return
-    const surface=rootRef.current.getBoundingClientRect(),width=tools.getBoundingClientRect().width,clusterRight=bar.getBoundingClientRect().right-surface.left
-    const centred=surface.width/2-width/2,left=Math.max(centred,clusterRight+12),zoom=Number(getComputedStyle(tools).zoom)||1
-    const next=left>centred+.5?Math.round(left/zoom):null
-    // Only set on a real change: an unconditional setState in this every-render layout effect counts as a nested
-    // update and, together with other synchronous re-renders, tripped React's update-depth limit (#185).
-    if(next!==toolsLeft)setToolsLeft(next)
-  })
   useEffect(() => {
     if (!providerRevision) return
     let alive = true
@@ -506,6 +547,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       if (!clean() || version.current !== atVersion || fresh.revision <= workflowRef.current.revision) return
       if ((fresh.title || '') !== (titleRef.current || '') || !sameServerDocument(docRef.current, fresh.document)) return
       serverDocRef.current = fresh.document
+      serverTitleRef.current = fresh.title || '未命名画布'
       const { document: _document, ...stored } = fresh
       workflowRef.current = { ...workflowRef.current, ...stored, document: docRef.current }
       if (mounted.current) { setWorkflow(workflowRef.current); setWorkflows(items => items.map(item => item.id === stored.id ? { ...item, ...stored } : item)) }
@@ -519,9 +561,10 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   // Unchanged results neither edit nor save the canvas.
   useEffect(() => {
     let alive = true, lastTick = 0
-    const tick = async () => {
-      if (!alive || polling.current || conflictRef.current || !workflowRef.current) return
-      if (document.hidden && Date.now() - lastTick < HIDDEN_POLL_MS) return
+    const tick = async (force = false) => {
+      if (!alive || conflictRef.current || !workflowRef.current) return
+      if (polling.current) { if (force) repollTasksRef.current = true; return }
+      if (!force && document.hidden && Date.now() - lastTick < HIDDEN_POLL_MS) return
       lastTick = Date.now()
       const currentWorkflowId = workflowRef.current.id
       const isCurrent = () => alive && mounted.current && workflowRef.current?.id === currentWorkflowId
@@ -551,7 +594,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
             if (unknown.length) setUnknownTasks(current => new Set([...current, ...unknown]))
             if (patches.size) edit(current => applyTaskUpdates(current, patches), { history: false, runtime: true, transient: true })
             // V2-FIX-20261117 F4: written-back results are new library media (生成历史) → refresh the sidebar tree and counts.
-            if ([...patches.values()].some(patch => patch.additions?.length || patch.task.status === 'succeeded')) setMediaRefresh(value => value + 1)
+            if ([...patches.values()].some(patch => patch.additions?.length || patch.task.status === 'succeeded')) { setMediaRefresh(value => value + 1); notifyLibraryChanged({ source: 'canvas_task_done' }) }
             // TASK-DONE-NOTIFY-20261114: remind from the written-back terminal state only.
             if (patches.size) remindRef.current?.(completionNotices({ patches, document: docRef.current, workflowId: currentWorkflowId, notified: notifiedTasks.current, eligible: watchedTasks.current }))
             if (Number.isInteger(synced.revision) && synced.revision > (workflowRef.current?.revision || 0)) adoptServerRevision(currentWorkflowId, synced.revision)
@@ -559,12 +602,16 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
         }
         setPollWarning(failed ? { workflowId: currentWorkflowId, count: failed } : null)
       } catch { /* the next cycle retries; per-node failures are counted above */ }
-      finally { polling.current = false }
+      finally {
+        polling.current = false
+        if (repollTasksRef.current && alive) { repollTasksRef.current = false; tick(true) }
+      }
     }
-    const timer = setInterval(tick, 3000)
-    const visible = () => { if (!document.hidden) tick() }
+    pollTasksNowRef.current = () => tick(true)
+    const timer = setInterval(() => tick(false), 3000)
+    const visible = () => { if (!document.hidden) tick(false) }
     document.addEventListener('visibilitychange', visible)
-    return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
+    return () => { alive = false; pollTasksNowRef.current = null; repollTasksRef.current = false; clearInterval(timer); document.removeEventListener('visibilitychange', visible) }
   }, [edit, adoptServerRevision])
 
   // result_unknown is server state; hydrate it for failed nodes after loading a canvas.
@@ -675,6 +722,19 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     navigationRef.current = true; setBusy(true)
     try { await save(); const next = await getCanvasWorkflow(id); await save(); installWorkflow(next); setError(''); return true } catch (failure) { showError(failure); return false } finally { setBusy(false); navigationRef.current = false }
   }
+  async function duplicateWorkflow(target = workflowRef.current) {
+    if (!target?.id || navigationRef.current || ioRef.current || generationLocks.current.size) return null
+    navigationRef.current = true; setBusy(true)
+    try {
+      await save()
+      const created = await duplicateCanvasWorkflow(target.id)
+      setWorkflows(items => [created, ...items])
+      installWorkflow(created)
+      setError('')
+      notify?.(`已复制画布“${created.title}”`, 'success')
+      return created
+    } catch (failure) { showError(failure); return null } finally { setBusy(false); navigationRef.current = false }
+  }
   const worldPoint = (clientX, clientY) => {
     const rect = rootRef.current.getBoundingClientRect(), view = docRef.current.viewport
     return { x: (clientX - rect.left - view.x) / view.zoom, y: (clientY - rect.top - view.y) / view.zoom }
@@ -704,9 +764,8 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     for (const [index,asset] of unique.entries()) {
       let source = nodes.find(node => node.type === 'asset' && node.asset?.id === asset.id)
       if (!source) {
-        // UI-ITER-R2-FIX L1: stack by each blocking node's real geometry (nodeGeometry), gap 20/30, never overlapping.
-        let x=origin.x,y=origin.y
-        for(let guard=0;guard<600;guard++){const blocker=nodes.find(node=>overlapsNode({type:'asset',x,y,asset},node,0));if(!blocker)break;if(target)y=blocker.y+nodeGeometry(blocker).height+20;else x=blocker.x+nodeGeometry(blocker).width+30}
+        // V2-REAL-USE F9: avoid overlapping both existing nodes and node groups.
+        const {x,y}=freeAssetNodePosition(current,nodes,{type:'asset',asset},origin,{target:Boolean(target)})
         source = {id:uid(),type:'asset',title:titles?.get(asset.id) || asset.name || '素材',x,y,text:'',params:{},asset,candidates:[asset],selectedCandidateId:asset.id,task:null};nodes.push(source)
       }
       added.push(source)
@@ -771,9 +830,19 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     try { const result = removeOverLimitReferences(docRef.current, id, {provider:nodeProvider(capabilities,node)}); if (!result.removed.length) return; edit(() => result.document, {description:`移除超出上限的 ${result.removed.length} 个参考`}); notify?.(`已移除 ${result.removed.length} 个超出上限的参考（${canvasModifier()}+Z 可撤销）`,'success') } catch (failure) { showError(failure) }
   }
   function clearReferences(id) { edit(current => ({...current,nodes:current.nodes.map(node => node.id===id?{...node,referenceAssets:[],referenceGroups:[]}:node),edges:current.edges.filter(edge=>edge.target!==id)})) }
+  function removeReference(nodeId, asset) {
+    if (!asset?.id) return
+    edit(current => removeNodeReference(current, nodeId, asset.id), { description: `移除参考素材“${asset.name || asset.id}”` })
+  }
+  function openReferencePreview(asset, assets = []) {
+    if (!asset?.url || (isMediaAsset(asset) && isDeletedMedia(asset.id))) return
+    const live = (assets || []).filter(item => item?.url && !(isMediaAsset(item) && isDeletedMedia(item.id)))
+    previewOwner.current = null
+    setPreview(withPreviewPages(asset, live))
+  }
   function closeContextMenu() {setContextMenu(null);rootRef.current?.focus()}
   function openContextMenu(event) {
-    if(event.target.closest('.cv-node,.cv-properties,.cv-tools,.cv-viewport-tools,.cv-node-toolbar,.cv-rail,.cv-rail-panel,.cv-context-menu,.cv-alert')) return
+    if(event.target.closest('.cv-node,.cv-properties,.cv-tools,.cv-viewport-tools,.cv-node-toolbar,.cv-rail,.cv-rail-panel,.cv-rail-panel-shell,.cv-sidebar-resizer,.cv-context-menu,.cv-alert,.cv-overlap-notice')) return
     event.preventDefault(); const rect=rootRef.current.getBoundingClientRect()
     const x=event.clientX || rect.left+rect.width/2,y=event.clientY || rect.top+rect.height/2
     setContextMenu({x:x-rect.left,y:y-rect.top,point:worldPoint(x,y)});setSelected(null);setSelectedEdge(null)
@@ -812,13 +881,34 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     try{const position=freeNodePosition(docRef.current,node,{x:node.x+40,y:node.y+40}),result=duplicateCanvasNode(docRef.current,node.id,uid,position,preselectedProvider)
     edit(()=>result.document,{description:`复制 1 个节点`});interaction.choose(result.ids)}catch(failure){showError(failure)}
   }
-  function copySelection(){
-    if(!workflowRef.current||!interaction.selectedIds.length)return false
-    clipboard.current=copyCanvasSelection(docRef.current,interaction.selectedIds,workflowRef.current.id);pasteCount.current=0;refreshHistory();notify?.('已复制选区，仅可粘贴到当前画布','success');return true
+  function copySelection(ids = interaction.selectedIds){
+    const list = (ids || []).filter(id => docRef.current.nodes.some(node => node.id === id))
+    if(!workflowRef.current||!list.length)return false
+    const copied = copyCanvasSelection(docRef.current,list,workflowRef.current.id)
+    clipboard.current = copied
+    sessionClipboard = copied
+    pasteCount.current=0;refreshHistory();notify?.(`已复制 ${copied.nodes.length} 个节点，可在当前或其他画布粘贴`,'success');return true
   }
-  function pasteSelection(){
-    if(!clipboard.current)return false
-    try{const result=pasteCanvasSelection(docRef.current,clipboard.current,workflowRef.current?.id,uid,40*(++pasteCount.current),preselectedProvider);edit(()=>result.document,{description:`粘贴 ${result.ids.length} 个节点`});interaction.choose(result.ids);setSelectedEdge(null)}catch(failure){showError(failure)}return true
+  function pasteSelection(anchor = null){
+    const clip = clipboard.current || sessionClipboard
+    if(!clip?.nodes?.length)return false
+    clipboard.current = clip
+    let targetAnchor = anchor
+    const crossWorkflow = clip.workflowId !== workflowRef.current?.id
+    const count = ++pasteCount.current
+    if (!targetAnchor && crossWorkflow && rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect()
+      const view = docRef.current.viewport
+      const minX = Math.min(...clip.nodes.map(n => n.x)), minY = Math.min(...clip.nodes.map(n => n.y))
+      const maxX = Math.max(...clip.nodes.map(n => n.x + nodeGeometry(n).width)), maxY = Math.max(...clip.nodes.map(n => n.y + nodeGeometry(n).height))
+      const inView = (maxX * view.zoom + view.x) > 40 && (minX * view.zoom + view.x) < rect.width - 40
+        && (maxY * view.zoom + view.y) > 40 && (minY * view.zoom + view.y) < rect.height - 80
+      if (!inView) {
+        const origin = worldPoint(rect.left + Math.min(120, rect.width * 0.2), rect.top + Math.min(100, rect.height * 0.2))
+        targetAnchor = { x: origin.x + 40 * (count - 1), y: origin.y + 40 * (count - 1) }
+      }
+    }
+    try{const result=pasteCanvasSelection(docRef.current,clip,workflowRef.current?.id,uid,40*count,preselectedProvider,targetAnchor?{anchor:targetAnchor}:{});edit(()=>result.document,{description:`粘贴 ${result.ids.length} 个节点`});interaction.choose(result.ids);setSelectedEdge(null)}catch(failure){showError(failure)}return true
   }
   function travelHistory(redo=false){
     if(ioRef.current||navigationRef.current||drag.current||conflictRef.current)return
@@ -1079,6 +1169,78 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     } finally { generationLocks.current.delete(id); if (mounted.current) setGenerationCount(generationLocks.current.size) }
   }
   const isUnknownResult=node=>node?.task?.status==='failed'&&unknownTasks.has(Number(node.task.id))
+  // P0-CANVAS-CANCEL-20261120: single-node cancel for pending/preparing/processing canvas tasks.
+  // Never writes non-vocabulary statuses, never triggers extra canvas PUT churn, and never harms result_unknown.
+  async function cancelNodeTask(nodeId) {
+    const owner = workflowRef.current?.id
+    const node = docRef.current.nodes.find(item => item.id === nodeId)
+    if (!owner || !node || !isCancellableTask(node.task) || isUnknownResult(node)) return
+    const taskId = Number(node.task.id)
+    if (cancellingTasksRef.current.has(taskId)) return
+    const isQueued = node.task.status === 'pending' || node.task.status === 'preparing'
+    const inGroupRun = Boolean(groupRun.owningRun(nodeId))
+    const baseMessage = isQueued
+      ? `任务 #${taskId} 尚在排队，取消后不会发起生成；确认取消？`
+      : `取消进行中的任务后，若请求已发往外部服务，可能仍会产生部分费用；确认取消任务 #${taskId}？`
+    const confirmed = await askConfirm({
+      title: '取消任务',
+      message: inGroupRun ? (
+        <>
+          <p>{baseMessage}</p>
+          <p>该节点属于正在运行的节点组：取消当前任务只会阻断其下游节点，组内其他独立分支不受影响（如需停止整组未提交节点，请使用节点组的“取消整组”）。</p>
+        </>
+      ) : baseMessage,
+      confirmLabel: '确认取消任务',
+      cancelLabel: '继续运行',
+      danger: true,
+    })
+    if (!confirmed || !mounted.current || workflowRef.current?.id !== owner) return
+    const latest = docRef.current.nodes.find(item => item.id === nodeId)
+    if (!latest || !isCancellableTask(latest.task) || Number(latest.task.id) !== taskId || isUnknownResult(latest)) {
+      notify?.(`任务 #${taskId} 状态已变化，已同步最新状态`, 'info')
+      syncRetry.current.delete(taskId)
+      pollTasksNowRef.current?.()
+      return
+    }
+    if (cancellingTasksRef.current.has(taskId)) return
+    cancellingTasksRef.current.add(taskId)
+    setCancellingTasks(new Set(cancellingTasksRef.current))
+    try {
+      const result = await cancelCanvasTask(taskId)
+      if (!mounted.current || workflowRef.current?.id !== owner) return
+      if (!result.status) {
+        showError(`${INVALID_STATUS_LABEL}：取消任务返回未知状态“${result.invalidStatus || ''}”，正在重新同步`)
+        syncRetry.current.delete(taskId)
+        pollTasksNowRef.current?.()
+        return
+      }
+      if (result.resultUnknown) setUnknownTasks(current => new Set([...current, taskId]))
+      const nextTask = { id: taskId, status: result.status, error: result.error || null }
+      edit(current => applyTaskUpdates(current, new Map([[nodeId, { task: nextTask, additions: [] }]])), { history: false, runtime: true, transient: true })
+      setError('')
+      if (result.status === 'cancelled') {
+        notifiedTasks.current.add(taskId)
+        notify?.(`已取消任务 #${taskId}`, 'success')
+        syncCanvasTasks(owner, [taskId]).then(synced => {
+          if (mounted.current && workflowRef.current?.id === owner && Number.isInteger(synced?.revision) && synced.revision > (workflowRef.current?.revision || 0)) {
+            adoptServerRevision(owner, synced.revision)
+          }
+        }).catch(() => {})
+      } else if (result.status === 'cancel_requested') {
+        notify?.(`已请求取消任务 #${taskId}，等待执行器停止`, 'info')
+      }
+      if (inGroupRun || groupRun.owningRun(nodeId)) groupRun.refresh?.()
+    } catch (failure) {
+      if (!mounted.current || workflowRef.current?.id !== owner) return
+      showError(failure)
+      syncRetry.current.delete(taskId)
+      pollTasksNowRef.current?.()
+      if (inGroupRun || groupRun.owningRun(nodeId)) groupRun.refresh?.()
+    } finally {
+      cancellingTasksRef.current.delete(taskId)
+      if (mounted.current) setCancellingTasks(new Set(cancellingTasksRef.current))
+    }
+  }
   // Regenerating after an unknown result may bill twice: require explicit confirmation.
   function requestGenerate(id){const node=docRef.current.nodes.find(item=>item.id===id);if(isUnknownResult(node)){setGenerateConfirm(id);return}generate(id)}
   function planSelection(){return batchRunPlan(docRef.current,interaction.selectedIds,{providerFor:node=>nodeProvider(capabilities,node),isUnknownResult,isLocked:id=>generationLocks.current.has(id)})}
@@ -1107,7 +1269,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   function openNodeMenu(id,event) {
     if(ioRef.current)return
     event.preventDefault();event.stopPropagation();const rect=rootRef.current.getBoundingClientRect()
-    const keyboard=event.type==='keydown',nodeRect=event.currentTarget?.getBoundingClientRect();setSelected(id);setContextMenu(null);setNodeMenu({id,x:(keyboard?nodeRect.left+30:event.clientX)-rect.left,y:(keyboard?nodeRect.top+35:event.clientY)-rect.top})
+    const keyboard=event.type==='keydown',nodeRect=event.currentTarget?.getBoundingClientRect();if(!interaction.selectedIds.includes(id))setSelected(id);setContextMenu(null);setNodeMenu({id,x:(keyboard?nodeRect.left+30:event.clientX)-rect.left,y:(keyboard?nodeRect.top+35:event.clientY)-rect.top})
   }
   function assetOwner(id,action="替换素材") {const node=docRef.current.nodes.find(item=>item.id===id);return {workflowId:workflowRef.current?.id,nodeId:id,assetId:node?.asset?.id,kind:node?.asset?.kind,description:`${action}：节点“${node?.title}”`}}
   async function saveAssetVersion(owner,file,origin='canvas_upload') {
@@ -1152,6 +1314,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     }catch(failure){throw new Error(messageOf(failure))}finally{ioRef.current--;setIoCount(ioRef.current)}
   }
   function editNodeImage(id){if(ioRef.current)return;const owner=assetOwner(id,'编辑图片'),node=docRef.current.nodes.find(n=>n.id===id);if(!node?.asset?.url)return;setImageEditing({owner,asset:node.asset});ioRef.current++;setIoCount(ioRef.current)}
+  function openNodeInLayerStudio(node){setNodeMenu(null);const payload=buildLayerSourceRequest(node?.asset,node?.title);if(!payload){showError('该节点没有可用的图片素材');return}requestLayerSource(payload)}
   function closeImageEditor(){setImageEditing(current=>{if(current){ioRef.current--;setIoCount(ioRef.current)}return null})}
   // NODE-TOOLBAR-VERSIONS-20261118 root cause of "历史版本 does nothing": for generation nodes this used to only move
   // focus to the panel's 版本 section (programmatic focus shows no ring, the section was usually below the fold), so
@@ -1235,7 +1398,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     try{const media=isMediaAsset(asset)?{id:asset.id}:await resolveAssetMediaId(asset);if(!media)throw new Error('该结果尚未进入素材库（等待迁移）');railRef.current?.open('assets',{focus:false});setRevealMedia({id:media.id,nonce:Date.now()})}catch(e){showError(e)}
   }
   async function resolveAssetMediaId(asset){const item=(await lookupMedia([asset.url])).get(asset.url);return item?.status==='ok'?{id:item.media_id}:null}
-  function clearWorkflow(){editHistory.current.clear();clipboard.current=null;refreshHistory();workflowRef.current=null;docRef.current=fresh();version.current=0;savedVersion.current=0;contentVersion.current=0;savedContentVersion.current=0;setWorkflow(null);setDoc(docRef.current);setSelected(null);setTitle('');titleRef.current='';setSaveState('尚未创建');setConflict(false);conflictRef.current=false}
+  function clearWorkflow(){editHistory.current.clear();pasteCount.current=0;refreshHistory();workflowRef.current=null;docRef.current=fresh();version.current=0;savedVersion.current=0;contentVersion.current=0;savedContentVersion.current=0;setWorkflow(null);setDoc(docRef.current);setSelected(null);setTitle('');titleRef.current='';setSaveState('尚未创建');setConflict(false);conflictRef.current=false}
   async function refreshNavigation() {
     const remaining=await listCanvasProjects();setProjects(remaining)
     const next=remaining.find(item=>item.id===projectIdRef.current) || remaining[0]
@@ -1251,7 +1414,9 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     try {
       if(!target.pending)await save()
       const result=await deleteCanvasObject(target.kind,target.id,target.pending?target.cleanup:cleanup)
-      clearWorkflow();await refreshNavigation();setDeletion(null)
+      const deletingOtherWorkflow=target.kind==='workflow'&&String(target.id)!==String(workflowRef.current?.id)
+      if(!deletingOtherWorkflow)clearWorkflow()
+      await refreshNavigation();setDeletion(null)
       notify?.(cleanup?`已删除，清理 ${result.removed_files ?? 0} 个文件，共享引用已保留`:'已删除，素材和生成文件保持保留','success')
     } catch(failure) {
       if(failure?.response?.data?.cleanup_pending){
@@ -1262,6 +1427,42 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       }
       throw failure
     } finally {ioRef.current--;setIoCount(ioRef.current)}
+  }
+  async function handleBulkDeleteProjects(ids, cleanupAssets = false) {
+    if (ioRef.current || navigationRef.current || generationLocks.current.size) {
+      throw new Error('请等待当前画布操作完成后再删除项目')
+    }
+    ioRef.current += 1; setIoCount(ioRef.current)
+    try {
+      const currentId = projectIdRef.current
+      if (currentId && ids.includes(currentId) && workflowRef.current && !conflictRef.current) {
+        await save().catch(() => {})
+      }
+      const result = await bulkDeleteProjects(ids, cleanupAssets)
+      const removedIds = new Set([
+        ...(result.deleted || []).map(item => item.id),
+        ...(result.skipped || []).filter(item => item.cleanup_pending).map(item => item.id),
+      ])
+      if (currentId && removedIds.has(currentId)) {
+        clearWorkflow()
+        await refreshNavigation()
+        setError('')
+      } else {
+        const remaining = await listCanvasProjects()
+        setProjects(remaining)
+        if (currentId && !remaining.some(item => item.id === currentId)) {
+          clearWorkflow()
+          await refreshNavigation()
+          setError('')
+        } else {
+          setAssetRefresh(value => value + 1)
+        }
+      }
+      return result
+    } finally {
+      ioRef.current -= 1
+      if (mounted.current) setIoCount(ioRef.current)
+    }
   }
   function downloadLocal() {
     const blob = new Blob([JSON.stringify({ title: titleRef.current, document: docRef.current }, null, 2)], { type: 'application/json' })
@@ -1324,6 +1525,8 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   }
   function focusPanel(){if(panelPrefs.collapsed)panelPrefs.setCollapsed(false);requestAnimationFrame(()=>document.querySelector('.cv-properties .cv-properties-body :is(input,select,textarea,button):not(:disabled), .cv-properties .cv-properties-head input')?.focus())}
   function focusSelection(){const id=interaction.selectedIds[0];const element=id&&rootRef.current?.querySelector(`.cv-node[data-node-id="${CSS.escape(id)}"]`);(element||rootRef.current)?.focus({preventScroll:true})}
+  function openMovingAssets(assets,origin){movingOpener.current=origin||null;setMovingAssets(assets)}
+  function closeMovingAssets(){const origin=movingOpener.current;movingOpener.current=null;setMovingAssets(null);requestAnimationFrame(()=>{if(origin?.element?.isConnected&&!origin.element.disabled){origin.element.focus({preventScroll:true});return}const nodeEl=origin?.nodeId&&rootRef.current?.querySelector(`.cv-node[data-node-id="${CSS.escape(origin.nodeId)}"]`);(nodeEl||rootRef.current)?.focus({preventScroll:true})})}
   const cardPrompt=node=>{
     if(!['image','video','audio','text'].includes(node.type))return null
     const single=selected===node.id&&interaction.selectedIds.length===1,editable=single&&!ioCount
@@ -1332,7 +1535,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     // panel button once its checks are ready (same disabled reasons, result-unknown confirmation, estimate).
     const label={image:'画面',video:'视频',audio:'音频'}[node.type],nodeBlock=node.type==='text'?'':quickGenerationBlock(node,nodeProvider(capabilities,node),groupRun.owningRun(node.id)?groupRunBlock:portBlock(node))
     const generate=node.type==='text'?null:single?{nodeId:node.id,label,disabledReason:selectedGen.disabledReason,estimate:selectedEstimate,onGenerate:()=>requestGenerate(node.id)}:{nodeId:node.id,label,disabledReason:nodeBlock,provider:nodeProvider(capabilities,node),references:inputMap.get(node.id)?.assets||[],onGenerate:()=>{if(ioRef.current)return;setFocusedGroup(null);setSelectedEdge(null);interaction.selectSingle(node.id);setCardGenerate(node.id)}}
-    return <CanvasNodePrompt node={node} editable={editable} inputAssets={single?selectedAssets:[]} editor={single?promptEditor:null} onText={text=>patchNode(node.id,{text})} onActivate={()=>activatePrompt(node.id)} onExpand={node.type==='text'?undefined:()=>{if(ioRef.current)return;setFocusedGroup(null);setSelectedEdge(null);if(!single)interaction.selectSingle(node.id);setPromptDialog(node.id)}} focusRequest={promptFocus.id===node.id?promptFocus.n:0} generate={generate}/>
+    return <CanvasNodePrompt node={node} editable={editable} inputAssets={single?selectedAssets:(inputMap.get(node.id)?.assets||[])} editor={single?promptEditor:null} onText={text=>patchNode(node.id,{text})} onActivate={()=>activatePrompt(node.id)} onExpand={node.type==='text'?undefined:()=>{if(ioRef.current)return;setFocusedGroup(null);setSelectedEdge(null);if(!single)interaction.selectSingle(node.id);setPromptDialog(node.id)}} focusRequest={promptFocus.id===node.id?promptFocus.n:0} generate={generate}/>
   }
   // Card 生成 on a node that was not the single selection: decide once that node is selected and its checks are ready.
   useEffect(()=>{
@@ -1344,17 +1547,81 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   },[cardGenerate,selected,selectedGen.ready,selectedGen.disabledReason])
   const panelGroup=doc.groups?.find(group=>group.id===focusedGroup)
   const selectionNodes=interaction.selectedIds.map(id=>doc.nodes.find(node=>node.id===id)).filter(Boolean)
+  function applyBatchParams(change) {
+    const ids = interaction.selectedIds
+    const targets = ids.map(id => docRef.current.nodes.find(node => node.id === id)).filter(Boolean)
+    const kind = homogeneousGenerationType(targets)
+    if (!kind) return
+    const kindLabel = { image: '画面', video: '视频', audio: '音频' }[kind] || kind
+    const fieldLabel = change.providerOption ? '接口' : (BATCH_FIELD_LABELS[change.field] || '参数')
+    edit(current => applyBatchParamPatch(current, ids, change, capabilities), { description: `批量修改 ${targets.length} 个${kindLabel}节点的${fieldLabel}` })
+    if (change.providerOption) rememberProvider(kind, toSelection(change.providerOption))
+  }
   const panelContent=panelGroup?groupContent({group:panelGroup,nodes:doc.nodes,run:groupRun.runFor(panelGroup.id),titleOf:id=>doc.nodes.find(node=>node.id===id)?.title||id,disabled:busy||ioCount>0,onRename:renameGroup,onUngroup:ungroup,onColor:(group,color,label)=>edit(current=>({...current,groups:current.groups.map(item=>item.id===group.id?{...item,color}:item)}),{description:`节点组底色改为${label}`}),onRun:group=>groupRun.start(group),onCancelRun:groupRun.requestCancel})
-    :selectionNodes.length>1?multiContent({nodes:selectionNodes,plan:selectionNodes.some(node=>['image','video','audio'].includes(node.type))?planSelection():null,onLocate:locateNode,onMakeGroup:makeGroup,onRun:()=>setBatchPlan(planSelection()),groupDisabled:busy||ioCount>0,runDisabledReason:busy||ioCount>0?'请等待当前操作完成':conflict?'画布版本冲突，请先处理冲突提示':''})
+    :selectionNodes.length>1?multiContent({nodes:selectionNodes,plan:selectionNodes.some(node=>['image','video','audio'].includes(node.type))?planSelection():null,capabilities,onBatchChange:applyBatchParams,onLocate:locateNode,onMakeGroup:makeGroup,onRun:()=>setBatchPlan(planSelection()),groupDisabled:busy||ioCount>0,runDisabledReason:busy||ioCount>0?'请等待当前操作完成':conflict?'画布版本冲突，请先处理冲突提示':''})
     :!selectedNode?canvasContent({nodes:doc.nodes})
     :selectedNode.type==='text'?textContent({node:selectedNode,usedBy:doc.edges.filter(edge=>edge.source===selectedNode.id).length,onChange:patch=>nodePatch(selectedNode.id,patch),onEditPrompt:()=>setPromptDialog(selectedNode.id)})
-    :selectedNode.type==='asset'?(()=>{const asset=selectedNode.asset,deleted=isMediaAsset(asset)&&isDeletedMedia(asset?.id),usable=asset?.id&&['image','video','audio'].includes(asset?.kind)&&!deleted;return assetContent({node:selectedNode,dimensions:mediaSize(asset?.id),deleted,onChange:patch=>nodePatch(selectedNode.id,patch),onCopy:()=>copyNode(selectedNode),onRevealInLibrary:usable?()=>revealInLibrary(asset):null,onMoveToFolder:usable?()=>setMovingAssets([asset]):null,onAddToCharacter:usable&&asset.kind==='image'&&asset.url&&workflow?.id?()=>setCharacterTarget({workflowId:workflow.id,asset}):null,onReplace:!ioCount?()=>replaceNodeAsset(selectedNode.id):null,onReplaceFromLibrary:!ioCount?()=>replaceNodeFromLibrary(selectedNode.id):null,onRemove:()=>removeDeletedResult(selectedNode.id)})})()
+    :selectedNode.type==='asset'?(()=>{const asset=selectedNode.asset,deleted=isMediaAsset(asset)&&isDeletedMedia(asset?.id),usable=asset?.id&&['image','video','audio'].includes(asset?.kind)&&!deleted;return assetContent({node:selectedNode,dimensions:mediaSize(asset?.id),deleted,onChange:patch=>nodePatch(selectedNode.id,patch),onCopy:()=>copyNode(selectedNode),onRevealInLibrary:usable?()=>revealInLibrary(asset):null,onMoveToFolder:usable?()=>openMovingAssets([asset],{nodeId:selectedNode.id,element:document.activeElement}):null,onAddToCharacter:usable&&asset.kind==='image'&&asset.url&&workflow?.id?()=>setCharacterTarget({workflowId:workflow.id,asset}):null,onReplace:!ioCount?()=>replaceNodeAsset(selectedNode.id):null,onReplaceFromLibrary:!ioCount?()=>replaceNodeFromLibrary(selectedNode.id):null,onRemove:()=>removeDeletedResult(selectedNode.id)})})()
     :generationContent({node:selectedNode,provider:selectedNodeProvider,providerOptions:capabilities[selectedNode.type]||[],gen:selectedGen,editor:promptEditor,estimate:selectedEstimate,inputAssets:selectedAssets,errorMessage:error,resultUnknown:isUnknownResult(selectedNode),mentionNotice:mentionNotice?.nodeId===selectedNode.id&&mentionNotice.key===JSON.stringify(selectedNode.referenceMentions||{})?mentionNotice.text:'',
-      onChange:patch=>nodePatch(selectedNode.id,patch),onGenerate:()=>requestGenerate(selectedNode.id),onCopy:()=>copyNode(selectedNode),onOrganizeGroup:selectedNode.type==='video'&&selectedNode.params?.video_mode==='keyframe'&&!doc.groups?.some(group=>group.keyframeNodeId===selectedNode.id)?()=>organizeKeyframes(selectedNode.id):null,
-      onClearReferences:()=>clearReferences(selectedNode.id),portWarnings:portMap.get(selectedNode.id)?.warnings||[],overLimitCount:portMap.get(selectedNode.id)?.derived.overLimitCount||0,onRemoveOverLimit:()=>removeOverLimit(selectedNode.id),onReorderReferences:order=>{try{const before=docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text;edit(current=>reorderNodeReferences(current,selectedNode.id,order),{description:'调整参考素材顺序并同步提及'});if(docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text!==before)notify?.(`已同步更新提示词中的引用（${canvasModifier()}+Z 可撤销）`,'success')}catch(error){showError(error)}},
+      onChange:patch=>nodePatch(selectedNode.id,patch),onGenerate:()=>requestGenerate(selectedNode.id),onCancelTask:cancelNodeTask,cancellingTaskIds:cancellingTasks,groupRunActive:Boolean(groupRun.owningRun(selectedNode.id)),onCopy:()=>copyNode(selectedNode),onOrganizeGroup:selectedNode.type==='video'&&selectedNode.params?.video_mode==='keyframe'&&!doc.groups?.some(group=>group.keyframeNodeId===selectedNode.id)?()=>organizeKeyframes(selectedNode.id):null,
+      onClearReferences:()=>clearReferences(selectedNode.id),onRemoveReference:asset=>removeReference(selectedNode.id,asset),onPreviewReference:openReferencePreview,portWarnings:portMap.get(selectedNode.id)?.warnings||[],overLimitCount:portMap.get(selectedNode.id)?.derived.overLimitCount||0,onRemoveOverLimit:()=>removeOverLimit(selectedNode.id),onReorderReferences:order=>{try{const before=docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text;edit(current=>reorderNodeReferences(current,selectedNode.id,order),{description:'调整参考素材顺序并同步提及'});if(docRef.current.nodes.find(n=>n.id===selectedNode.id)?.text!==before)notify?.(`已同步更新提示词中的引用（${canvasModifier()}+Z 可撤销）`,'success')}catch(error){showError(error)}},
       onUpload:()=>pickFile(selectedNode.id),onLibrary:()=>openLibrary(selectedNode.id),onLinkTask:taskId=>linkTask(selectedNode.id,taskId),onOpenTask:task=>openTaskCenter(task,selectedNode.type),onDismissStale:()=>edit(current=>clearStale(current,selectedNode.id),{description:'清除“上游已更新”标记'}),onRevealInLibrary:revealInLibrary,onNotice:text=>{notify?.(text,'success');setAssetRefresh(value=>value+1)},onEditPrompt:()=>setPromptDialog(selectedNode.id)})
   // CANVAS-LAYOUT-2-WIRE-20261118: chrome wiring (rail panels, node toolbar, F6 regions, bottom tool position).
   const promptTarget=interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?selectedNode:null
+  applyPngInfoRef.current=async metadata=>{
+    if(loading){queueCanvasPngInfo(metadata);return}
+    const existing=interaction.selectedIds.length===1&&selectedNode?.type==='image'&&!isBusyTaskStatus(selectedNode.task?.status)&&!generationLocks.current.has(selectedNode.id)?selectedNode:null
+    const target=existing||await addNode('image')
+    if(!target)return
+    const {text,paramsPatch,skipped}=buildCanvasPngInfoPatch(metadata,nodeProvider(capabilities,target))
+    const nextParams={...(target.params||{}),...paramsPatch}
+    patchNode(target.id,{...(text!=null?{text}:{}),params:nextParams})
+    setSelected(target.id);setSelectedEdge(null)
+    notify?.(skipped.length?`PNG Info 已载入画布图像节点，已忽略不兼容的${skipped.join('、')}`:'PNG Info 已载入画布图像节点','success')
+  }
+  locateCanvasTargetRef.current=async target=>{
+    if(!target?.workflowId)return
+    if(loading){queueCanvasLocateNode(target);return}
+    if(navigationRef.current||ioRef.current||generationLocks.current.size){notify?.('请等待当前画布操作完成后再定位节点','info');return}
+    const targetWorkflowId=String(target.workflowId)
+    if(String(workflowRef.current?.id||'')!==targetWorkflowId){
+      navigationRef.current=true;setBusy(true)
+      try{
+        await save()
+        const next=await getCanvasWorkflow(targetWorkflowId)
+        const nextProjectId=next.project_id??target.projectId??projectIdRef.current
+        if(nextProjectId!=null){
+          let nextWorkflows=workflows
+          try{nextWorkflows=await listCanvasWorkflows(nextProjectId)}catch{/* keep existing list */}
+          projectIdRef.current=nextProjectId;setProjectId(nextProjectId)
+          setWorkflows(nextWorkflows.some(item=>String(item.id)===String(next.id))?nextWorkflows:[next,...nextWorkflows])
+          if(!projects.some(p=>String(p.id)===String(nextProjectId))){
+            try{const freshProjects=await listCanvasProjects();setProjects(freshProjects)}catch{/* optional */}
+          }
+        }
+        installWorkflow(next);setError('')
+      }catch(failure){
+        const status=failure?.response?.status||failure?.status
+        const msg=status===404||status===410?'原画布已删除或不存在，无法定位节点':`无法打开原画布：${messageOf(failure)}`
+        notify?.(msg,'warning')
+        return
+      }finally{setBusy(false);navigationRef.current=false}
+    }
+    const nodeId=target.nodeId
+    const found=nodeId&&docRef.current.nodes.find(node=>node.id===nodeId)
+    if(!found){
+      notify?.('原节点已从画布中删除，已为您打开所在画布','info')
+      return
+    }
+    setFocusedGroup(null);setSelectedEdge(null)
+    if(highlightTimerRef.current)clearTimeout(highlightTimerRef.current)
+    setHighlightedNodeId(found.id)
+    highlightTimerRef.current=setTimeout(()=>{if(mounted.current)setHighlightedNodeId(null)},2400)
+    requestAnimationFrame(()=>{
+      if(!mounted.current)return
+      interaction.locate(found.id)
+    })
+  }
   function insertLibraryPrompt(text){
     const node=promptTarget;if(!node)return
     const textarea=rootRef.current?.querySelector(`.cv-world .cv-node[data-node-id="${CSS.escape(node.id)}"] textarea.cv-card-prompt`)
@@ -1362,6 +1629,13 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   }
   const taskBadge=summarizeCanvasTasks(doc.nodes).active.length
   const toolbarShown=nodeToolbarVisible({node:selectedNode,selectedCount:interaction.selectedIds.length,dragging:drag.current?.type==='nodes'&&!!drag.current.moved,connecting:!!portDrag||!!connection,annotating:!!annotation||!!imageEditing,deleted:!!selectedNode?.asset&&isMediaAsset(selectedNode.asset)&&isDeletedMedia(selectedNode.asset.id)})
+  const toolbarAvoidRects=toolbarShown&&(doc.groups||[]).length?(doc.groups||[]).map(group=>{
+    const bounds=groupBounds(group,doc.nodes)
+    if(!bounds)return null
+    const headerEl=rootRef.current?.querySelector(`.cv-node-group[data-group-id="${CSS.escape(group.id)}"] > header`)
+    return groupHeaderScreenRect(bounds,view,{headerWidth:headerEl?.offsetWidth||320})
+  }).filter(Boolean):[]
+  const hasClipboard=Boolean((clipboard.current||sessionClipboard)?.nodes?.length)
   function cycleRegion(back){
     const order=['rail',...(rail.panel?['panel']:[]),'canvas','properties'],active=document.activeElement,studio=rootRef.current?.closest('.canvas-studio')
     const current=active?.closest?.('.cv-rail')?'rail':active?.closest?.('.cv-rail-panel')?'panel':active?.closest?.('.cv-properties')?'properties':'canvas'
@@ -1373,38 +1647,43 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   chromeKeys.current={cycle:cycleRegion,toolbar:()=>{if(!toolbarRef.current)return false;toolbarRef.current.focus();return true}}
   return <section className="canvas-studio" aria-label="创作画布">
     <div className="cv-layout">
-    <CanvasRail active={rail.panel} pinned={rail.pinned} iconRefs={rail.iconRefs} onToggle={rail.toggle} onCharacters={()=>openLibrary('__browse__','characters')} onShortcuts={()=>setShortcutsOpen(true)} onTogglePin={togglePin} badges={{tasks:taskBadge}}/>
-     {rail.panel && <CanvasRailPanel id={rail.panel} pinned={rail.pinned} autoFocus={rail.autoFocus} onFocused={rail.consumeFocus} onClose={rail.close} onTogglePin={togglePin} pinDisabledReason={pinRefusal()} onWidth={setRailPanelPx}>{rail.panel==='project'?<CanvasProjectPanel edges={doc.edges} groups={doc.groups||[]} onLocateGroup={locateGroup} onRenameGroup={renameGroup} onUngroup={ungroup} navigationError={error} projects={projects} projectId={projectId} workflows={workflows} workflow={workflow} nodes={doc.nodes} selected={selected} selectedIds={interaction.selectedIds} disabled={loading||busy||ioCount>0||generationCount>0} onProject={chooseProject} onWorkflow={chooseWorkflow} onNewProject={requestNewProject} onNewWorkflow={newWorkflow} onRenameProject={()=>{setError('');setRenameMode('rename');setRenameDraft(projects.find(item=>String(item.id)===String(projectId))?.title || '')}} onRenameProjectDirect={renameSidebarProject} onRenameWorkflow={renameSidebarWorkflow} onLibrary={()=>openLibrary('__browse__')} onCharacters={()=>openLibrary('__browse__','characters')} onLocate={locateNode} onSelect={locateNode} onCopy={copyNode} onDelete={deleteNode} onRating={(id,rating)=>patchNode(id,{rating})} onAddAssets={addProjectAssets} ioBusy={ioCount>0} onRenameNode={node=>{setSelected(node.id);setSidebarRename({id:node.id,title:node.title})}} onDeleteProject={()=>setDeletion({kind:'project',id:projectId,title:projects.find(p=>p.id===projectId)?.title || '当前项目'})} onDeleteWorkflow={()=>setDeletion({kind:'workflow',id:workflow.id,title})} onPendingDeletions={()=>save().then(()=>setPendingDeletions(true)).catch(showError)} assetRefresh={assetRefresh} mediaRefresh={mediaRefresh} referenceTarget={interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?{id:selectedNode.id,title:selectedNode.title}:null} onAddReference={(assets,kinds)=>{const target=interaction.selectedIds.length===1?interaction.selectedIds[0]:null;if(!target)throw new Error('请先选择一个生成节点');return addProjectReferences(assets,kinds,target)}} revealMedia={revealMedia} uploadFolder={uploadFolder} onUploadFolder={setUploadFolder}/>:rail.panel==='assets'?<CanvasAssetPanel edges={doc.edges} groups={doc.groups||[]} onLocateGroup={locateGroup} onRenameGroup={renameGroup} onUngroup={ungroup} navigationError={error} projects={projects} projectId={projectId} workflows={workflows} workflow={workflow} nodes={doc.nodes} selected={selected} selectedIds={interaction.selectedIds} disabled={loading||busy||ioCount>0||generationCount>0} onProject={chooseProject} onWorkflow={chooseWorkflow} onNewProject={requestNewProject} onNewWorkflow={newWorkflow} onRenameProject={()=>{setError('');setRenameMode('rename');setRenameDraft(projects.find(item=>String(item.id)===String(projectId))?.title || '')}} onRenameProjectDirect={renameSidebarProject} onRenameWorkflow={renameSidebarWorkflow} onLibrary={()=>openLibrary('__browse__')} onCharacters={()=>openLibrary('__browse__','characters')} onLocate={locateNode} onSelect={locateNode} onCopy={copyNode} onDelete={deleteNode} onRating={(id,rating)=>patchNode(id,{rating})} onAddAssets={addProjectAssets} ioBusy={ioCount>0} onRenameNode={node=>{setSelected(node.id);setSidebarRename({id:node.id,title:node.title})}} onDeleteProject={()=>setDeletion({kind:'project',id:projectId,title:projects.find(p=>p.id===projectId)?.title || '当前项目'})} onDeleteWorkflow={()=>setDeletion({kind:'workflow',id:workflow.id,title})} onPendingDeletions={()=>save().then(()=>setPendingDeletions(true)).catch(showError)} assetRefresh={assetRefresh} mediaRefresh={mediaRefresh} referenceTarget={interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?{id:selectedNode.id,title:selectedNode.title}:null} onAddReference={(assets,kinds)=>{const target=interaction.selectedIds.length===1?interaction.selectedIds[0]:null;if(!target)throw new Error('请先选择一个生成节点');return addProjectReferences(assets,kinds,target)}} revealMedia={revealMedia} uploadFolder={uploadFolder} onUploadFolder={setUploadFolder}/>:rail.panel==='prompts'?<CanvasPromptPanel onInsert={insertLibraryPrompt} insertDisabledReason={promptTarget?'':'请先选中一个生成节点'} targetLabel={promptTarget?.title||''}/>:<CanvasTaskPanel nodes={doc.nodes} onLocate={id=>locateNode(id)} onUnhandled={message=>notify?.(message,'info')}/>}</CanvasRailPanel>}
+    <CanvasRail active={rail.panel} iconRefs={rail.iconRefs} onToggle={rail.toggle} onCharacters={()=>openLibrary('__browse__','characters')} onShortcuts={()=>setShortcutsOpen(true)} badges={{tasks:taskBadge}}/>
+     {rail.panel && <CanvasRailPanel id={rail.panel} pinned={rail.pinned} autoFocus={rail.autoFocus} onFocused={rail.consumeFocus} onClose={rail.close} onTogglePin={togglePin} pinDisabledReason={pinRefusal()} onWidth={setRailPanelPx}>{rail.panel==='project'?<CanvasProjectPanel edges={doc.edges} groups={doc.groups||[]} onLocateGroup={locateGroup} onRenameGroup={renameGroup} onUngroup={ungroup} navigationError={error} projects={projects} projectId={projectId} workflows={workflows} workflow={workflow} nodes={doc.nodes} selected={selected} selectedIds={interaction.selectedIds} disabled={loading||busy||ioCount>0||generationCount>0} onProject={chooseProject} onWorkflow={chooseWorkflow} onNewProject={requestNewProject} onNewWorkflow={newWorkflow} onDuplicateWorkflow={duplicateWorkflow} onRenameProject={()=>{setError('');setRenameMode('rename');setRenameDraft(projects.find(item=>String(item.id)===String(projectId))?.title || '')}} onRenameProjectDirect={renameSidebarProject} onRenameWorkflow={renameSidebarWorkflow} onLibrary={()=>openLibrary('__browse__')} onCharacters={()=>openLibrary('__browse__','characters')} onLocate={locateNode} onSelect={locateNode} onCopy={copyNode} onDelete={deleteNode} onRating={(id,rating)=>patchNode(id,{rating})} onAddAssets={addProjectAssets} ioBusy={ioCount>0} onRenameNode={node=>{setSelected(node.id);setSidebarRename({id:node.id,title:node.title})}} onDeleteProject={()=>setDeletion({kind:'project',id:projectId,title:projects.find(p=>p.id===projectId)?.title || '当前项目'})} onBulkDeleteProjects={handleBulkDeleteProjects} onDeleteWorkflow={(target=workflow)=>target&&setDeletion({kind:'workflow',id:target.id,title:String(target.id)===String(workflow?.id)?title:target.title})} onPendingDeletions={()=>save().then(()=>setPendingDeletions(true)).catch(showError)} assetRefresh={assetRefresh} mediaRefresh={mediaRefresh} referenceTarget={interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?{id:selectedNode.id,title:selectedNode.title}:null} onAddReference={(assets,kinds)=>{const target=interaction.selectedIds.length===1?interaction.selectedIds[0]:null;if(!target)throw new Error('请先选择一个生成节点');return addProjectReferences(assets,kinds,target)}} revealMedia={revealMedia} uploadFolder={uploadFolder} onUploadFolder={setUploadFolder}/>:rail.panel==='assets'?<CanvasAssetPanel edges={doc.edges} groups={doc.groups||[]} onLocateGroup={locateGroup} onRenameGroup={renameGroup} onUngroup={ungroup} navigationError={error} projects={projects} projectId={projectId} workflows={workflows} workflow={workflow} nodes={doc.nodes} selected={selected} selectedIds={interaction.selectedIds} disabled={loading||busy||ioCount>0||generationCount>0} onProject={chooseProject} onWorkflow={chooseWorkflow} onNewProject={requestNewProject} onNewWorkflow={newWorkflow} onRenameProject={()=>{setError('');setRenameMode('rename');setRenameDraft(projects.find(item=>String(item.id)===String(projectId))?.title || '')}} onRenameProjectDirect={renameSidebarProject} onRenameWorkflow={renameSidebarWorkflow} onLibrary={()=>openLibrary('__browse__')} onCharacters={()=>openLibrary('__browse__','characters')} onLocate={locateNode} onSelect={locateNode} onCopy={copyNode} onDelete={deleteNode} onRating={(id,rating)=>patchNode(id,{rating})} onAddAssets={addProjectAssets} ioBusy={ioCount>0} onRenameNode={node=>{setSelected(node.id);setSidebarRename({id:node.id,title:node.title})}} onDeleteProject={()=>setDeletion({kind:'project',id:projectId,title:projects.find(p=>p.id===projectId)?.title || '当前项目'})} onBulkDeleteProjects={handleBulkDeleteProjects} onDeleteWorkflow={(target=workflow)=>target&&setDeletion({kind:'workflow',id:target.id,title:String(target.id)===String(workflow?.id)?title:target.title})} onPendingDeletions={()=>save().then(()=>setPendingDeletions(true)).catch(showError)} assetRefresh={assetRefresh} mediaRefresh={mediaRefresh} referenceTarget={interaction.selectedIds.length===1&&['image','video','audio'].includes(selectedNode?.type)?{id:selectedNode.id,title:selectedNode.title}:null} onAddReference={(assets,kinds)=>{const target=interaction.selectedIds.length===1?interaction.selectedIds[0]:null;if(!target)throw new Error('请先选择一个生成节点');return addProjectReferences(assets,kinds,target)}} revealMedia={revealMedia} uploadFolder={uploadFolder} onUploadFolder={setUploadFolder} onBeforeDelete={flushBeforeLibraryDelete} onDeleted={afterLibraryDelete}/>:rail.panel==='prompts'?<CanvasPromptPanel onInsert={insertLibraryPrompt} insertDisabledReason={promptTarget?'':'请先选中一个生成节点'} targetLabel={promptTarget?.title||''} selectedPromptText={promptTarget?.text||''}/>:<CanvasTaskPanel nodes={doc.nodes} onLocate={id=>locateNode(id)} onCancelTask={cancelNodeTask} cancellingTaskIds={cancellingTasks} onUnhandled={message=>notify?.(message,'info')}/>}</CanvasRailPanel>}
      <div className="cv-main" style={rail.panel&&!rail.pinned&&railPanelPx?{'--cv-float-panel':`${Math.round(railPanelPx)}px`}:undefined}>
     <header className="cv-topbar">{workflow && <input className="cv-project-name" aria-label="画布名称" title={title} value={title} onChange={e => { titleRef.current = e.target.value; setTitle(e.target.value); version.current += 1; contentVersion.current += 1; setSaveState('未保存') }} />}<span className="cv-spacer" /><div className="cv-edit-tools" role="group" aria-label="画布编辑">
       <button ref={moreTrigger} className="btn btn-icon" aria-label="更多画布操作" title="更多画布操作（复制／粘贴选区）" aria-haspopup="menu" aria-expanded={!!moreMenu} onClick={event=>setMoreMenu(moreMenu?null:menuPosition(event))}><MoreHorizontal size={16}/></button></div>
       {ioCount > 0 && <span className="cv-save-state" role="status">正在处理素材…</span>}<span className={`cv-save-state ${saveState === '保存失败' ? 'error' : ''}`} role="status" title={`自动保存 · ${canvasModifier()}+S 立即保存`}>{saveState}</span>{workflow && (saveState === '保存失败' || conflict) && <button className="cv-retry-save" onClick={() => {save().catch(showError);rootRef.current?.focus({preventScroll:true})}} disabled={conflict} title={conflict?'画布版本冲突，请先处理冲突提示':'重新尝试保存画布'}><RotateCw size={14} />重试保存</button>}</header>
-    {moreMenu && <SidebarMenu label="更多画布操作" position={moreMenu} onClose={()=>setMoreMenu(null)} className="cv-more-menu"><button role="menuitem" aria-label="复制画布选区" title={`复制画布选区 (${canvasModifier()}+C)`} disabled={!interaction.selectedIds.length||ioCount>0||busy} onClick={()=>{copySelection();setMoreMenu(null);rootRef.current?.focus()}}><Copy size={14}/>复制选区<kbd>{canvasModifier()}+C</kbd></button><button role="menuitem" aria-label="粘贴画布选区" title={`粘贴画布选区 (${canvasModifier()}+V)`} disabled={!clipboard.current||ioCount>0||busy||conflict} onClick={()=>{pasteSelection();setMoreMenu(null);rootRef.current?.focus()}}><ClipboardPaste size={14}/>粘贴<kbd>{canvasModifier()}+V</kbd></button><button role="menuitemcheckbox" aria-checked={systemOn} disabled={permission==='unsupported'} title={permission==='unsupported'?'当前浏览器不支持系统通知':permission==='denied'?'浏览器已阻止本站通知，需在浏览器网站设置中允许':'页面在后台时用系统通知提醒任务完成'} onClick={()=>{setMoreMenu(null);if(systemOn)chooseSystem('off');else enableSystem()}}><Bell size={14}/>系统完成通知<kbd>{systemOn?'开':'关'}</kbd></button><button role="menuitem" onClick={()=>{setMoreMenu(null);setShortcutsOpen(true)}}><Keyboard size={14}/>快捷键帮助<kbd>?</kbd></button></SidebarMenu>}
-    <div ref={rootRef} className={`cv-surface ${tool === 'pan' ? 'is-pan' : ''}`} tabIndex={0} aria-label="无限画布工作区" style={{ backgroundSize: `${24 * view.zoom}px ${24 * view.zoom}px`, backgroundPosition: `${view.x}px ${view.y}px` }} onContextMenu={e=>e.preventDefault()} onKeyDown={e=>{if(e.target===e.currentTarget && (e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')))openContextMenu(e)}} onPointerDown={startSurface} onPointerMove={event=>{lastPointer.current={x:event.clientX,y:event.clientY};movePointer(event)}} onPointerLeave={()=>{lastPointer.current=null}} onPointerUp={event=>{interaction.end(event);setGestureTick(value=>value+1)}} onPointerCancel={interaction.cancel} onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if ([...e.dataTransfer.types].includes(PROJECT_ASSET_DRAG)) { dropProjectAssets(e); return } const type = e.dataTransfer.getData('application/x-ink-node'); if (['image','video','audio'].includes(type)) addNode(type, worldPoint(e.clientX, e.clientY)); else importFiles(e.dataTransfer.files, worldPoint(e.clientX, e.clientY)) }}>
+    {moreMenu && <SidebarMenu label="更多画布操作" position={moreMenu} onClose={()=>setMoreMenu(null)} className="cv-more-menu"><button role="menuitem" aria-label="复制画布选区" title={`复制画布选区 (${canvasModifier()}+C)`} disabled={!interaction.selectedIds.length||ioCount>0||busy} onClick={()=>{copySelection();setMoreMenu(null);rootRef.current?.focus()}}><Copy size={14}/>复制选区<kbd>{canvasModifier()}+C</kbd></button><button role="menuitem" aria-label="粘贴画布选区" title={`粘贴画布选区 (${canvasModifier()}+V)`} disabled={!hasClipboard||ioCount>0||busy||conflict} onClick={()=>{pasteSelection();setMoreMenu(null);rootRef.current?.focus()}}><ClipboardPaste size={14}/>粘贴<kbd>{canvasModifier()}+V</kbd></button><button role="menuitemcheckbox" aria-checked={systemOn} disabled={permission==='unsupported'} title={permission==='unsupported'?'当前浏览器不支持系统通知':permission==='denied'?'浏览器已阻止本站通知，需在浏览器网站设置中允许':'页面在后台时用系统通知提醒任务完成'} onClick={()=>{setMoreMenu(null);if(systemOn)chooseSystem('off');else enableSystem()}}><Bell size={14}/>系统完成通知<kbd>{systemOn?'开':'关'}</kbd></button><button role="menuitem" onClick={()=>{setMoreMenu(null);setShortcutsOpen(true)}}><Keyboard size={14}/>快捷键帮助<kbd>?</kbd></button></SidebarMenu>}
+    <div ref={rootRef} className={`cv-surface ${tool === 'pan' ? 'is-pan' : ''} ${fileDragging ? 'is-file-dragging' : ''}`} tabIndex={0} aria-label="无限画布工作区" style={{ backgroundSize: `${24 * view.zoom}px ${24 * view.zoom}px`, backgroundPosition: `${view.x}px ${view.y}px` }} onContextMenu={e=>e.preventDefault()} onKeyDown={e=>{if(e.target===e.currentTarget && (e.key==='ContextMenu'||(e.shiftKey&&e.key==='F10')))openContextMenu(e)}} onPointerDown={startSurface} onPointerMove={event=>{lastPointer.current={x:event.clientX,y:event.clientY};movePointer(event)}} onPointerLeave={()=>{lastPointer.current=null}} onPointerUp={event=>{interaction.end(event);setGestureTick(value=>value+1)}} onPointerCancel={interaction.cancel} onDragEnter={e => { if (isExternalFileDrag(e.dataTransfer)) { e.preventDefault(); fileDragDepth.current += 1; if (fileDragDepth.current === 1) setFileDragging(true) } }} onDragOver={e => { e.preventDefault(); if (isExternalFileDrag(e.dataTransfer)) { e.dataTransfer.dropEffect = 'copy'; if (fileDragDepth.current === 0) fileDragDepth.current = 1; if (!fileDragging) setFileDragging(true) } }} onDragLeave={e => { if (fileDragDepth.current <= 0) return; fileDragDepth.current -= 1; if (fileDragDepth.current <= 0 || (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget))) { fileDragDepth.current = 0; setFileDragging(false) } }} onDrop={e => { e.preventDefault(); fileDragDepth.current = 0; setFileDragging(false); if ([...e.dataTransfer.types].includes(PROJECT_ASSET_DRAG)) { dropProjectAssets(e); return } const type = e.dataTransfer.getData('application/x-ink-node'); if (['image','video','audio'].includes(type)) addNode(type, worldPoint(e.clientX, e.clientY)); else importFiles(e.dataTransfer.files, worldPoint(e.clientX, e.clientY)) }}>
       <style>{`#${CSS.escape(worldId)} :is(.cv-node-title, .cv-port, .cv-edge-hit, .cv-node-group header, .cv-node-run-mark) { --cv-zoom: ${Number(view.zoom)}; }`}</style>
-      <div id={worldId} className={`cv-world ${view.zoom < LOD_ZOOM ? 'is-lod-low' : ''}`} style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.zoom})`, '--cv-zoom': view.zoom }}>
+      <div id={worldId} className={`cv-world ${view.zoom < LOD_ZOOM ? 'is-lod-low' : ''} ${view.zoom < COMPACT_ZOOM ? 'is-zoom-compact' : ''} ${shouldHideTaskEcho(view.zoom) ? 'is-echo-hidden' : ''}`} style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.zoom})`, '--cv-zoom': view.zoom }}>
         <CanvasGroups groups={doc.groups} nodes={doc.nodes} edges={doc.edges} onLocateSource={locateNode} onUpload={id=>pickFile(id)} onLibrary={id=>{setSelected(id);openLibrary(id)}} disabled={busy||ioCount>0} onLocate={locateGroup} onRename={renameGroup} onColor={(group,color,label)=>edit(current=>({...current,groups:current.groups.map(item=>item.id===group.id?{...item,color}:item)}),{description:`节点组底色改为${label}`})} onUngroup={ungroup} onCopy={copyGroup} runFor={groupRun.runFor} onRun={group=>groupRun.start(group)} onCancelRun={groupRun.requestCancel} onDismissRun={groupRun.dismiss} onDrag={(event,group)=>{if(event.button===0){setFocusedGroup(group.id);interaction.choose(group.nodeIds);}const node=docRef.current.nodes.find(n=>group.nodeIds.includes(n.id));if(node)interaction.startNode(event,node)}}/><svg className="cv-connections">{doc.edges.map(edge => { const source = doc.nodes.find(n => n.id === edge.source), target = doc.nodes.find(n => n.id === edge.target); if (!source || !target) return null; const x1 = source.x + nodeGeometry(source).width, y1 = source.y + nodeGeometry(source).portY, x2 = target.x, y2 = target.y + (portMap.get(target.id)?.layout.edgeY.get(edge.id) ?? nodeGeometry(target).portY), bend = Math.max(80, Math.abs(x2 - x1) / 2), path = `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`; return <g key={edge.id} data-kind={nodeMediaKind(source)||undefined}><path className={`cv-edge ${selectedEdge === edge.id ? 'selected' : ''}`} d={path} /><path className="cv-edge-flow" d={path} pathLength="100" aria-hidden="true"/><path className="cv-edge-hit" d={path} onPointerDown={e => {if(e.button===2){interaction.startSurface(e);return} e.stopPropagation(); setSelectedEdge(edge.id); setSelected(null) }} /></g> })}{portDrag && (() => { const source = doc.nodes.find(n => n.id === portDrag.source); if (!source) return null; const x1 = source.x + nodeGeometry(source).width, y1 = source.y + nodeGeometry(source).portY, {x:x2,y:y2} = portDrag.point, bend = Math.max(60, Math.abs(x2 - x1) / 2); return <path className="cv-edge cv-edge-preview" data-testid="connection-preview" data-kind={nodeMediaKind(source)||undefined} d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`} aria-hidden="true"/> })()}</svg>
-        {doc.nodes.map(node => <CanvasNodeBoundary key={node.id} mediaStatusKey={mediaStatus.deletedKey} mediaSizeRevision={mediaSizeRevision} node={node} provider={nodeProvider(capabilities,node)} references={inputMap.get(node.id)?.assets || []} frames={inputMap.get(node.id)?.frames} selected={interaction.selectedIds.includes(node.id)} pendingConnection={connection} onSelect={event => { if(!ioRef.current)setSelected(node.id,event?.shiftKey); setSelectedEdge(null) }} resultUnknown={isUnknownResult(node)} statusAnomaly={statusAnomalies?.workflowId===workflow?.id?statusAnomalies.nodes.get(node.id):undefined} onSelectComplete={()=>{if(workflowRef.current?.id===workflow?.id)interaction.reveal(node.id)}} onDrag={(e,options) => startDrag(e, node,options)} onChange={patch => patchNode(node.id, patch)} onPort={(kind,target) => port(node.id, kind, target)} ports={portMap.get(node.id)?.derived} portLayout={portMap.get(node.id)?.layout} portWarnings={portMap.get(node.id)?.warnings} dragKind={portMap.get(node.id)?.dragKind||null} dragReason={portMap.get(node.id)?.dragReason} onPortsHover={portMap.get(node.id)?.layout.overflow?hovering=>setPortHover(current=>hovering?node.id:current===node.id?null:current):undefined} onExpandPorts={()=>{if(connection&&connection!==node.id){port(node.id,'input');return}setFocusedGroup(null);setSelectedEdge(null);interaction.selectSingle(node.id)}} onPortDrag={event => startPortDrag(event, node.id)} dropTarget={portDrag?.target === node.id} onRightDrag={event=>{stopViewAnimation();interaction.startSurface(event,node.id)}} onFocusZoom={()=>focusZoom(node.id)} onMenu={event=>openNodeMenu(node.id,event)} onPreview={()=>openPreview(node.id)} onHistory={()=>openNodeHistory(node.id,'node')} onAddReference={()=>{if(!ioRef.current)openLibrary(node.id)}} onLocate={()=>locateNode(node.id)} onOpenTask={task=>openTaskCenter(task,node.type)} runMark={groupRun.marks.get(node.id)} assetDeleted={isMediaAsset(node.asset)&&isDeletedMedia(node.asset.id)} onMediaError={()=>{if(isMediaAsset(node.asset))mediaStatus.recheck([node.asset.id])}} onReplaceDeleted={node.type==='asset'&&!ioCount?()=>replaceNodeAsset(node.id):null} onReplaceDeletedFromLibrary={node.type==='asset'&&!ioCount?()=>replaceNodeFromLibrary(node.id):null} onRemoveDeleted={()=>removeDeletedResult(node.id)} onResize={(scale,phase)=>resizeNode(node.id,scale,phase)} prompt={cardPrompt(node)} onPromptKey={shift=>{if(shift)focusPanel();else{if(panelPrefs.collapsed)panelPrefs.setCollapsed(false);activatePrompt(node.id)}}} />)}
+        {doc.nodes.map(node => <CanvasNodeBoundary key={node.id} mediaStatusKey={mediaStatus.deletedKey} mediaSizeRevision={mediaSizeRevision} node={node} provider={nodeProvider(capabilities,node)} references={inputMap.get(node.id)?.assets || []} frames={inputMap.get(node.id)?.frames} selected={interaction.selectedIds.includes(node.id)} highlighted={highlightedNodeId===node.id} pendingConnection={connection} onSelect={event => { if(!ioRef.current)setSelected(node.id,event?.shiftKey); setSelectedEdge(null) }} resultUnknown={isUnknownResult(node)} statusAnomaly={statusAnomalies?.workflowId===workflow?.id?statusAnomalies.nodes.get(node.id):undefined} onSelectComplete={()=>{if(workflowRef.current?.id===workflow?.id)interaction.reveal(node.id)}} onDrag={(e,options) => startDrag(e, node,options)} onChange={patch => patchNode(node.id, patch)} onPort={(kind,target) => port(node.id, kind, target)} ports={portMap.get(node.id)?.derived} portLayout={portMap.get(node.id)?.layout} portWarnings={portMap.get(node.id)?.warnings} dragKind={portMap.get(node.id)?.dragKind||null} dragReason={portMap.get(node.id)?.dragReason} onPortsHover={portMap.get(node.id)?.layout.overflow?hovering=>setPortHover(current=>hovering?node.id:current===node.id?null:current):undefined} onExpandPorts={()=>{if(connection&&connection!==node.id){port(node.id,'input');return}setFocusedGroup(null);setSelectedEdge(null);interaction.selectSingle(node.id)}} onPortDrag={event => startPortDrag(event, node.id)} dropTarget={portDrag?.target === node.id} onRightDrag={event=>{stopViewAnimation();interaction.startSurface(event,node.id)}} onFocusZoom={()=>focusZoom(node.id)} onMenu={event=>openNodeMenu(node.id,event)} onPreview={()=>openPreview(node.id)} onHistory={()=>openNodeHistory(node.id,'node')} onAddReference={()=>{if(!ioRef.current)openLibrary(node.id)}} onLocate={()=>locateNode(node.id)} onOpenTask={task=>openTaskCenter(task,node.type)} runMark={groupRun.marks.get(node.id)} assetDeleted={isMediaAsset(node.asset)&&isDeletedMedia(node.asset.id)} onMediaError={()=>{if(isMediaAsset(node.asset))mediaStatus.recheck([node.asset.id])}} onReplaceDeleted={node.type==='asset'&&!ioCount?()=>replaceNodeAsset(node.id):null} onReplaceDeletedFromLibrary={node.type==='asset'&&!ioCount?()=>replaceNodeFromLibrary(node.id):null} onRemoveDeleted={()=>removeDeletedResult(node.id)} onResize={(scale,phase)=>resizeNode(node.id,scale,phase)} prompt={cardPrompt(node)} onPromptKey={shift=>{if(shift)focusPanel();else{if(panelPrefs.collapsed)panelPrefs.setCollapsed(false);activatePrompt(node.id)}}} />)}
       </div>
       {groupRun.element}
       {interaction.marquee && <div className="cv-selection-box" style={interaction.marquee}/>}
       {toolbarShown && (nodeToolbarKind(selectedNode)==='video'
-        ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} busy={ioCount>0} label="视频操作" historyOpen={historyNode===selectedNode.id} captureNote={currentFrameNote(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onCaptureCurrent={()=>captureFrame(selectedNode.id,false)} onCaptureTail={()=>captureFrame(selectedNode.id,true)} onPreview={()=>openPreview(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
-        :<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} busy={ioCount>0} label="图片操作" historyOpen={historyNode===selectedNode.id} onEdit={()=>editNodeImage(selectedNode.id)} onRotate={()=>rotateNode(selectedNode.id)} onAnnotate={()=>annotateNode(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>)}
-      {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&!contextDeleted&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':contextDeleted?'素材已在素材库中删除':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} onReplaceFromLibrary={()=>replaceNodeFromLibrary(nodeMenu.id)} {...(contextNode?.asset?.url&&!contextDeleted&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&['image','video','audio'].includes(mediaKind(contextNode))&&!(isMediaAsset(contextNode.asset)&&isDeletedMedia(contextNode.asset.id))?{onRevealInLibrary:()=>revealInLibrary(contextNode.asset),onMoveToFolder:()=>{setMovingAssets([contextNode.asset]);setNodeMenu(null)}}:{})} {...((contextNode?.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(nodeMenu.id,'node'),versionCount:contextNode.candidates.length}:{})} {...(contextLiveVersions.length>1?{onMoveAllVersions:()=>{setMovingAssets(contextLiveVersions);setNodeMenu(null)},liveVersionCount:contextLiveVersions.length}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
+        ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="视频操作" historyOpen={historyNode===selectedNode.id} captureNote={currentFrameNote(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onCaptureCurrent={()=>captureFrame(selectedNode.id,false)} onCaptureTail={()=>captureFrame(selectedNode.id,true)} onPreview={()=>openPreview(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
+        :nodeToolbarKind(selectedNode)==='audio'
+        ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="音频操作" historyOpen={historyNode===selectedNode.id} onPreview={()=>openPreview(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} {...((selectedNode.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(selectedNode.id)}:{})} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
+        :<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="图片操作" historyOpen={historyNode===selectedNode.id} onEdit={()=>editNodeImage(selectedNode.id)} onRotate={()=>rotateNode(selectedNode.id)} onAnnotate={()=>annotateNode(selectedNode.id)} onDecomposeLayer={()=>openNodeInLayerStudio(selectedNode)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>)}
+      {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&!contextDeleted&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':contextDeleted?'素材已在素材库中删除':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopyToClipboard={()=>{const ids=interaction.selectedIds.includes(nodeMenu.id)?interaction.selectedIds:[nodeMenu.id];copySelection(ids);setNodeMenu(null)}} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} onReplaceFromLibrary={()=>replaceNodeFromLibrary(nodeMenu.id)} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='image'?{onDecomposeLayer:()=>openNodeInLayerStudio(contextNode)}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&['image','video','audio'].includes(mediaKind(contextNode))&&!(isMediaAsset(contextNode.asset)&&isDeletedMedia(contextNode.asset.id))?{onRevealInLibrary:()=>revealInLibrary(contextNode.asset),onMoveToFolder:()=>{openMovingAssets([contextNode.asset],{nodeId:contextNode.id});setNodeMenu(null)}}:{})} {...((contextNode?.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(nodeMenu.id,'node'),versionCount:contextNode.candidates.length}:{})} {...(contextLiveVersions.length>1?{onMoveAllVersions:()=>{openMovingAssets(contextLiveVersions,{nodeId:contextNode.id});setNodeMenu(null)},liveVersionCount:contextLiveVersions.length}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
       {historyNodeData && <CanvasVersionPopover node={historyNodeData} rect={nodeScreenRect(historyNodeData,view)} surface={surfaceSize} busy={ioCount>0} isGone={asset=>isMediaAsset(asset)&&isDeletedMedia(asset.id)} onChoose={asset=>chooseVersion(historyNodeData.id,asset)} onClose={closeHistory}/>}
       {imageEditing && createPortal(<React.Suspense fallback={<div className="cv-studio-overlay" role="status"><div>正在加载编辑器…</div></div>}><ImageAssetEditor asset={imageEditing.asset} onSave={file=>saveImageResult(imageEditing.owner,file)} onClose={closeImageEditor}/></React.Suspense>,document.body)}
       {annotation && <React.Suspense fallback={<div className="cv-studio-overlay" role="status">正在加载标注工具…</div>}><CanvasImageAnnotator key={annotation.asset.id} asset={annotation.asset} style={{zIndex:50}} onSave={file=>saveImageResult(annotation.owner,file)} onClose={closeAnnotation}/></React.Suspense>}
-      {contextMenu && <CanvasContextMenu position={contextMenu} bounds={surfaceSize} onClose={closeContextMenu} onDismiss={()=>setContextMenu(null)} onUpload={()=>{const point=contextMenu.point;closeContextMenu();pickFile(null,point)}} onCreate={type=>{const point=contextMenu.point;closeContextMenu();addNode(type,point)}}/>}
-      <div ref={toolsRef} className="cv-tools" style={toolsLeft==null?undefined:{left:toolsLeft,transform:'none'}} onPointerDown={e => e.stopPropagation()}><button title="选择节点" aria-label="选择工具" aria-pressed={tool === 'select'} onClick={() => setTool('select')}><MousePointer2 size={18} /></button><button title="平移画布（空格拖动）" aria-label="平移工具" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}><Hand size={18} /></button><hr />{[['image',Image],['video',Film],['audio',Music]].map(([type, Icon]) => <button key={type} draggable onDragStart={event => { event.dataTransfer.setData("application/x-ink-node", type); event.dataTransfer.effectAllowed = "copy" }} title={`添加${labels[type]}节点（可拖入画布）`} aria-label={`添加${labels[type]}节点`} onClick={() => addNode(type)}><Icon size={18} /></button>)}<hr /><button title="导入素材" aria-label="导入素材" onClick={() => pickFile()}><Upload size={18} /></button></div>
-      {loading ? <div className="cv-empty">正在载入画布…</div> : !doc.nodes.length && <div className="cv-empty" onPointerDown={e => e.stopPropagation()}><h2>把想法放上画布</h2><p>拖入素材，连接参考，逐个制作你的镜头。</p><div className="cv-empty-actions"><button className="btn btn-primary" onClick={() => addNode('image')}><Image size={16} />图像生成</button><button onClick={() => addNode('video')}><Film size={16} />视频生成</button><button onClick={() => addNode('audio')}><Music size={16} />音频生成</button></div><small>节点自由摆放 · 连线选择参考 · 点击生成才运行任务</small></div>}
+      {contextMenu && <CanvasContextMenu position={contextMenu} bounds={surfaceSize} onClose={closeContextMenu} onDismiss={()=>setContextMenu(null)} onUpload={()=>{const point=contextMenu.point;closeContextMenu();pickFile(null,point)}} onCreate={type=>{const point=contextMenu.point;closeContextMenu();addNode(type,point)}} canPaste={hasClipboard&&!ioCount&&!busy&&!conflict} onPaste={()=>{const point=contextMenu.point;closeContextMenu();pasteSelection(point)}} organizeDisabled={!doc.nodes.length||busy||ioCount>0||generationCount>0||!!conflict} onOrganize={()=>{closeContextMenu();organize()}} fitDisabled={!doc.nodes.length} onFit={()=>{closeContextMenu();fit()}}/>}
+      {loading ? <div className="cv-empty">正在载入画布…</div> : !doc.nodes.length && <div className="cv-empty"><EmptyCanvasFlowArt /><div className="cv-empty-actions" onPointerDown={e => e.stopPropagation()}><button className="btn btn-primary" onClick={() => addNode('image')}><Image size={16} />图像生成</button><button onClick={() => addNode('video')}><Film size={16} />视频生成</button><button onClick={() => addNode('audio')}><Music size={16} />音频生成</button></div></div>}
+      {fileDragging && <CanvasFileDropOverlay />}
       {portDrag && <div className="cv-connection-note" role="status">{dropAnnouncement ? `${dropAnnouncement} · ` : ''}松开到目标节点上建立连接 · 松在空白处或按 Esc 取消</div>}{connection && !portDrag && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}>点击目标节点建立连接<button onClick={() => setConnection(null)}>取消</button></div>}
       {selectedEdge && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}><button onClick={() => deleteEdge(selectedEdge)}><Trash2 size={13} />移除连接</button></div>}
-      <CanvasViewportTools zoom={view.zoom} onZoomIn={()=>zoomAt(1.2)} onZoomOut={()=>zoomAt(1/1.2)} onZoomTo={value=>zoomAt(value/docRef.current.viewport.zoom)} onFit={fit} onOrganize={organize} organizeDisabled={!doc.nodes.length||busy||ioCount>0||generationCount>0||!!conflict} canUndo={!!editHistory.current.past.length&&!ioCount&&!busy&&!conflict} canRedo={!!editHistory.current.future.length&&!ioCount&&!busy&&!conflict} undoDescription={undoDescription} redoDescription={redoDescription} onUndo={()=>{travelHistory();rootRef.current?.focus()}} onRedo={()=>{travelHistory(true);rootRef.current?.focus()}} onShortcuts={()=>setShortcutsOpen(true)} minimapOpen={minimapOpen} onToggleMinimap={value=>{setMinimapOpen(value);writeMinimapPreference(value)}}><CanvasMinimap nodes={doc.nodes} groups={doc.groups||[]} view={view} surface={surfaceSize} selectedIds={interaction.selectedIds} onViewChange={next=>{stopViewAnimation();edit(current=>({...current,viewport:{...current.viewport,x:next.x,y:next.y}}),{history:false})}} onFit={fit}/></CanvasViewportTools><span className="cv-hint">空格 + 拖动平移 · 滚轮缩放 · 连线不会自动生成</span>
+      <div className="cv-bottom-dock">
+        <CanvasViewportTools zoom={view.zoom} onZoomIn={()=>zoomAt(1.2)} onZoomOut={()=>zoomAt(1/1.2)} onZoomTo={value=>zoomAt(value/docRef.current.viewport.zoom)} onFit={fit} onOrganize={organize} organizeDisabled={!doc.nodes.length||busy||ioCount>0||generationCount>0||!!conflict} canUndo={!!editHistory.current.past.length&&!ioCount&&!busy&&!conflict} canRedo={!!editHistory.current.future.length&&!ioCount&&!busy&&!conflict} undoDescription={undoDescription} redoDescription={redoDescription} onUndo={()=>{travelHistory();rootRef.current?.focus()}} onRedo={()=>{travelHistory(true);rootRef.current?.focus()}} onShortcuts={()=>setShortcutsOpen(true)} minimapOpen={minimapOpen} onToggleMinimap={value=>{setMinimapOpen(value);writeMinimapPreference(value)}}><CanvasMinimap nodes={doc.nodes} groups={doc.groups||[]} view={view} surface={surfaceSize} selectedIds={interaction.selectedIds} onViewChange={next=>{stopViewAnimation();edit(current=>({...current,viewport:{...current.viewport,x:next.x,y:next.y}}),{history:false})}} onFit={fit}/></CanvasViewportTools>
+        <div className="cv-tools" onPointerDown={e => e.stopPropagation()}><button title="选择节点" aria-label="选择工具" aria-pressed={tool === 'select'} onClick={() => setTool('select')}><MousePointer2 size={18} /></button><button title="平移画布（空格拖动）" aria-label="平移工具" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}><Hand size={18} /></button><hr />{[['image',Image],['video',Film],['audio',Music]].map(([type, Icon]) => <button key={type} draggable onDragStart={event => { event.dataTransfer.setData("application/x-ink-node", type); event.dataTransfer.effectAllowed = "copy" }} title={`添加${labels[type]}节点（可拖入画布）`} aria-label={`添加${labels[type]}节点`} onClick={() => addNode(type)}><Icon size={18} /></button>)}<hr /><button title="导入素材" aria-label="导入素材" onClick={() => pickFile()}><Upload size={18} /></button></div>
+      </div><span className="cv-hint">空格 + 拖动平移 · 滚轮缩放 · 连线不会自动生成</span>
       <TaskDoneNotices notices={doneNotices.filter(notice=>notice.workflowId===workflow?.id)} ask={askSystem&&shouldAskSystem({setting:systemSetting,permission})} onLocate={locateNotice} onDismiss={key=>setDoneNotices(current=>current.filter(item=>item.key!==key))} onEnable={enableSystem} onDecline={declineSystem}/>
-      {!error&&alertDismissed!==`${pollWarning?.count||0}|${statusAnomalies?.nodes?.size||0}`&&((pollWarning&&pollWarning.workflowId===workflow?.id)||(statusAnomalies&&statusAnomalies.workflowId===workflow?.id))&&<div className="cv-alert cv-alert-stack" role="status" onPointerDown={e=>e.stopPropagation()}>{pollWarning&&pollWarning.workflowId===workflow?.id&&<span>{pollWarning.count} 个任务暂时无法更新，正在重试；其他任务继续更新。</span>}{statusAnomalies&&statusAnomalies.workflowId===workflow?.id&&<span data-testid="task-status-anomaly">{INVALID_STATUS_LABEL}：{statusAnomalies.nodes.size} 个任务返回未知状态（{[...new Set(statusAnomalies.nodes.values())].join('、').slice(0,60)}），已保留原状态，其他任务照常更新。</span>}<button aria-label="关闭提示" title="关闭提示" onClick={()=>setAlertDismissed(`${pollWarning?.count||0}|${statusAnomalies?.nodes?.size||0}`)}><X size={13} /></button></div>}
-    {!error&&overlapCount>0&&<div className="cv-alert cv-alert-stack cv-alert-info" role="status" data-testid="overlap-notice" onPointerDown={e=>e.stopPropagation()}><span>{overlapCount} 个节点因按画面比例显示而相互重叠，可使用「整理画布」（可撤销）；不会自动移动节点。</span><span><button className="btn" onClick={organize} disabled={busy||ioCount>0||generationCount>0||!!conflict}>整理画布</button><button aria-label="关闭提示" title="关闭提示" onClick={()=>setOverlapCount(0)}><X size={13} /></button></span></div>}
-    {error && <div className="cv-alert" role="alert" onPointerDown={e => e.stopPropagation()}><span>{error}</span><button aria-label="关闭提示" title="关闭提示" onClick={() => setError('')}><X size={13} /></button></div>}
+      {!error&&alertDismissed!==`${pollWarning?.count||0}|${statusAnomalies?.nodes?.size||0}`&&((pollWarning&&pollWarning.workflowId===workflow?.id)||(statusAnomalies&&statusAnomalies.workflowId===workflow?.id))&&<div className="cv-alert cv-alert-stack" role="status" onPointerDown={e=>e.stopPropagation()}>{pollWarning&&pollWarning.workflowId===workflow?.id&&<span>{pollWarning.count} 个任务暂时无法更新，正在重试；其他任务继续更新。</span>}{statusAnomalies&&statusAnomalies.workflowId===workflow?.id&&<span data-testid="task-status-anomaly">{INVALID_STATUS_LABEL}：{statusAnomalies.nodes.size} 个任务返回未知状态（{[...new Set(statusAnomalies.nodes.values())].join('、').slice(0,60)}），已保留原状态，其他任务照常更新。</span>}<button aria-label="关闭提示" title="关闭提示" onClick={()=>{setAlertDismissed(`${pollWarning?.count||0}|${statusAnomalies?.nodes?.size||0}`);requestAnimationFrame(focusSelection)}}><X size={13} /></button></div>}
+    {!error&&overlapCount>0&&<div className="cv-overlap-notice" role="status" data-testid="overlap-notice" onPointerDown={e=>e.stopPropagation()}><span>{overlapCount} 个节点因按画面比例显示而相互重叠，可使用「整理画布」（可撤销）；不会自动移动节点。</span><span><button className="btn" onClick={organize} disabled={busy||ioCount>0||generationCount>0||!!conflict}>整理画布</button><button aria-label="关闭提示" title="关闭提示" onClick={()=>{setOverlapCount(0);requestAnimationFrame(focusSelection)}}><X size={13} /></button></span></div>}
+    {error && <div className="cv-alert" role="alert" onPointerDown={e => e.stopPropagation()}><span>{error}</span><button aria-label="关闭提示" title="关闭提示" onClick={() => { setError(''); requestAnimationFrame(focusSelection) }}><X size={13} /></button></div>}
     </div>
     </div><CanvasPropertiesPanel prefs={panelPrefs} content={panelContent} onFocusCanvas={focusSelection}/></div>
     {dialogNode && <CanvasPromptDialog key={dialogNode.id} node={dialogNode} inputAssets={dialogNode.id===selected?selectedAssets:inputMap.get(dialogNode.id)?.assets||[]} editor={dialogNode.id===selected?promptEditor:null} onText={text=>patchNode(dialogNode.id,{text})} onClose={()=>setPromptDialog(null)}/>}
@@ -1428,7 +1707,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       return <div className="cv-studio-overlay"><div role="dialog" aria-modal="true" aria-label={creating ? '新建项目' : '命名项目'} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }}><h3>{creating ? '新建项目' : '项目名称'}</h3><input ref={renameInputRef} autoFocus aria-label="项目名称" value={renameDraft} maxLength={100} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); commit() } }} />{error && <p role="alert">{error}</p>}<p /><button onClick={close}>取消</button><button className="btn btn-primary" disabled={!renameDraft.trim() || busy} onClick={commit}>{creating ? '创建项目' : '保存名称'}</button></div></div>
     })()}
     {busy && <div className="cv-studio-overlay" role="status"><div>正在打开画布…</div></div>}
-    {movingAssets && <CanvasMoveToFolder assets={movingAssets} onClose={()=>setMovingAssets(null)} onDone={text=>{setMovingAssets(null);notify?.(text,'success');setAssetRefresh(value=>value+1)}}/>}
+    {movingAssets && <CanvasMoveToFolder assets={movingAssets} onClose={closeMovingAssets} onDone={text=>{closeMovingAssets();notify?.(text,'success');setAssetRefresh(value=>value+1)}}/>}
     {characterTarget && <AddToCharacterDialog workflowId={characterTarget.workflowId} asset={characterTarget.asset} onClose={()=>setCharacterTarget(null)}/>}
     {libraryTarget && <CanvasLibrary initialSource={libraryOwner.current?.initialSource||'local'} projectId={libraryOwner.current?.projectId} onBeforeDelete={flushBeforeLibraryDelete} onDeleted={afterLibraryDelete} onClose={() => {setLibraryTarget(null);setAssetRefresh(value=>value+1)}} browseOnly={libraryTarget === '__browse__'} canAddToCanvas={!!libraryOwner.current?.workflowId} allowedKinds={doc.nodes.find(n=>n.id===libraryTarget)?.type==='image'?['image']:doc.nodes.find(n=>n.id===libraryTarget)?.type==='audio'?['image','audio']:['image','video','audio']} validateSelection={items=>{const node=docRef.current.nodes.find(n=>n.id===libraryTarget);if(node?.type==='video'&&node.params?.video_mode==='keyframe'){return items.some(item=>item.asset.kind!=='image')?'首尾帧仅支持图片':items.length>2?'首尾帧一次最多选择两张图片':null}return null}} onApply={async items => {
       const owner=libraryOwner.current

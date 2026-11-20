@@ -52,3 +52,9 @@
 /* FIX-B2B-20261114 ada: busy state text sits on a dark backing so code rain never crosses it; timer lives only in the status row. */
 .canvas-studio .cv-media-state.is-busy>:is(strong,.cv-task-stages){background:rgba(8,10,9,.78);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:2px 8px}
 .canvas-studio .cv-media-state.is-busy>.cv-task-stages{background:rgba(8,10,9,.82)}
+
+/* P1-TASK-LIBRARY-FLOW-20261120: brief node locate highlight ring + expanded prompt dialog tool row. */
+@keyframes cv-locate-pulse{0%{box-shadow:0 0 0 0 rgba(79,196,140,.75)}50%{box-shadow:0 0 0 8px rgba(79,196,140,.22)}100%{box-shadow:0 0 0 2px var(--accent,#4fc48c)}}
+.canvas-studio .cv-node.is-locate-highlight{border-color:var(--accent,#4fc48c);animation:cv-locate-pulse .85s ease-out 2;box-shadow:0 0 0 2px var(--accent,#4fc48c)}
+@media(prefers-reduced-motion:reduce){.canvas-studio .cv-node.is-locate-highlight{animation:none;box-shadow:0 0 0 3px var(--accent,#4fc48c)}}
+.cv-expanded-host .cv-dialog-prompt-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}

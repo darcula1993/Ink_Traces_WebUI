@@ -178,8 +178,8 @@ export function estimateBytePlusVideoCost({
 }
 
 export function formatUsdEstimate(estimate) {
-  const minimum = estimate.minimumCost.toFixed(2)
-  const maximum = estimate.maximumCost.toFixed(2)
+  const minimum = estimate.minimumCost.toFixed(3)
+  const maximum = estimate.maximumCost.toFixed(3)
   return minimum === maximum ? `$${minimum}` : `$${minimum}~$${maximum}`
 }
 

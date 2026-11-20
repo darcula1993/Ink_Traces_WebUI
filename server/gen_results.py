@@ -50,16 +50,17 @@ def owned_media(db, task_ids):
 
 def _eligible(db, task_ids, task_type=None):
     """(eligible rows, skipped {id: reason}, missing ids): the permanent-deletion rules."""
+    effective_type = None if task_type in (None, 'all') else task_type
     eligible, skipped, missing = [], {}, []
     for task_id in task_ids:
         row = db.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
-        if not row or (task_type and row['type'] != task_type):
+        if not row or (effective_type and row['type'] != effective_type):
             missing.append(task_id)
         elif row['deleted_at'] is None:
             skipped[task_id] = 'not_in_trash'
         elif row['status'] == 'cancel_requested':
             skipped[task_id] = 'cancel_requested'
-        elif row['lease_owner']:
+        elif row['lease_owner'] or row['status'] in task_db.ACTIVE_TASK_STATUSES:
             skipped[task_id] = 'leased'
         else:
             eligible.append(row)
@@ -91,10 +92,11 @@ EMPTY_MEDIA = {'count': 0, 'items': [], 'kinds': {k: 0 for k in ml.KINDS}, 'affe
                'characters': [], 'asset_groups': 0, 'copies_kept': 0}
 
 
-def trashed_ids(task_type):
+def trashed_ids(task_type=None):
+    effective_type = None if task_type in (None, 'all') else task_type
     ids, after = [], 0
     while True:
-        batch = task_db.list_trashed_task_ids(task_type, after, 500)
+        batch = task_db.list_trashed_task_ids(effective_type, after, 500)
         if not batch:
             return ids
         ids += batch
@@ -110,9 +112,14 @@ def preview(task_ids, task_type=None):
     try:
         eligible, skipped, missing = _eligible(db, task_ids, task_type)
         ids = [r['id'] for r in eligible]
+        types_breakdown = {}
+        for row in eligible:
+            t = row['type']
+            types_breakdown[t] = types_breakdown.get(t, 0) + 1
         media_ids = owned_media(db, ids)
         media = _media_summary(ml._plan(db, media_ids)['summary'], _copies_kept(db, media_ids)) if media_ids else EMPTY_MEDIA
-        return {'task_ids': ids, 'tasks': len(ids), 'skipped_ids': list(skipped), 'skipped': skipped,
+        return {'task_ids': ids, 'tasks': len(ids), 'types_breakdown': types_breakdown,
+                'skipped_ids': list(skipped), 'skipped': skipped,
                 'missing_ids': missing, 'media': media}
     finally:
         if owns:

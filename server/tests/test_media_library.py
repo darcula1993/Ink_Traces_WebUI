@@ -371,3 +371,30 @@ def test_rename_media_api(media_files):
     media.delete_media([item['id']])
     gone = c.patch('/api/canvas/media/' + item['id'], json={'name': 'a'})
     assert gone.status_code == 410 and gone.json['code'] == 'media_deleted'
+
+
+def test_video_thumbnail_generation_cache_and_fallback(media_files, monkeypatch):
+    """BACKLOG-LIBRARY-SIDEBAR: video media serves a cached 320px WebP first-frame thumbnail and falls back to 404."""
+    c = client()
+    name, raw = media_files['video']
+    video = up(c, raw, name)['media']
+    assert video['kind'] == 'video' and video['thumbnail_url'] == video['url'] + '/thumbnail'
+    thumb_path = media.video_thumbnail_path(video['id'])
+    assert not thumb_path.exists()
+    # Graceful fallback when ffmpeg is unavailable.
+    monkeypatch.setattr(media.shutil, 'which', lambda cmd: None)
+    miss = c.get(video['thumbnail_url'])
+    assert miss.status_code == 404 and miss.json['code'] == 'no_thumbnail'
+    assert not thumb_path.exists()
+    # With ffmpeg available, first frame is extracted and cached as .thumb.webp.
+    monkeypatch.undo()
+    resp = c.get(video['thumbnail_url'])
+    assert resp.status_code == 200 and resp.mimetype == 'image/webp'
+    assert thumb_path.is_file() and thumb_path.stat().st_size > 0
+    # Cached hit works even if ffmpeg is later unavailable.
+    monkeypatch.setattr(media.shutil, 'which', lambda cmd: None)
+    cached = c.get(video['thumbnail_url'])
+    assert cached.status_code == 200 and cached.mimetype == 'image/webp'
+    # Deleting the video cleans up its cached thumbnail.
+    media.delete_media([video['id']])
+    assert not thumb_path.exists()

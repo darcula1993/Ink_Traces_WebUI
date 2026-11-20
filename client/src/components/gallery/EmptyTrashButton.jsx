@@ -31,6 +31,7 @@ export default function EmptyTrashButton({ mode, revision, onEmptied }) {
   const [preview, setPreview] = useState(null)
   const [notice, setNotice] = useState('')
   const noticeTimer = useRef(null)
+  const isAll = mode === 'all'
   const typeLabel = taskTypeLabel(mode)
 
   const loadCount = useCallback(async signal => {
@@ -77,8 +78,16 @@ export default function EmptyTrashButton({ mode, revision, onEmptied }) {
         type="button"
         className="btn btn-danger btn-sm"
         disabled={!count}
-        title={count === null ? (countFailed ? '回收站数量读取失败' : '正在读取回收站数量') : count ? `彻底删除回收站中的 ${count} 个${typeLabel}任务` : '回收站为空'}
-        aria-label={count === null ? (countFailed ? '清空回收站（数量读取失败）' : '清空回收站（正在读取数量）') : count ? `清空回收站（${count} 个${typeLabel}任务）` : '清空回收站（回收站为空）'}
+        title={count === null
+          ? (countFailed ? '回收站数量读取失败' : '正在读取回收站数量')
+          : count
+            ? (isAll ? `彻底删除全部类型回收站中的 ${count} 个任务（图片、视频、音频、图层）` : `彻底删除回收站中的 ${count} 个${typeLabel}任务`)
+            : '回收站为空'}
+        aria-label={count === null
+          ? (countFailed ? '清空回收站（数量读取失败）' : '清空回收站（正在读取数量）')
+          : count
+            ? (isAll ? `清空回收站（全部 ${count} 个任务）` : `清空回收站（${count} 个${typeLabel}任务）`)
+            : '清空回收站（回收站为空）'}
         data-testid="empty-trash-button"
         onClick={open}
       >
@@ -87,7 +96,9 @@ export default function EmptyTrashButton({ mode, revision, onEmptied }) {
       <span role="status" aria-live="polite" className="text-xs text-nexus-text" data-testid="empty-trash-status">{notice}</span>
       {confirming && (
         <ConfirmDialog title="清空回收站" confirmLabel="彻底删除" danger onConfirm={confirm} onClose={() => setConfirming(false)}>
-          {preview ? <TaskDeletePlan preview={preview} count={count} label={typeLabel} /> : <p>将彻底删除 {count} 个{typeLabel}任务，不可恢复。</p>}
+          {preview
+            ? <TaskDeletePlan preview={preview} count={count} label={isAll ? '' : typeLabel} scope={mode} />
+            : <p>{isAll ? `将彻底删除全部类型回收站中的 ${count} 个任务，不可恢复。` : `将彻底删除 ${count} 个${typeLabel}任务，不可恢复。`}</p>}
         </ConfirmDialog>
       )}
     </>

@@ -10,7 +10,13 @@ export const selectionOptionId = choice => choice ? (choice.profile_id ? `profil
 
 export function selectedProvider(capabilities, choice, kind) {
   if (!choice) return null
-  return capabilities?.[kind]?.find(p => p.provider === choice.provider && (p.profile_id || null) === (choice.profile_id || null)) || null
+  const options = capabilities?.[kind] || []
+  const exact = options.find(p => p.provider === choice.provider && (p.profile_id || null) === (choice.profile_id || null))
+  if (exact) return exact
+  if (!choice.profile_id) {
+    return options.find(p => p.provider === choice.provider && p.source_key === `config:${kind}:${choice.provider}`) || null
+  }
+  return null
 }
 
 export const nodeProvider = (capabilities, node) => selectedProvider(capabilities, node?.providerSelection, node?.type)

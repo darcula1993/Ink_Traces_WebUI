@@ -34,9 +34,9 @@ export function folderTree(folders) {
     if (!children.has(parent)) children.set(parent, [])
     children.get(parent).push(folder)
   }
-  // System folders first (生成历史, then 图片/视频/音频 in that order), then by title.
+  // System folders first (生成历史, then 图片/视频/音频 in that order), then user folders in stable server order.
   const rank = folder => folder.system_key ? ['generated', 'generated_image', 'generated_video', 'generated_audio'].indexOf(folder.system_key) + 1 || 9 : 99
-  const order = (a, b) => rank(a) - rank(b) || String(a.title).localeCompare(String(b.title), 'zh-CN')
+  const order = (a, b) => rank(a) - rank(b)
   const out = []
   const seen = new Set()
   const walk = (parent, depth) => {
