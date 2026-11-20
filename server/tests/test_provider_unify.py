@@ -58,7 +58,8 @@ def test_sync_config_profiles_imports_all_five_idempotently_without_overwriting_
         'config:image:ark', 'config:image:cupsy',
         'config:video:ark', 'config:video:cupsy', 'config:audio:cupsy',
     }
-    assert all(p['is_system_default'] is True and p['enabled'] is True and p['has_api_key'] is True for p in mapped.values())
+    assert all('is_system_default' not in p and p['is_default'] is False and p['enabled'] is True and p['has_api_key'] is True for p in mapped.values())
+    assert all('默认' not in p['name'] for p in mapped.values())
     assert all(p['api_key_mask'] == '••••••••' and 'api_key' not in p for p in mapped.values())
 
     assert mapped['config:image:ark']['settings']['endpoint'] == 'https://ark.cfg.invalid'
@@ -125,10 +126,10 @@ def test_sync_omits_placeholder_seedance_25_and_handles_name_collision_and_schem
     db.commit()
     profiles.init_profiles_db()
     existing = profiles.save_profile({
-        'name': 'BytePlus 图像（默认）', 'kind': 'image', 'adapter': 'ark',
+        'name': 'BytePlus 图像', 'kind': 'image', 'adapter': 'ark',
         'settings': {'endpoint': 'https://custom.invalid'}, 'api_key': 'custom-key',
     })
-    assert existing['source_key'] is None and existing['is_system_default'] is False
+    assert existing['source_key'] is None and 'is_system_default' not in existing
 
     cfg = sample_config()
     cfg['providers']['byteplus']['endpoint_ids']['seedance_2_5'] = 'ep-your-endpoint-id'
@@ -139,6 +140,13 @@ def test_sync_omits_placeholder_seedance_25_and_handles_name_collision_and_schem
     mapped = by_source_key()
     assert len(mapped) == 5
     assert mapped['config:image:ark']['name'] != existing['name']
+    # Verify uniform sorting by (kind, name, id): custom profile starting with 'A' sorts before imported 'BytePlus 图像'.
+    profiles.save_profile({
+        'name': 'A 优先排序测试', 'kind': 'image', 'adapter': 'ark',
+        'settings': {'endpoint': 'https://a.invalid'}, 'api_key': 'a-key',
+    })
+    image_names = [p['name'] for p in profiles.list_profiles('image')]
+    assert image_names[0] == 'A 优先排序测试'
     assert 'seedance_2_5_model' not in mapped['config:video:ark']['settings']
     assert 'request_timeout_seconds' not in mapped['config:image:ark']['settings']
     assert 'asset_token_ttl_seconds' not in mapped['config:video:cupsy']['settings']

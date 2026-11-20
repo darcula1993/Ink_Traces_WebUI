@@ -11,11 +11,11 @@ import tasks as task_db
 
 KINDS = {'image': {'ark', 'cupsy'}, 'video': {'ark', 'cupsy'}, 'audio': {'cupsy'}}
 CONFIG_PROFILES = (
-    ('config:image:ark', 'image', 'ark', 'BytePlus 图像（默认）'),
-    ('config:image:cupsy', 'image', 'cupsy', 'Cupsy 图像（默认）'),
-    ('config:video:ark', 'video', 'ark', 'BytePlus 视频（默认）'),
-    ('config:video:cupsy', 'video', 'cupsy', 'Cupsy 视频（默认）'),
-    ('config:audio:cupsy', 'audio', 'cupsy', 'Cupsy 音频（默认）'),
+    ('config:image:ark', 'image', 'ark', 'BytePlus 图像'),
+    ('config:image:cupsy', 'image', 'cupsy', 'Cupsy 图像'),
+    ('config:video:ark', 'video', 'ark', 'BytePlus 视频'),
+    ('config:video:cupsy', 'video', 'cupsy', 'Cupsy 视频'),
+    ('config:audio:cupsy', 'audio', 'cupsy', 'Cupsy 音频'),
 )
 CONFIG_SOURCE_KEYS = {(kind, adapter): key for key, kind, adapter, _ in CONFIG_PROFILES}
 UNSUPPORTED_ADAPTER_ERROR = '生成类型与适配器组合不受支持'
@@ -76,7 +76,6 @@ def public_profile(profile):
     result = {key: profile[key] for key in ('id', 'name', 'kind', 'adapter', 'enabled', 'is_default', 'revision', 'settings', 'asset_scope', 'created_at', 'updated_at')}
     source_key = profile.get('source_key')
     result['source_key'] = source_key
-    result['is_system_default'] = bool(source_key)
     result['has_api_key'] = bool(profile['api_key'])
     result['api_key_mask'] = '••••••••' if profile['api_key'] else ''
     if profile.get('kind') == 'image':
@@ -155,22 +154,29 @@ def load_source_profile(kind, adapter):
         return None
     deleted_at = current['deleted_at'] if 'deleted_at' in current.keys() else None
     if deleted_at is not None:
-        custom_default = db.execute(
+        candidates = db.execute(
             '''SELECT id, revision, enabled, source_key FROM provider_profiles
-               WHERE kind=? AND adapter=? AND deleted_at IS NULL AND enabled=1 AND is_default=1
-               ORDER BY id LIMIT 1''',
+               WHERE kind=? AND adapter=? AND deleted_at IS NULL AND enabled=1
+               ORDER BY is_default DESC, name, id''',
             (kind, adapter),
-        ).fetchone()
-        if custom_default:
+        ).fetchall()
+        first_enabled = None
+        for cand in candidates:
             row = db.execute(
                 'SELECT private_document FROM provider_profile_revisions WHERE profile_id=? AND revision=?',
-                (custom_default['id'], custom_default['revision']),
+                (cand['id'], cand['revision']),
             ).fetchone()
-            if row:
-                profile = json.loads(row['private_document'])
-                profile['source_key'] = custom_default['source_key']
-                profile['enabled'] = bool(custom_default['enabled'])
+            if not row:
+                continue
+            profile = json.loads(row['private_document'])
+            profile['source_key'] = cand['source_key']
+            profile['enabled'] = bool(cand['enabled'])
+            if profile.get('api_key'):
                 return profile
+            if first_enabled is None:
+                first_enabled = profile
+        if first_enabled is not None:
+            return first_enabled
         row = db.execute(
             'SELECT private_document FROM provider_profile_revisions WHERE profile_id=? AND revision=?',
             (current['id'], current['revision']),
@@ -202,7 +208,6 @@ def list_profiles(kind=None):
         SELECT id FROM provider_profiles
         WHERE deleted_at IS NULL
         ORDER BY
-            CASE WHEN source_key IS NOT NULL THEN 0 ELSE 1 END,
             CASE kind WHEN 'image' THEN 1 WHEN 'video' THEN 2 WHEN 'audio' THEN 3 ELSE 4 END,
             name, id
     ''').fetchall()

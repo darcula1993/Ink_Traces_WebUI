@@ -6,7 +6,7 @@ const defaults = (kind, adapter) => ({
   model: kind === 'audio' ? 'seed-audio-1.0' : kind === 'video' ? adapter === 'cupsy' ? 'seedance-2.5' : '' : adapter === 'ark' ? 'dola-seedream-5-5-261028' : 'seedream-5.0-pro',
 })
 export const blankForm = (kind = 'image', adapter = 'ark') => ({ name: '', kind, adapter, enabled: true, is_default: false, settings: defaults(kind, adapter), api_key: '', clear_api_key: false, sync_adapter_api_key: false })
-export const profileForm = profile => ({ name: profile.name, kind: profile.kind, adapter: profile.adapter, enabled: profile.enabled, is_default: profile.is_default, settings: { ...profile.settings }, api_key: '', clear_api_key: false, sync_adapter_api_key: Boolean(profile.is_system_default || profile.source_key) })
+export const profileForm = profile => ({ name: profile.name, kind: profile.kind, adapter: profile.adapter, enabled: profile.enabled, is_default: Boolean(profile.is_default), settings: { ...profile.settings }, api_key: '', clear_api_key: false, sync_adapter_api_key: false })
 export const ADVANCED_NUMBERS = [
   ['request_timeout_seconds', '请求超时（秒）'],
   ['upload_timeout_seconds', '连接超时（秒）'],

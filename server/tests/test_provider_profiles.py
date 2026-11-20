@@ -73,6 +73,7 @@ def test_multiple_named_profiles_defaults_and_kind(client):
     assert old['revision'] == 2 and not old['is_default']
     assert profiles.load_profile(a['id'], 1)['is_default'] is True
     assert profiles.load_profile(b['id'])['is_default'] is True
+    assert 'is_system_default' not in a and 'is_system_default' not in b
     assert client.patch(f"/api/provider-profiles/{a['id']}", json={'revision': 1, 'enabled': False}).status_code == 409
     assert client.post('/api/provider-profiles', json=payload(name='二号')).status_code == 409
     with pytest.raises(profiles.ProfileError, match='类型'):
@@ -339,7 +340,7 @@ def test_delete_system_default_profiles_no_reimport_no_fallback_and_custom_defau
         assert all(o['provider'] != 'ark' for o in caps['image'])
         assert all(o['provider'] != 'ark' for o in caps['video'])
 
-    # User can immediately recreate profiles with the exact same names and set them as default.
+    # User can immediately recreate profiles with the exact same names (works both with and without is_default).
     new_img = app_client.post('/api/provider-profiles', json={
         'name': img_ark['name'], 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'is_default': True,
         'settings': {'endpoint': 'https://custom-ark.invalid', 'model': 'dola-seedream-5-5-261028'},
@@ -347,7 +348,7 @@ def test_delete_system_default_profiles_no_reimport_no_fallback_and_custom_defau
     })
     assert new_img.status_code == 201
     new_vid = app_client.post('/api/provider-profiles', json={
-        'name': vid_ark['name'], 'kind': 'video', 'adapter': 'ark', 'enabled': True, 'is_default': True,
+        'name': vid_ark['name'], 'kind': 'video', 'adapter': 'ark', 'enabled': True,
         'settings': {'endpoint': 'https://custom-ark.invalid', 'model': 'ep-custom-v20', 'seedance_2_5_model': 'ep-custom-25'},
         'api_key': 'test-key-custom-vid',
     })

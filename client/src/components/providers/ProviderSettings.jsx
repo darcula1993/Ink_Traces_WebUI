@@ -81,7 +81,6 @@ export default function ProviderSettings({ onClose, onSaved }) {
   }
   const close = () => navigate(onClose)
   function changeKind(kind) { const adapter = adaptersFor(kind).includes(form.adapter) ? form.adapter : adaptersFor(kind)[0]; change({ kind, adapter, settings: blankForm(kind, adapter).settings }) }
-  const isSystemDefault = Boolean(selected?.is_system_default || selected?.source_key)
   const sameAdapterPeers = profiles.filter(item => item.adapter === form.adapter && item.id !== selected?.id)
   const changingKey = Boolean(form.clear_api_key || form.api_key.trim())
   const canSyncAdapterKey = sameAdapterPeers.length > 0 && changingKey
@@ -121,9 +120,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
       setNotice(
         syncedIds.length
           ? `配置已保存，并同步更新了另外 ${syncedIds.length} 个 ${ADAPTERS[saved.adapter] || saved.adapter} 配置的 API Key，修改已即时生效。`
-          : (saved.is_system_default || saved.source_key)
-            ? '配置已保存并即时生效，无需重启或修改 config.json。'
-            : '配置已保存，后续新任务可选择使用。'
+          : '配置已保存并即时生效，后续新任务可选择使用。'
       )
       onSaved?.(saved)
       // Setting a default or syncing same-adapter keys can revise other profiles. Refresh
@@ -171,7 +168,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
   }
   return <div className="provider-settings-backdrop">
     <section ref={dialogRef} className="provider-settings" role="dialog" aria-modal="true" aria-labelledby="provider-settings-title" tabIndex={-1} onKeyDown={keyboard}>
-      <header className="ps-header"><div><h2 id="provider-settings-title"><Server size={20} />接口管理</h2><p>统一管理默认及自定义接口配置与密钥；修改后即时生效，无需重启或修改 config.json。</p></div><button type="button" className="btn btn-icon btn-outlined" onClick={close} disabled={busy || checking} aria-label="关闭接口管理" title="关闭接口管理"><X size={19} /></button></header>
+      <header className="ps-header"><div><h2 id="provider-settings-title"><Server size={20} />接口管理</h2><p>统一管理所有接口配置与密钥；修改后即时生效，无需重启或修改 config.json。</p></div><button type="button" className="btn btn-icon btn-outlined" onClick={close} disabled={busy || checking} aria-label="关闭接口管理" title="关闭接口管理"><X size={19} /></button></header>
       <div className="ps-layout">
         <aside className="ps-sidebar" aria-label="已保存的接口配置">
           <button type="button" className="btn btn-secondary btn-block ps-add" disabled={busy || checking} onClick={() => navigate(() => install(null))}><Plus size={16} />新建配置</button>
@@ -187,7 +184,6 @@ export default function ProviderSettings({ onClose, onSaved }) {
                   <button type="button" className="ps-profile" key={profile.id} aria-pressed={selected?.id === profile.id} disabled={busy || checking} onClick={() => navigate(() => install(profile))}>
                     <div className="ps-profile-head">
                       <strong>{profile.name}</strong>
-                      {(profile.is_system_default || profile.source_key) && <span className="ps-badge">系统默认</span>}
                     </div>
                     <span>{KINDS[profile.kind]} · {ADAPTERS[profile.adapter] || profile.adapter}</span>
                     <small>{profile.enabled ? '已启用' : '已停用'}{profile.is_default ? ' · 默认' : ''}{profile.has_api_key ? ' · 已配置密钥' : ' · 未配置密钥'}</small>
@@ -199,8 +195,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
         </aside>
         <form className="ps-form" onSubmit={save}>
           <div className="ps-form-scroll">
-            <div className="ps-form-head"><h3>{selected ? '编辑接口配置' : '新建接口配置'}</h3>{isSystemDefault && <span className="ps-badge">系统默认</span>}</div>
-            {isSystemDefault && <p className="ps-muted ps-system-hint">源自 config.json 导入的系统默认配置；修改后即时生效，无需重启或修改 config.json。</p>}
+            <div className="ps-form-head"><h3>{selected ? '编辑接口配置' : '新建接口配置'}</h3></div>
             {error && <div className="ps-error" role="alert">{error}{conflict && <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => (dirty ? setPending(() => reload) : reload())}><RefreshCw size={14} />重新载入服务器版本</button>}</div>}
             {notice && <div className="ps-notice" role="status">{notice}</div>}
             {preflight && (
@@ -232,7 +227,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
               {canSyncAdapterKey && <><label className="ps-check ps-sync-key"><input type="checkbox" checked={form.sync_adapter_api_key} onChange={event => change({ sync_adapter_api_key: event.target.checked })} />同时同步更新所有 {ADAPTERS[form.adapter] || form.adapter} 配置的 API Key</label><p className="ps-muted">将同步更新另外 {sameAdapterPeers.length} 个 {ADAPTERS[form.adapter] || form.adapter} 配置的密钥，并立即生效。</p></>}
               <label>{form.kind === 'video' && form.adapter === 'ark' ? 'Seedance 2.0 模型 / 推理接入点 ID' : '默认模型'}<input readOnly={form.adapter === 'cupsy' && form.kind !== 'video'} value={form.settings.model || ''} onChange={event => setting('model', event.target.value)} spellCheck={false} placeholder={form.kind === 'video' && form.adapter === 'ark' ? '例如 ep-…；按服务账号配置' : '模型标识'} /></label>
               {form.adapter === 'cupsy' && form.kind !== 'video' && <p className="ps-muted">此适配器当前使用固定模型，可配置服务地址和账号。</p>}
-              <div className="ps-checks"><label className="ps-check"><input type="checkbox" checked={form.enabled} onChange={event => change({ enabled: event.target.checked, is_default: event.target.checked && form.is_default })} />启用此配置</label><label className="ps-check"><input type="checkbox" checked={form.is_default} disabled={!form.enabled} onChange={event => change({ is_default: event.target.checked })} />作为新节点的首次预选</label><span className="ps-muted">仅在该类型还没有“上次选择”时，新建节点预选它；不影响已有节点。</span></div>
+              <div className="ps-checks"><label className="ps-check"><input type="checkbox" checked={form.enabled} onChange={event => change({ enabled: event.target.checked, is_default: event.target.checked && form.is_default })} />启用此配置</label><label className="ps-check"><input type="checkbox" checked={form.is_default} disabled={!form.enabled} onChange={event => change({ is_default: event.target.checked })} />默认配置</label><span className="ps-muted">该类型尚无“上次选择”时优先选用此配置；不影响已有节点。</span></div>
               <details className="ps-advanced"><summary>高级参数</summary>
                 <p className="ps-muted">留空采用服务端默认值。连接超时限制连接建立阶段，不是整个文件上传时长；查询参数仅用于异步任务。修改配置不会替换已有任务使用的配置版本。</p>
                 {form.kind === 'video' && form.adapter === 'ark' && <><label>Seedance 2.0 Fast 接入点 ID<input value={form.settings.fast_model || ''} onChange={event => setting('fast_model', event.target.value)} /></label><label>Seedance 2.5 接入点 ID<input value={form.settings.seedance_2_5_model || ''} placeholder="ep-…（BytePlus 控制台真实接入点；留空沿用部署配置）" spellCheck={false} onChange={event => setting('seedance_2_5_model', event.target.value)} /></label></>}
@@ -252,7 +247,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
         </form>
       </div>
       {pending && <div ref={confirmRef} className="ps-confirm" role="alertdialog" aria-modal="true" aria-label="未保存修改"><div><h3>替换当前未保存的内容？</h3><p>继续会丢弃本地编辑，已保存的服务器配置不会因此被修改。</p><button type="button" className="btn btn-secondary" onClick={() => setPending(null)}>继续编辑</button><button type="button" className="btn btn-danger" onClick={() => { const action = pending; setPending(null); action() }}>丢弃修改并继续</button></div></div>}
-      {!pending && confirmDelete && selected && <div ref={confirmRef} className="ps-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ps-delete-title"><div><h3 id="ps-delete-title">删除接口配置“{selected.name}”？</h3><p>{isSystemDefault ? '删除后不会在重启时从 config.json 重新导入，后续可在接口管理中自由新建配置；已提交的任务仍按原版本完成。' : '删除后将从接口列表和画布下拉中移除，引用它的已有画布节点需重新选择接口；已提交的任务仍按原版本完成。'}</p><button type="button" className="btn btn-secondary" onClick={() => setConfirmDelete(false)}>取消</button><button type="button" className="btn btn-danger" onClick={remove}>确认删除</button></div></div>}
+      {!pending && confirmDelete && selected && <div ref={confirmRef} className="ps-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ps-delete-title"><div><h3 id="ps-delete-title">删除接口配置“{selected.name}”？</h3><p>删除后将从接口列表和画布下拉中移除，引用它的已有画布节点需重新选择接口；已提交的任务仍按原版本完成。</p><button type="button" className="btn btn-secondary" onClick={() => setConfirmDelete(false)}>取消</button><button type="button" className="btn btn-danger" onClick={remove}>确认删除</button></div></div>}
     </section>
   </div>
 }

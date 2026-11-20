@@ -108,21 +108,7 @@
 .ps-profile-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; width: 100%; }
 .ps-form-head { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--sp-3); }
 .ps-form-head h3 { margin: 0; }
-.ps-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: var(--r-sm, 6px);
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, .04);
-  color: var(--text-2);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.45;
-  white-space: nowrap;
-}
-.ps-system-hint { margin: 0 0 var(--sp-4); }
-.ps-profile span:not(.ps-badge), .ps-profile small { color: var(--text-2); font-size: var(--fs-caption); }
+.ps-profile span, .ps-profile small { color: var(--text-2); font-size: var(--fs-caption); }
 .ps-form { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface-2, var(--surface-solid)); }
 .ps-form-scroll { padding: var(--sp-5) var(--sp-5) 40px; overflow-y: auto; flex: 1; min-height: 0; }
 .ps-form-scroll > * { max-width: 880px; }

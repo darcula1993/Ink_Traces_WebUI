@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.1 - 2026-11-21
+
+Unified provider profile equality and documentation refresh.
+
+- **Equalized Provider Profiles**: Removed the legacy "system default" (`系统默认` / `（默认）`) distinction between config-imported and user-created provider profiles across the API and WebUI; all profiles now share uniform naming, sorting, key-sync defaults, and save/delete copy while preserving tombstone protection against re-import or `config.json` credential fallback after deletion.
+- **Renamed Default Toggle**: Renamed the per-type first-preselection switch in Interface Management to **「默认配置」**, allowing any enabled profile of each media type to serve as the default choice when no last-used selection is stored.
+- **Documentation Refresh**: Updated `doc/development.md` to reflect v2.3.x capabilities (Global Task Center, unified provider management, Layer Studio library bridge, and Micro-Ink Precision visual assets).
+
 ## 2.3.0 - 2026-11-21
 
 Full-site desktop IDE layout unification, unified web provider management, global aggregated task center, bidirectional Layer Studio integration, canvas workflow upgrades, and a refined visual identity.
