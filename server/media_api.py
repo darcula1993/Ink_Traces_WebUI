@@ -10,6 +10,7 @@ from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
 import canvas_store as store
 import media_library as media
+import video_split
 from canvas_api import body
 from local_delete import require_same_origin
 
@@ -111,6 +112,12 @@ def info(media_id):
 @media_api.get(PREFIX + '/<media_id>/references')
 def references(media_id):
     return jsonify(success=True, **media.media_references(media_id))
+
+
+@media_api.post(PREFIX + '/<media_id>/split')
+def split_video(media_id):
+    require_same_origin(request)
+    return jsonify(success=True, **video_split.split_video_media(media_id, body())), 201
 
 
 @media_api.get(PREFIX + '/<media_id>/thumbnail')

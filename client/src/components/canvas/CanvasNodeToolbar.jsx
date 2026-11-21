@@ -1,10 +1,10 @@
 import React,{forwardRef,useImperativeHandle,useLayoutEffect,useRef,useState} from 'react'
-import {Crop,RotateCw,PenLine,Layers3,Download,Eye,Play,History,MoreHorizontal,FastForward,Wand2} from 'lucide-react'
+import {Crop,RotateCw,PenLine,Layers3,Download,Eye,Play,History,MoreHorizontal,FastForward,Wand2,Scissors} from 'lucide-react'
 import {CaptureCurrentFrameIcon,CaptureTailFrameIcon} from '../art/CanvasLibraryArt'
 import {nodeToolbarKind,nodeToolbarActions,nodeToolbarPlacement} from './canvasChrome'
 import './canvasChrome.css'
 
-const ICONS={edit:Crop,rotate:RotateCw,annotate:PenLine,layer:Layers3,download:Download,preview:Eye,history:History,more:MoreHorizontal,captureCurrent:CaptureCurrentFrameIcon,captureTail:CaptureTailFrameIcon,extendVideo:FastForward,editVideo:Wand2}
+const ICONS={edit:Crop,rotate:RotateCw,annotate:PenLine,layer:Layers3,download:Download,preview:Eye,history:History,more:MoreHorizontal,captureCurrent:CaptureCurrentFrameIcon,captureTail:CaptureTailFrameIcon,extendVideo:FastForward,editVideo:Wand2,splitVideo:Scissors}
 
 // CANVAS-LAYOUT-2-20261118: icon toolbar above the single selected image node (asset node, or image
 // generation node with an image result — user 11-17 Q5). Shows one button per supplied handler

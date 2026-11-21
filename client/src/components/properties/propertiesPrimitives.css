@@ -1,0 +1,698 @@
+/* UNIFY-PROPS-PANEL-20261122: shared Linear-style right properties panel primitives.
+ * Single source of truth for standalone tools (.inspector-pane), LayerStudio (.layer-studio-right),
+ * and Canvas (.cv-properties). One column, 36px controls, neutral dark surfaces, green only for
+ * focus rings, checked switches, and primary actions. */
+:root {
+  --pf-h: 36px;
+  --pf-gap: 12px;
+  --pf-pad: 16px;
+  --pf-rim: rgba(255, 255, 255, .10);
+  --pf-rim-hover: rgba(255, 255, 255, .16);
+  --pf-fill: rgba(255, 255, 255, .03);
+  --pf-fill-hover: rgba(255, 255, 255, .05);
+  --pf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a4a9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* ---- panel shell: fixed head + scrollable body + pinned footer */
+.pf-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-1);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.pf-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0 var(--pf-pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+
+.pf-kind-box {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--pf-rim);
+  border-radius: 6px;
+  background: var(--pf-fill);
+  color: var(--text-2);
+}
+
+.pf-kind-icon {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.pf-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-header-summary {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 var(--pf-pad) var(--pf-pad);
+  overscroll-behavior: contain;
+}
+
+/* ---- sections */
+.pf-section {
+  padding: var(--pf-pad) 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-gap);
+  min-width: 0;
+}
+
+.pf-section:last-child {
+  border-bottom: 0;
+}
+
+.pf-section-head,
+.pf-section-head.inspector-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 20px;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.pf-section-title {
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--text);
+}
+
+.pf-section-title > span {
+  flex: 0 0 auto;
+}
+
+.pf-section-summary {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* ---- fields */
+.pf-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-gap);
+  min-width: 0;
+}
+
+.pf-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pf-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-2);
+}
+
+.pf-label small {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-field-note {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--text-3);
+}
+
+.pf-field select,
+.pf-field input:not([type=checkbox]),
+.pf-panel .ip-controls.is-panel select,
+.pf-panel .ip-controls.is-panel input:not([type=checkbox]) {
+  width: 100%;
+  min-width: 0;
+  height: var(--pf-h);
+  min-height: var(--pf-h);
+  margin: 0;
+  padding: 0 32px 0 12px;
+  border: 1px solid var(--pf-rim);
+  border-radius: 8px;
+  background-color: var(--pf-fill);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+
+.pf-field select,
+.pf-panel .ip-controls.is-panel select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: var(--pf-chevron);
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px 14px;
+}
+
+.pf-field select option,
+.pf-panel .ip-controls.is-panel select option {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.pf-field input:not([type=checkbox]),
+.pf-panel .ip-controls.is-panel input:not([type=checkbox]) {
+  padding-right: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-field :is(select, input:not([type=checkbox])):hover:not(:disabled),
+.pf-panel .ip-controls.is-panel :is(select, input:not([type=checkbox])):hover:not(:disabled) {
+  border-color: var(--pf-rim-hover);
+  background-color: var(--pf-fill-hover);
+}
+
+.pf-field :is(select, input:not([type=checkbox])):focus-visible,
+.pf-panel .ip-controls.is-panel :is(select, input:not([type=checkbox])):focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--ring-focus);
+}
+
+.pf-field select:disabled,
+.pf-panel .ip-controls.is-panel select:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* Read-only model box rendered with a disabled <select> for test & a11y parity, matching canvas .ip-model strong */
+.pf-field select.pf-readonly-select,
+.pf-field select.pf-readonly-select:disabled {
+  opacity: 1;
+  cursor: default;
+  background-image: none;
+  background-color: transparent;
+  padding-right: 12px;
+  color: var(--text);
+}
+
+/* Decorative prefix sits inside the control's left edge: (36 - 16) / 2 = 10px from control bottom */
+.pf-prefix {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  pointer-events: none;
+}
+
+.pf-field.has-note .pf-prefix {
+  top: 32px;
+  bottom: auto;
+}
+
+.pf-field.has-prefix select,
+.pf-field.has-prefix input:not([type=checkbox]),
+.pf-panel .ip-controls.is-panel .ip-prefixed select {
+  padding-left: 36px;
+}
+
+.pf-ratio {
+  display: block;
+  box-sizing: border-box;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+}
+
+.pf-ratio.is-free {
+  border-style: dashed;
+}
+
+/* ---- toggle row + 32x18 Linear switch */
+.pf-toggle,
+.pf-panel .ip-controls.is-panel .ip-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--pf-h);
+  padding: 0 12px;
+  border: 1px solid var(--pf-rim);
+  border-radius: 8px;
+  background: var(--pf-fill);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pf-toggle.is-disabled {
+  cursor: not-allowed;
+}
+
+.pf-toggle-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pf-toggle-label small {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.pf-panel .ip-controls.is-panel .ip-toggle {
+  flex-direction: row-reverse;
+}
+
+.pf-switch,
+.pf-panel .ip-controls.is-panel .ip-toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--pf-rim-hover);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .08);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.pf-switch::after,
+.pf-panel .ip-controls.is-panel .ip-toggle input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+
+.pf-switch:checked,
+.pf-panel .ip-controls.is-panel .ip-toggle input:checked {
+  border-color: transparent;
+  background: var(--accent);
+}
+
+.pf-switch:checked::after,
+.pf-panel .ip-controls.is-panel .ip-toggle input:checked::after {
+  transform: translateX(14px);
+  background: var(--on-accent);
+}
+
+.pf-switch:focus-visible,
+.pf-panel .ip-controls.is-panel .ip-toggle input:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
+.pf-switch:disabled,
+.pf-panel .ip-controls.is-panel .ip-toggle input:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+@media (forced-colors: active) {
+  .pf-switch,
+  .pf-panel .ip-controls.is-panel .ip-toggle input { border-color: CanvasText; }
+  .pf-switch::after,
+  .pf-panel .ip-controls.is-panel .ip-toggle input::after { background: CanvasText; }
+  .pf-switch:checked,
+  .pf-panel .ip-controls.is-panel .ip-toggle input:checked { background: Highlight; }
+}
+
+/* ---- collapsible 高级 drawer */
+.pf-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-gap);
+  min-width: 0;
+}
+
+.pf-advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pf-advanced-toggle:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+.pf-advanced-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+}
+
+.pf-advanced-toggle .pf-chevron {
+  flex: 0 0 auto;
+  color: var(--text-2);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.pf-advanced.is-open .pf-chevron {
+  transform: rotate(90deg);
+}
+
+.pf-advanced-toggle small {
+  margin-left: auto;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pf-advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-gap);
+  min-width: 0;
+}
+
+.pf-advanced-body[hidden] {
+  display: none;
+}
+
+/* ---- notes & alerts */
+.pf-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-2);
+}
+
+.pf-alert {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--danger);
+}
+
+/* ---- ImageOutputControls panel variant inside standalone .pf-panel */
+.pf-panel .ip-controls.is-panel {
+  padding: 0;
+  gap: var(--pf-gap);
+  font-size: 12px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-prefixed {
+  position: relative;
+  min-width: 0;
+}
+
+.pf-panel .ip-controls.is-panel .ip-field {
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--text-2);
+}
+
+.pf-panel .ip-controls.is-panel .ip-field > small,
+.pf-panel .ip-controls.is-panel small {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.pf-panel .ip-controls.is-panel .ip-size {
+  margin: 0;
+  padding: 12px;
+  gap: var(--pf-gap);
+  border: 1px solid var(--pf-rim);
+  border-radius: 8px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-size legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.pf-panel .ip-controls.is-panel .ip-size .ip-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-size-tools {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-reference-size {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-reference-size select {
+  min-width: 0;
+}
+
+.pf-panel .ip-controls.is-panel button:where(:not(.btn, .pf-advanced-toggle, .cv-pf-advanced-toggle)) {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--btn-rim);
+  border-radius: 6px;
+  background: var(--btn-fill);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--btn-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: var(--btn-transition);
+}
+
+.pf-panel .ip-controls.is-panel button:where(:not(.btn, .pf-advanced-toggle, .cv-pf-advanced-toggle)):hover:not(:disabled) {
+  border-color: var(--btn-rim-hover);
+  background: var(--btn-fill-hover);
+}
+
+.pf-panel .ip-controls.is-panel button:where(:not(.btn, .pf-advanced-toggle, .cv-pf-advanced-toggle))[aria-pressed=true] {
+  border-color: var(--btn-active-rim);
+  background: var(--btn-active-fill);
+  color: var(--btn-active-text);
+}
+
+.pf-panel .ip-controls.is-panel .ip-reference-size button:where(:not(.btn)) {
+  height: var(--pf-h);
+  min-height: var(--pf-h);
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-errors button:where(:not(.btn)) {
+  align-self: flex-start;
+}
+
+.pf-panel .ip-controls.is-panel p {
+  color: var(--danger);
+}
+
+/* ---- pinned CostEstimateFooter */
+.pf-panel-footer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.pf-cost-details {
+  padding: 10px var(--pf-pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-cost-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pf-cost-detail-muted {
+  color: var(--text-3);
+}
+
+.pf-cost-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px var(--pf-pad);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.pf-cost-trigger:hover {
+  background: var(--pf-fill);
+}
+
+.pf-cost-trigger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--border-focus), var(--ring-focus);
+}
+
+.pf-cost-label {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pf-cost-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pf-cost-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf-cost-value.is-warn {
+  color: var(--warning, #d9b15f);
+}
+
+.pf-cost-value.is-muted {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.pf-cost-chevron {
+  flex: 0 0 auto;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.pf-cost-trigger:hover .pf-cost-chevron {
+  color: var(--text-2);
+}
+
+.pf-cost-chevron.is-open {
+  transform: rotate(180deg);
+}

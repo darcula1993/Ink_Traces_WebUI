@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = PROJECT_ROOT / 'config.json'
 DEFAULT_TEMPLATE = PROJECT_ROOT / 'deploy/nginx/nanobanana-cupsy.conf.template'
+WORKSPACE_TEMPLATE = PROJECT_ROOT / 'deploy/nginx/nanobanana-workspace.conf.template'
 DEFAULT_NGINX_AVAILABLE = Path('/etc/nginx/sites-available/nanobanana-cupsy')
 DEFAULT_NGINX_ENABLED = Path('/etc/nginx/sites-enabled/nanobanana-cupsy')
 DEFAULT_WEBROOT = Path('/var/www/certbot')
@@ -44,6 +45,7 @@ class PublicSourceSpec:
     frontend_port: int
     is_ip: bool
     certificate_email: str = ''
+    workspace_proxy: bool = False
 
     @property
     def server_name(self) -> str:
@@ -138,6 +140,12 @@ def load_spec(config_path: Path) -> PublicSourceSpec | None:
         raise DeploymentError('HTTP public source proxy port must not conflict with client.port')
 
     email = str(source.get('certificate_email', '')).strip()
+    workspace_proxy = _same_origin(
+        str(config.get('deployment', {}).get('public_base_url', '')),
+        parsed.scheme,
+        host,
+        public_port,
+    )
     return PublicSourceSpec(
         source_url=source_url,
         scheme=parsed.scheme,
@@ -147,7 +155,51 @@ def load_spec(config_path: Path) -> PublicSourceSpec | None:
         frontend_port=frontend_port,
         is_ip=is_ip,
         certificate_email=email,
+        workspace_proxy=workspace_proxy,
     )
+
+
+def _same_origin(raw_url: str, scheme: str, host: str, port: int) -> bool:
+    cleaned = raw_url.strip().rstrip('/')
+    if not cleaned:
+        return False
+    parsed = urlsplit(cleaned)
+    try:
+        other_host = parsed.hostname
+        other_port = parsed.port or (443 if parsed.scheme == 'https' else 80 if parsed.scheme == 'http' else None)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == scheme
+        and bool(other_host)
+        and other_host.lower() == host.lower()
+        and other_port == port
+        and parsed.path in {'', '/'}
+    )
+
+
+def _installed_uses_workspace_template(available: Path) -> bool:
+    try:
+        content = available.read_text(encoding='utf-8')
+    except OSError:
+        return False
+    if not content.startswith(MANAGED_MARKER):
+        return False
+    # Workspace template proxies all routes (`location / { proxy_pass ... }`) instead of
+    # restricting the HTTPS vhost to `/api/cupsy/source/` + `location / { return 404; }`.
+    return 'location ^~ /api/cupsy/source/' not in content and bool(
+        re.search(r'location\s+/\s*\{[^}]*proxy_pass\s+http://127\.0\.0\.1:', content, re.DOTALL)
+    )
+
+
+def resolve_template(template_arg: str | Path | None, spec: PublicSourceSpec, available: Path | None = None) -> Path:
+    if template_arg is not None:
+        return Path(template_arg)
+    if spec.workspace_proxy:
+        return WORKSPACE_TEMPLATE
+    if available is not None and _installed_uses_workspace_template(available):
+        return WORKSPACE_TEMPLATE
+    return DEFAULT_TEMPLATE
 
 
 def render_bootstrap(spec: PublicSourceSpec, webroot: Path) -> str:
@@ -468,7 +520,8 @@ def reconcile(args: argparse.Namespace, spec: PublicSourceSpec) -> None:
         raise DeploymentError('Certbot is not installed')
     _install_deploy_hook(deploy_hook)
     certificate_path = cert_root / 'live' / spec.certificate_name / 'fullchain.pem'
-    final_config = render_https_proxy(spec, Path(args.template), webroot, cert_root)
+    template_path = resolve_template(args.template, spec, available)
+    final_config = render_https_proxy(spec, template_path, webroot, cert_root)
 
     if not certificate_path.exists():
         previous = available.read_text(encoding='utf-8') if available.exists() else None
@@ -497,8 +550,9 @@ def check_deployment(args: argparse.Namespace, spec: PublicSourceSpec) -> None:
     enabled = Path(args.nginx_enabled)
     if not available.exists() or not enabled.exists():
         raise DeploymentError('Managed Nginx public source site is not installed')
+    template_path = resolve_template(args.template, spec, available)
     expected = (
-        render_https_proxy(spec, Path(args.template), Path(args.webroot), Path(args.cert_root))
+        render_https_proxy(spec, template_path, Path(args.webroot), Path(args.cert_root))
         if spec.scheme == 'https'
         else render_http_proxy(spec)
     )
@@ -519,7 +573,7 @@ def check_deployment(args: argparse.Namespace, spec: PublicSourceSpec) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default=str(DEFAULT_CONFIG))
-    parser.add_argument('--template', default=str(DEFAULT_TEMPLATE))
+    parser.add_argument('--template', default=None)
     parser.add_argument('--nginx-available', default=str(DEFAULT_NGINX_AVAILABLE))
     parser.add_argument('--nginx-enabled', default=str(DEFAULT_NGINX_ENABLED))
     parser.add_argument('--webroot', default=str(DEFAULT_WEBROOT))
@@ -541,7 +595,8 @@ def main() -> int:
             if spec.direct_http:
                 print('Direct HTTP mode: no Nginx configuration required.')
             elif spec.scheme == 'https':
-                print(render_https_proxy(spec, Path(args.template), Path(args.webroot), Path(args.cert_root)))
+                template_path = resolve_template(args.template, spec, Path(args.nginx_available))
+                print(render_https_proxy(spec, template_path, Path(args.webroot), Path(args.cert_root)))
             else:
                 print(render_http_proxy(spec))
             return 0

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.4.2 - 2026-11-22
+
+Video asset node toolbar & non-destructive video splitting, canvas media upload progress HUD, unified right properties panels, Global Task Center trash consolidation, and HTTPS workspace proxy template protection.
+
+- **Video Asset Node Toolbar & Non-Destructive Video Split**:
+  - Added a 5-action floating toolbar above selected video asset nodes (**Video Split**, **Download**, **Preview**, **Version History**, **More**) plus a matching **Video Split** entry in the node context menu, without changing existing video generation node toolbars.
+  - Added `CanvasVideoSplitDialog` with embedded video playback (`±0.1s` fine-tuning), interactive visual timeline, **Timeline Cut Points** mode (add at playhead, manual seconds input, drag/delete markers), and **Equal Duration** mode (custom seconds, `3s`/`5s`/`10s`/`15s` & `2`/`3`/`4` equal-part presets, auto-merging `<0.2s` trailing remainder, up to 20 segments).
+  - Added `POST /api/canvas/media/<media_id>/split` (`server/video_split.py`) using `ffmpeg`/`ffprobe` (`-protocol_whitelist file`, same-origin & local-path guards) for frame-accurate re-encoding into independent `save_as` library items (keeping user folders; routing system-folder/root sources to library root), with pre-save size checks, atomic rollback on mid-save failures, deduplicated `items` responses, zero original modification, and one-step undoable canvas placement to the right of the source node.
+- **Canvas Upload Progress HUD**: Added a live floating upload progress indicator (`.cv-upload-progress`) backed by real Axios `onUploadProgress` telemetry showing file count, bytes transferred, and percentage when dragging/dropping, pasting, uploading, or replacing media on the canvas.
+- **Unified Right Properties Panels**: Extracted shared `client/src/components/properties/` primitives to unify right-hand parameter panels across Canvas and standalone Image, Video, and Audio tools (44px neutral icon header, 36px single-column controls with prefix icons, unified copy, collapsible Advanced drawer, pinned compact Cost Estimate footer) and aligned the Layer Studio right panel to Linear tokens.
+- **Consolidated Trash in Global Task Center**: Hid per-page Trash tabs on standalone Image, Video, and Audio sub-pages (`TaskGallery allowTrash=false` by default) while guiding users to the top-level **Task Center → Trash** view for restoration and permanent deletion.
+- **HTTPS Full-Workspace Proxy Guard**: Hardened `deploy/configure_public_source.py` (`resolve_template()`) to automatically select or preserve `nanobanana-workspace.conf.template` whenever `public_base_url` matches `cupsy_source.base_url` or an existing managed workspace proxy is installed, preventing `start.sh` from reverting full-site HTTPS to 404.
+
 ## 2.4.1 - 2026-11-21
 
 Storage garbage collection and completed deletion compaction (`STORAGE-GC-COMPACT-20261121`).

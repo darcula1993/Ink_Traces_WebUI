@@ -40,12 +40,13 @@ import {readCanvasUrlRoute,syncCanvasUrlRoute,subscribeCanvasUrlRoute,resolveCan
 import {writeDraft,readDraft,clearDraft,draftIncluded,mergeDraftDocument} from '../../lib/canvasDraftBackup'
 import PendingDeletions from './PendingDeletions'
 const ImageAssetEditor=React.lazy(()=>import('../image-editor/ImageAssetEditor'))
+import CanvasVideoSplitDialog from './CanvasVideoSplitDialog'
 import CanvasNodeMenu from './CanvasNodeMenu'
 import AddToCharacterDialog from './AddToCharacterDialog'
 import CanvasMoveToFolder from './CanvasMoveToFolder'
 import useCanvasMediaStatus from './useCanvasMediaStatus'
-import {uploadCanvasLibraryMedia,resolveLibraryMedia,lookupMedia,readUploadFolder,writeUploadFolder} from '../../lib/canvasMedia'
-import {isMediaAsset,isDeletedMedia,isTrashedMedia,markDeletedMedia} from '../../lib/canvasMediaStatus'
+import {uploadCanvasLibraryMedia,splitCanvasLibraryVideo,computeBatchUploadProgress,formatUploadBytes,resolveLibraryMedia,lookupMedia,readUploadFolder,writeUploadFolder} from '../../lib/canvasMedia'
+import {isMediaAsset,isMediaId,mediaNodeAsset,isDeletedMedia,isTrashedMedia,markDeletedMedia} from '../../lib/canvasMediaStatus'
 import MediaPreview,{previewItems} from './MediaPreview'
 import {withPreviewPages} from './previewPages'
 import DeleteCanvasDialog from './DeleteCanvasDialog'
@@ -182,6 +183,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const editHistory=useRef(new CanvasEditHistory()),clipboard=useRef(sessionClipboard),pasteCount=useRef(0),editCommands=useRef(null)
   const [historyRevision,setHistoryRevision]=useState(0),[shortcutsOpen,setShortcutsOpen]=useState(false),[moreMenu,setMoreMenu]=useState(null),moreTrigger=useRef(null)
   const [fileDragging,setFileDragging]=useState(false),fileDragDepth=useRef(0)
+  const [uploadProgress,setUploadProgress]=useState(null)
   useEffect(()=>{
     const resetFileDrag=()=>{fileDragDepth.current=0;setFileDragging(false)}
     window.addEventListener('dragend',resetFileDrag);window.addEventListener('drop',resetFileDrag)
@@ -448,7 +450,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const [focusedGroup,setFocusedGroup]=useState(null)
   // CANVAS-LAYOUT-1-20261117: right properties panel preferences (per browser) and the prompt editors' runtime state.
   const panelToggle=useRef(null),chromeKeys=useRef({}),toolbarRef=useRef(null),railRef=useRef(null)
-  const [imageEditing,setImageEditing]=useState(null),[railPanelPx,setRailPanelPx]=useState(0)
+  const [imageEditing,setImageEditing]=useState(null),[videoSplitting,setVideoSplitting]=useState(null),[railPanelPx,setRailPanelPx]=useState(0)
   const [cardGenerate,setCardGenerate]=useState(null)
   const panelPrefs=usePropertiesPanelPrefs(),[promptDialog,setPromptDialog]=useState(null),[promptFocus,setPromptFocus]=useState({id:null,n:0})
   // CANVAS-LAYOUT-2-WIRE-20261118: left icon rail + pop-out panel (spec 2.2). Pinning keeps the canvas >= 640 wide
@@ -1358,27 +1360,75 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     ioRef.current += 1; setIoCount(ioRef.current)
     // CANVAS-INPUT-20261114 #1: upload every file first, then add all nodes in one edit (one undo step per drop/paste).
     // A deduplicated upload returns the existing library media (its stored name); the new node keeps this file's name.
-    const uploaded = [], problems = [], titles = new Map()
+    const uploaded = [], problems = [], titles = new Map(), validFiles = []
     let folderFallback = false
-    try {
     for (const file of [...files]) {
       const kind = (file.type || '').split('/')[0]
       if (!['image', 'video', 'audio'].includes(kind)) { problems.push(`不支持的素材类型：${file.name || file.type || '未知文件'}（仅支持图片、视频、音频）`); continue }
       const target = targetId && docRef.current.nodes.find(node => node.id === targetId)
       if (target && !canConnect({id:'uploaded-reference',type:'asset',asset:{kind}},target)) { problems.push('所选素材类型不能接入该生成节点。'); continue }
+      validFiles.push(file)
+    }
+    const totalFiles = validFiles.length
+    const totalBytes = validFiles.reduce((sum, file) => sum + (Number(file?.size) > 0 ? Number(file.size) : 0), 0)
+    let completedBytes = 0
+    try {
+    for (let index = 0; index < validFiles.length; index += 1) {
+      const file = validFiles[index]
+      const fileName = file.name || '素材'
+      const fileSize = Number(file?.size) > 0 ? Number(file.size) : 0
+      if (mounted.current) {
+        setUploadProgress(computeBatchUploadProgress({
+          totalFiles,
+          currentIndex: index + 1,
+          fileName,
+          completedBytes,
+          totalBytes,
+          fileLoaded: 0,
+          fileTotal: fileSize,
+          phase: 'uploading',
+        }))
+      }
       try {
-        const saved = await uploadCanvasLibraryMedia(file, { origin, folderId: uploadFolderRef.current })
+        const saved = await uploadCanvasLibraryMedia(file, {
+          origin,
+          folderId: uploadFolderRef.current,
+          onProgress: ({ loaded, total, phase }) => {
+            if (!mounted.current) return
+            setUploadProgress(computeBatchUploadProgress({
+              totalFiles,
+              currentIndex: index + 1,
+              fileName,
+              completedBytes,
+              totalBytes,
+              fileLoaded: loaded,
+              fileTotal: total || fileSize,
+              phase,
+            }))
+          },
+        })
         if (saved.folderFallback) { folderFallback = true; setUploadFolder(null) }
         if (workflowRef.current?.id !== owner) { problems.push('素材已保存到素材库；当前画布已切换，未添加节点，可从素材库拖入。'); uploaded.length = 0; break }
         uploaded.push(saved.asset); if (file.name) titles.set(saved.asset.id, String(file.name).slice(0, 240))
       } catch (failure) { const status = failure?.response?.status; problems.push(`${file.name || '文件'}：${status === 413 ? '文件过大，超过服务器上传上限' : messageOf(failure)}`) }
+      completedBytes += fileSize
     }
     if (uploaded.length && workflowRef.current?.id === owner) {
+      if (mounted.current) {
+        setUploadProgress(computeBatchUploadProgress({
+          totalFiles,
+          currentIndex: totalFiles,
+          fileName: validFiles[validFiles.length - 1]?.name || '素材',
+          completedBytes: totalBytes,
+          totalBytes,
+          phase: 'saving',
+        }))
+      }
       try { addAssetNodes(uploaded,targetId,{x:batchOrigin.x,y:batchOrigin.y},titles); await save() } catch (failure) { problems.push(messageOf(failure)) }
     }
     if (folderFallback) problems.push('画布上传文件夹已不存在，素材已存到素材库根目录')
     if (problems.length) showError(problems.join('；'))
-    } finally { ioRef.current -= 1; if (mounted.current) setIoCount(ioRef.current) }
+    } finally { ioRef.current -= 1; if (mounted.current) { setIoCount(ioRef.current); setUploadProgress(null) } }
   }
   // FRAME-CAPTURE-20261114: capture a still from a video node and add it as an image material
   // node to the right of the source, through the same upload path as paste/drop (one undo step).
@@ -1563,12 +1613,15 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     if(owner.kind==='image' && node.candidates?.length>=100 && !owner.versionPending)throw new Error('图片历史版本已达100个，请创建新素材节点')
     if(file.type.split('/')[0]!==owner.kind)throw new Error('替换素材必须保持原媒体类型')
     ioRef.current++;setIoCount(ioRef.current)
+    const fileName=file.name||'素材',fileSize=Number(file?.size)>0?Number(file.size):0
+    if(mounted.current)setUploadProgress(computeBatchUploadProgress({totalFiles:1,currentIndex:1,fileName,completedBytes:0,totalBytes:fileSize,fileLoaded:0,fileTotal:fileSize,phase:'uploading'}))
     try {
-      const saved=await uploadCanvasLibraryMedia(file,{origin,folderId:uploadFolderRef.current}),asset=saved.asset
+      const saved=await uploadCanvasLibraryMedia(file,{origin,folderId:uploadFolderRef.current,onProgress:({loaded,total,phase})=>{if(mounted.current)setUploadProgress(computeBatchUploadProgress({totalFiles:1,currentIndex:1,fileName,completedBytes:0,totalBytes:fileSize,fileLoaded:loaded,fileTotal:total||fileSize,phase}))}}),asset=saved.asset
       if(saved.folderFallback)setUploadFolder(null)
       if(workflowRef.current?.id!==owner.workflowId || docRef.current.nodes.find(item=>item.id===owner.nodeId)?.asset?.id!==owner.assetId)throw new Error('原素材节点已改变，文件已保存到素材库，未替换当前素材')
+      if(mounted.current)setUploadProgress(computeBatchUploadProgress({totalFiles:1,currentIndex:1,fileName,completedBytes:fileSize,totalBytes:fileSize,phase:'saving'}))
       const result=switchAssetVersion(docRef.current,owner.nodeId,asset,true);edit(()=>result.document,{description:owner.description});owner.assetId=asset.id;owner.versionPending=true;await save();owner.versionPending=false;if(result.warnings.length)showError(result.warnings.join('；'))
-    } catch(failure) {throw new Error(messageOf(failure))} finally {ioRef.current--;setIoCount(ioRef.current)}
+    } catch(failure) {throw new Error(messageOf(failure))} finally {ioRef.current--;if(mounted.current){setIoCount(ioRef.current);setUploadProgress(null)}}
   }
   async function rotateNode(id) {
     if(ioRef.current)return
@@ -1600,6 +1653,46 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   function editNodeImage(id){if(ioRef.current)return;const owner=assetOwner(id,'编辑图片'),node=docRef.current.nodes.find(n=>n.id===id);if(!node?.asset?.url)return;setImageEditing({owner,asset:node.asset});ioRef.current++;setIoCount(ioRef.current)}
   function openNodeInLayerStudio(node){setNodeMenu(null);const payload=buildLayerSourceRequest(node?.asset,node?.title,{projectId:workflowRef.current?.project_id??projectIdRef.current??null,workflowId:workflowRef.current?.id||null,nodeId:node?.id||null});if(!payload){showError('该节点没有可用的图片素材');return}requestLayerSource(payload)}
   function closeImageEditor(){setImageEditing(current=>{if(current){ioRef.current--;setIoCount(ioRef.current)}return null})}
+  function openVideoSplit(nodeId){
+    if(ioRef.current)return
+    const node=docRef.current.nodes.find(item=>item.id===nodeId)
+    if(!node||node.type!=='asset'||node.asset?.kind!=='video'||!node.asset?.url)return
+    if(isMediaAsset(node.asset)&&isDeletedMedia(node.asset.id)){showError('该视频素材已在素材库中删除，无法分割');return}
+    if(!node.asset.id){showError('该视频素材缺少素材库标识，无法分割');return}
+    setNodeMenu(null)
+    setVideoSplitting({nodeId:node.id,workflowId:workflowRef.current?.id||null,asset:node.asset,title:node.title||node.asset.name||'视频素材'})
+  }
+  function closeVideoSplit(){setVideoSplitting(null);requestAnimationFrame(focusSelection)}
+  async function confirmVideoSplit(target,payload){
+    if(!target?.asset?.id)throw new Error('该视频素材缺少素材库标识，无法分割')
+    if(ioRef.current||navigationRef.current)throw new Error('请等待当前操作完成后再分割')
+    ioRef.current++;setIoCount(ioRef.current)
+    try{
+      const result=await splitCanvasLibraryVideo(target.asset.id,payload)
+      const rawItems=Array.isArray(result?.items)?result.items:[]
+      const assets=rawItems.map(item=>isMediaId(item?.id)?mediaNodeAsset(item):item).filter(item=>item?.id&&item?.url)
+      if(!assets.length)throw new Error('分割完成，但未返回新的视频片段')
+      setAssetRefresh(value=>value+1);setMediaRefresh(value=>value+1);notifyLibraryChanged({source:'video_split'})
+      const totalSegments=Array.isArray(result?.segments)&&result.segments.length?result.segments.length:assets.length
+      const dedupedCount=Math.max(0,totalSegments-assets.length)
+      const splitSummary=dedupedCount>0?`已分割为 ${totalSegments} 段（其中 ${dedupedCount} 段内容相同已去重，新增 ${assets.length} 个视频素材）`:`已分割为 ${assets.length} 个视频片段`
+      if(target.workflowId&&workflowRef.current?.id!==target.workflowId){
+        setVideoSplitting(null)
+        notify?.(`${splitSummary}并存入素材库（原画布已切换，未添加到当前画布）`,'info')
+        return
+      }
+      const source=docRef.current.nodes.find(item=>item.id===target.nodeId)
+      const origin=source?{x:source.x+nodeGeometry(source).width+88,y:source.y}:null
+      addAssetNodes(assets,null,origin)
+      await save()
+      setVideoSplitting(null)
+      notify?.(`${splitSummary}并添加到画布`,'success')
+    }catch(failure){
+      throw new Error(messageOf(failure))
+    }finally{
+      ioRef.current--;if(mounted.current)setIoCount(ioRef.current)
+    }
+  }
   // NODE-TOOLBAR-VERSIONS-20261118 root cause of "历史版本 does nothing": for generation nodes this used to only move
   // focus to the panel's 版本 section (programmatic focus shows no ring, the section was usually below the fold), so
   // nothing visible happened. Every node kind now opens the same version popover; focus returns to the opener.
@@ -2037,7 +2130,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     insertPromptText(textarea,text,{value:docRef.current.nodes.find(item=>item.id===node.id)?.text||'',onFallback:next=>{promptEditor?.setMentionError?.('');patchNode(node.id,{text:next})}})
   }
   const taskBadge=summarizeCanvasTasks(doc.nodes).active.length
-  const toolbarShown=nodeToolbarVisible({node:selectedNode,selectedCount:interaction.selectedIds.length,dragging:drag.current?.type==='nodes'&&!!drag.current.moved,connecting:!!portDrag||!!connection,annotating:!!annotation||!!imageEditing,deleted:!!selectedNode?.asset&&isMediaAsset(selectedNode.asset)&&isDeletedMedia(selectedNode.asset.id)})
+  const toolbarShown=nodeToolbarVisible({node:selectedNode,selectedCount:interaction.selectedIds.length,dragging:drag.current?.type==='nodes'&&!!drag.current.moved,connecting:!!portDrag||!!connection,annotating:!!annotation||!!imageEditing||!!videoSplitting,deleted:!!selectedNode?.asset&&isMediaAsset(selectedNode.asset)&&isDeletedMedia(selectedNode.asset.id)})
   const toolbarAvoidRects=toolbarShown&&(doc.groups||[]).length?(doc.groups||[]).map(group=>{
     const bounds=groupBounds(group,doc.nodes)
     if(!bounds)return null
@@ -2073,16 +2166,57 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       {interaction.marquee && <div className="cv-selection-box" style={interaction.marquee}/>}
       {toolbarShown && (nodeToolbarKind(selectedNode)==='video'
         ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="视频操作" historyOpen={historyNode===selectedNode.id} captureNote={currentFrameNote(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} {...(canFollowUpVideoNode(selectedNode)?{onExtendVideo:()=>createVideoFollowUp(selectedNode.id,'extend'),onEditVideo:()=>createVideoFollowUp(selectedNode.id,'edit')}:{})} onCaptureCurrent={()=>captureFrame(selectedNode.id,false)} onCaptureTail={()=>captureFrame(selectedNode.id,true)} onPreview={()=>openPreview(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
+        :nodeToolbarKind(selectedNode)==='videoAsset'
+        ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="视频素材操作" historyOpen={historyNode===selectedNode.id} onSplitVideo={()=>openVideoSplit(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
         :nodeToolbarKind(selectedNode)==='audio'
         ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="音频操作" historyOpen={historyNode===selectedNode.id} onPreview={()=>openPreview(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} {...((selectedNode.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(selectedNode.id)}:{})} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
         :<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="图片操作" historyOpen={historyNode===selectedNode.id} onEdit={()=>editNodeImage(selectedNode.id)} onRotate={()=>rotateNode(selectedNode.id)} onAnnotate={()=>annotateNode(selectedNode.id)} onDecomposeLayer={()=>openNodeInLayerStudio(selectedNode)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>)}
-      {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&!contextDeleted&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':contextDeleted?'素材已在素材库中删除':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopyToClipboard={()=>{const ids=interaction.selectedIds.includes(nodeMenu.id)?interaction.selectedIds:[nodeMenu.id];copySelection(ids);setNodeMenu(null)}} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} onReplaceFromLibrary={()=>replaceNodeFromLibrary(nodeMenu.id)} {...(canFollowUpVideoNode(contextNode)?{onExtendVideo:()=>createVideoFollowUp(contextNode.id,'extend'),onEditVideo:()=>createVideoFollowUp(contextNode.id,'edit')}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='image'?{onDecomposeLayer:()=>openNodeInLayerStudio(contextNode)}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&['image','video','audio'].includes(mediaKind(contextNode))&&!(isMediaAsset(contextNode.asset)&&isDeletedMedia(contextNode.asset.id))?{onRevealInLibrary:()=>revealInLibrary(contextNode.asset),onMoveToFolder:()=>{openMovingAssets([contextNode.asset],{nodeId:contextNode.id});setNodeMenu(null)}}:{})} {...((contextNode?.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(nodeMenu.id,'node'),versionCount:contextNode.candidates.length}:{})} {...(contextLiveVersions.length>1?{onMoveAllVersions:()=>{openMovingAssets(contextLiveVersions,{nodeId:contextNode.id});setNodeMenu(null)},liveVersionCount:contextLiveVersions.length}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
+      {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&!contextDeleted&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':contextDeleted?'素材已在素材库中删除':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopyToClipboard={()=>{const ids=interaction.selectedIds.includes(nodeMenu.id)?interaction.selectedIds:[nodeMenu.id];copySelection(ids);setNodeMenu(null)}} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} onReplaceFromLibrary={()=>replaceNodeFromLibrary(nodeMenu.id)} {...(contextNode?.type==='asset'&&contextNode.asset?.kind==='video'&&contextNode.asset?.url&&contextNode.asset?.id&&!contextDeleted?{onSplitVideo:()=>openVideoSplit(contextNode.id)}:{})} {...(canFollowUpVideoNode(contextNode)?{onExtendVideo:()=>createVideoFollowUp(contextNode.id,'extend'),onEditVideo:()=>createVideoFollowUp(contextNode.id,'edit')}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='image'?{onDecomposeLayer:()=>openNodeInLayerStudio(contextNode)}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&['image','video','audio'].includes(mediaKind(contextNode))&&!(isMediaAsset(contextNode.asset)&&isDeletedMedia(contextNode.asset.id))?{onRevealInLibrary:()=>revealInLibrary(contextNode.asset),onMoveToFolder:()=>{openMovingAssets([contextNode.asset],{nodeId:contextNode.id});setNodeMenu(null)}}:{})} {...((contextNode?.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(nodeMenu.id,'node'),versionCount:contextNode.candidates.length}:{})} {...(contextLiveVersions.length>1?{onMoveAllVersions:()=>{openMovingAssets(contextLiveVersions,{nodeId:contextNode.id});setNodeMenu(null)},liveVersionCount:contextLiveVersions.length}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
       {historyNodeData && <CanvasVersionPopover node={historyNodeData} rect={nodeScreenRect(historyNodeData,view)} surface={surfaceSize} busy={ioCount>0} isGone={asset=>isMediaAsset(asset)&&isDeletedMedia(asset.id)} onChoose={asset=>chooseVersion(historyNodeData.id,asset)} onCompare={openCompareModal} onToggleFinalized={toggleNodeFinalized} onClose={closeHistory}/>}
       {imageEditing && createPortal(<React.Suspense fallback={<div className="cv-studio-overlay" role="status"><div>正在加载编辑器…</div></div>}><ImageAssetEditor asset={imageEditing.asset} onSave={file=>saveImageResult(imageEditing.owner,file)} onClose={closeImageEditor}/></React.Suspense>,document.body)}
+      {videoSplitting && createPortal(<CanvasVideoSplitDialog asset={videoSplitting.asset} title={videoSplitting.title} onConfirm={payload=>confirmVideoSplit(videoSplitting,payload)} onClose={closeVideoSplit}/>,document.body)}
       {annotation && <React.Suspense fallback={<div className="cv-studio-overlay" role="status">正在加载标注工具…</div>}><CanvasImageAnnotator key={annotation.asset.id} asset={annotation.asset} style={{zIndex:50}} onSave={file=>saveImageResult(annotation.owner,file)} onClose={closeAnnotation}/></React.Suspense>}
       {contextMenu && <CanvasContextMenu position={contextMenu} bounds={surfaceSize} onClose={closeContextMenu} onDismiss={()=>setContextMenu(null)} onUpload={()=>{const point=contextMenu.point;closeContextMenu();pickFile(null,point)}} onCreate={type=>{const point=contextMenu.point;closeContextMenu();addNode(type,point)}} templatesDisabled={busy||ioCount>0||!!conflict} onOpenTemplates={()=>{const point=contextMenu.point;closeContextMenu();openApplyTemplates(point)}} canPaste={hasClipboard&&!ioCount&&!busy&&!conflict} onPaste={()=>{const point=contextMenu.point;closeContextMenu();pasteSelection(point)}} organizeDisabled={!doc.nodes.length||busy||ioCount>0||generationCount>0||!!conflict} onOrganize={()=>{closeContextMenu();organize()}} fitDisabled={!doc.nodes.length} onFit={()=>{closeContextMenu();fit()}}/>}
       {loading ? <div className="cv-empty">正在载入画布…</div> : !doc.nodes.length && <div className="cv-empty"><EmptyCanvasFlowArt /><div className="cv-empty-actions" onPointerDown={e => e.stopPropagation()}><button className="btn btn-primary" onClick={() => addNode('image')}><Image size={16} />图像生成</button><button onClick={() => addNode('video')}><Film size={16} />视频生成</button><button onClick={() => addNode('audio')}><Music size={16} />音频生成</button></div></div>}
       {fileDragging && <CanvasFileDropOverlay />}
+      {uploadProgress && (
+        <div
+          className="cv-upload-progress"
+          role="status"
+          aria-live="polite"
+          data-testid="canvas-upload-progress"
+          data-phase={uploadProgress.phase}
+        >
+          <div className="cv-upload-progress-head">
+            <Upload size={14} className="cv-upload-progress-icon" aria-hidden="true" />
+            <span className="cv-upload-progress-text" title={uploadProgress.fileName}>
+              {uploadProgress.phase === 'saving'
+                ? '正在写入画布…'
+                : uploadProgress.phase === 'processing'
+                  ? `正在处理${uploadProgress.totalFiles > 1 ? ` (${uploadProgress.currentIndex}/${uploadProgress.totalFiles})` : ''} ${uploadProgress.fileName}…`
+                  : `正在上传${uploadProgress.totalFiles > 1 ? ` (${uploadProgress.currentIndex}/${uploadProgress.totalFiles})` : ''} ${uploadProgress.fileName}`}
+            </span>
+            <span className="cv-upload-progress-pct" data-testid="canvas-upload-progress-pct">
+              {uploadProgress.phase === 'saving'
+                ? '100%'
+                : uploadProgress.overallPercent !== null
+                  ? `${uploadProgress.overallPercent}%`
+                  : '上传中'}
+            </span>
+          </div>
+          <div className="cv-upload-progress-track" aria-hidden="true">
+            <div
+              className={`cv-upload-progress-bar ${uploadProgress.phase !== 'uploading' ? 'is-processing' : ''}`}
+              style={{ width: `${uploadProgress.overallPercent ?? 100}%` }}
+            />
+          </div>
+          {uploadProgress.totalBytes > 0 && uploadProgress.phase === 'uploading' && (
+            <div className="cv-upload-progress-meta">
+              {formatUploadBytes(uploadProgress.loadedBytes)} / {formatUploadBytes(uploadProgress.totalBytes)}
+            </div>
+          )}
+        </div>
+      )}
       {portDrag && <div className="cv-connection-note" role="status">{dropAnnouncement ? `${dropAnnouncement} · ` : ''}松开到目标节点上建立连接 · 松在空白处或按 Esc 取消</div>}{connection && !portDrag && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}>点击目标节点建立连接<button onClick={() => setConnection(null)}>取消</button></div>}
       {selectedEdge && <div className="cv-connection-note" onPointerDown={e => e.stopPropagation()}><button onClick={() => deleteEdge(selectedEdge)}><Trash2 size={13} />移除连接</button></div>}
       <div className="cv-bottom-dock">

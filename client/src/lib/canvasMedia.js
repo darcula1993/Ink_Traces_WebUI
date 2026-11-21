@@ -9,20 +9,98 @@ const data = async promise => (await promise).data
 export const CANVAS_UPLOAD_ORIGINS = ['canvas_upload', 'paste', 'frame', 'save_as']
 const codeOf = error => error?.response?.data?.code
 
+export function formatUploadBytes(bytes) {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  if (value < 1024) return `${Math.round(value)} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function computeBatchUploadProgress({
+  totalFiles = 1,
+  currentIndex = 1,
+  fileName = '素材',
+  completedBytes = 0,
+  totalBytes = 0,
+  fileLoaded = 0,
+  fileTotal = 0,
+  phase = 'uploading',
+} = {}) {
+  const safeFiles = Math.max(1, Number(totalFiles) || 1)
+  const safeIndex = Math.min(safeFiles, Math.max(1, Number(currentIndex) || 1))
+  const safeTotalBytes = Math.max(0, Number(totalBytes) || 0)
+  const safeCompleted = Math.max(0, Number(completedBytes) || 0)
+  const safeFileTotal = Math.max(0, Number(fileTotal) || 0)
+  const safeFileLoaded = safeFileTotal > 0
+    ? Math.min(safeFileTotal, Math.max(0, Number(fileLoaded) || 0))
+    : Math.max(0, Number(fileLoaded) || 0)
+
+  if (phase === 'saving') {
+    return {
+      totalFiles: safeFiles,
+      currentIndex: safeFiles,
+      fileName: String(fileName || '素材'),
+      filePercent: 100,
+      overallPercent: 100,
+      loadedBytes: safeTotalBytes,
+      totalBytes: safeTotalBytes,
+      phase: 'saving',
+    }
+  }
+
+  const filePercent = safeFileTotal > 0
+    ? Math.min(100, Math.round((safeFileLoaded / safeFileTotal) * 100))
+    : (phase === 'processing' ? 100 : null)
+
+  let loadedBytes = safeCompleted + safeFileLoaded
+  if (safeTotalBytes > 0) loadedBytes = Math.min(safeTotalBytes, loadedBytes)
+
+  let overallPercent = null
+  if (safeTotalBytes > 0) {
+    overallPercent = Math.min(100, Math.round((loadedBytes / safeTotalBytes) * 100))
+  } else if (filePercent !== null) {
+    overallPercent = Math.min(100, Math.round((((safeIndex - 1) + (filePercent / 100)) / safeFiles) * 100))
+  }
+
+  return {
+    totalFiles: safeFiles,
+    currentIndex: safeIndex,
+    fileName: String(fileName || '素材'),
+    filePercent,
+    overallPercent,
+    loadedBytes,
+    totalBytes: safeTotalBytes,
+    phase: phase === 'processing' ? 'processing' : 'uploading',
+  }
+}
+
 // Upload into the library root or a chosen folder. A folder deleted meanwhile falls back to the
 // root once (folderFallback) instead of losing the file.
-export async function uploadCanvasLibraryMedia(file, { origin = 'canvas_upload', folderId = null } = {}) {
+export async function uploadCanvasLibraryMedia(file, { origin = 'canvas_upload', folderId = null, onProgress = null } = {}) {
   if (!CANVAS_UPLOAD_ORIGINS.includes(origin)) throw new Error('上传来源无效')
+  const fileSize = Number(file?.size) > 0 ? Number(file.size) : 0
   const send = async folder => {
     const body = new FormData()
     body.append('file', file, file.name || 'media')
     body.append('origin', origin)
     if (folder) body.append('folder_id', folder)
-    return data(axios.post(base, body))
+    if (typeof onProgress !== 'function') return data(axios.post(base, body))
+    return data(axios.post(base, body, {
+      onUploadProgress: event => {
+        const rawTotal = Number(event?.total) > 0 ? Number(event.total) : fileSize
+        const loaded = Math.max(0, Number(event?.loaded) || 0)
+        const clampedLoaded = rawTotal > 0 ? Math.min(rawTotal, loaded) : loaded
+        const percent = rawTotal > 0 ? Math.min(100, Math.round((clampedLoaded / rawTotal) * 100)) : null
+        const phase = rawTotal > 0 && clampedLoaded >= rawTotal ? 'processing' : 'uploading'
+        onProgress({ loaded: clampedLoaded, total: rawTotal, percent, phase })
+      },
+    }))
   }
   let result, folderFallback = false
   try { result = await send(folderId) } catch (error) {
     if (!folderId || codeOf(error) !== 'folder_not_found') throw error
+    if (typeof onProgress === 'function') onProgress({ loaded: 0, total: fileSize, percent: 0, phase: 'uploading' })
     result = await send(null); folderFallback = true
   }
   return { asset: mediaNodeAsset(result.media), media: result.media, deduplicated: !!result.deduplicated, folderFallback }
@@ -93,6 +171,8 @@ export const deleteMediaFolder = id => data(axios.delete(`${base}/folders/${enco
 export const moveMedia = async (ids, folderId) => (await data(axios.post(`${base}/move`, { ids, folder_id: folderId || null }))).media || []
 export const listMedia = (params, signal) => data(axios.get(base, { params, signal }))
 export const getMediaInfo = async id => (await data(axios.get(`${base}/${encodeURIComponent(id)}/info`))).media
+export const splitCanvasLibraryVideo = (mediaId, payload) =>
+  data(axios.post(`${base}/${encodeURIComponent(mediaId)}/split`, payload, { timeout: 300000 }))
 
 // Folder labels ("生成历史 / 图片") and the folders a set of media may move into.
 export function folderPath(folders, id) {

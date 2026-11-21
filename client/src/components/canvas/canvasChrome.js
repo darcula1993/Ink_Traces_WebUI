@@ -132,6 +132,13 @@ export const NODE_TOOLBAR_ACTIONS = Object.freeze([
   {id: 'history', label: '历史版本', title: '历史版本', handler: 'onHistory'},
   {id: 'more', label: '更多', title: '更多操作', handler: 'onMore'},
 ])
+export const VIDEO_ASSET_TOOLBAR_ACTIONS = Object.freeze([
+  {id: 'splitVideo', label: '视频分割', title: '按时间轴或时长分割视频素材', handler: 'onSplitVideo'},
+  {id: 'download', label: '下载', title: '下载视频', handler: 'onDownload'},
+  {id: 'preview', label: '预览', title: '预览', handler: 'onPreview'},
+  {id: 'history', label: '历史版本', title: '历史版本', handler: 'onHistory'},
+  {id: 'more', label: '更多', title: '更多操作', handler: 'onMore'},
+])
 export const VIDEO_TOOLBAR_ACTIONS = Object.freeze([
   {id: 'history', label: '历史版本', title: '历史版本', handler: 'onHistory'},
   {id: 'extendVideo', label: '延长此视频', title: '创建已连线的下游视频延长节点（不自动生成）', handler: 'onExtendVideo'},
@@ -156,15 +163,20 @@ export function nodeHasImage(node) {
   return node.type === 'image' && !!node.asset?.url && (node.asset.kind == null || node.asset.kind === 'image')
 }
 
+export function nodeHasVideoAsset(node) {
+  return node?.type === 'asset' && node.asset?.kind === 'video' && !!node.asset?.url
+}
+
 export function nodeHasAudio(node) {
   if (!node) return false
   if (node.type === 'asset') return node.asset?.kind === 'audio' && !!node.asset?.url
   return node.type === 'audio' && !!node.asset?.url && (node.asset.kind == null || node.asset.kind === 'audio')
 }
 
-// 'image' | 'video' | 'audio' | null: which toolbar the node gets.
+// 'image' | 'videoAsset' | 'video' | 'audio' | null: which toolbar the node gets.
 export function nodeToolbarKind(node) {
   if (nodeHasImage(node)) return 'image'
+  if (nodeHasVideoAsset(node)) return 'videoAsset'
   if (node?.type === 'video' && node.asset?.url && (node.asset.kind == null || node.asset.kind === 'video')) return 'video'
   if (nodeHasAudio(node)) return 'audio'
   return null
@@ -178,7 +190,13 @@ export function nodeToolbarVisible({node, selectedCount = 1, dragging = false, c
 // Actions shown for the handlers the caller supplies; `history` is disabled (with a reason) for a single version.
 export function nodeToolbarActions(node, handlers = {}) {
   const kind = nodeToolbarKind(node)
-  const list = kind === 'video' ? VIDEO_TOOLBAR_ACTIONS : kind === 'audio' ? AUDIO_TOOLBAR_ACTIONS : NODE_TOOLBAR_ACTIONS
+  const list = kind === 'videoAsset'
+    ? VIDEO_ASSET_TOOLBAR_ACTIONS
+    : kind === 'video'
+      ? VIDEO_TOOLBAR_ACTIONS
+      : kind === 'audio'
+        ? AUDIO_TOOLBAR_ACTIONS
+        : NODE_TOOLBAR_ACTIONS
   return list.filter(action => typeof handlers[action.handler] === 'function').map(action => {
     if (action.id !== 'history' || (node?.candidates?.length || 0) > 1) return action
     return {...action, disabled: true, reason: SINGLE_VERSION_REASON, title: `历史版本（${SINGLE_VERSION_REASON}）`}

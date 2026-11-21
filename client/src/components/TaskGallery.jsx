@@ -29,6 +29,7 @@ function useLiveCallback(callback) {
 function TaskGallery({
   mode,
   showTypeBadge = false,
+  allowTrash = false,
   refreshToken,
   onReuseTask,
 }) {
@@ -37,6 +38,10 @@ function TaskGallery({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [view, setView] = useState('all')
+  const effectiveView = !allowTrash && view === 'trash' ? 'all' : view
+  useEffect(() => {
+    if (!allowTrash && view === 'trash') setView('all')
+  }, [allowTrash, view])
   const [favoriteGroup, setFavoriteGroup] = useState('all')
   const [favoriteGroups, setFavoriteGroups] = useState([])
   const [query, setQuery] = useState('')
@@ -191,11 +196,11 @@ function TaskGallery({
   const buildFilterParams = useCallback((search = debouncedQuery) => ({
     type: mode,
     sort: cardSort,
-    ...(view === 'favorite' ? { favorite: true } : {}),
-    ...(view === 'active' ? { active: true } : {}),
-    ...(view === 'trash' ? { deleted: true } : {}),
-    ...(view === 'favorite' && favoriteGroup === 'ungrouped' ? { ungrouped: true } : {}),
-    ...(view === 'favorite' && Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0
+    ...(effectiveView === 'favorite' ? { favorite: true } : {}),
+    ...(effectiveView === 'active' ? { active: true } : {}),
+    ...(effectiveView === 'trash' ? { deleted: true } : {}),
+    ...(effectiveView === 'favorite' && favoriteGroup === 'ungrouped' ? { ungrouped: true } : {}),
+    ...(effectiveView === 'favorite' && Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0
       ? { favorite_group: Number(favoriteGroup) }
       : {}),
     ...(search ? { q: search } : {}),
@@ -203,14 +208,14 @@ function TaskGallery({
     ...(filters.provider ? { provider: filters.provider } : {}),
     ...(filters.model ? { model: filters.model } : {}),
     ...(createdAfter ? { created_after: createdAfter } : {}),
-  }), [cardSort, createdAfter, debouncedQuery, favoriteGroup, filters, mode, view])
+  }), [cardSort, createdAfter, debouncedQuery, effectiveView, favoriteGroup, filters, mode])
 
   const buildSelectionParams = useCallback((search = query.trim()) => ({
     type: mode,
-    view,
+    view: effectiveView,
     sort: cardSort,
-    ...(view === 'favorite' && favoriteGroup === 'ungrouped' ? { ungrouped: true } : {}),
-    ...(view === 'favorite' && Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0
+    ...(effectiveView === 'favorite' && favoriteGroup === 'ungrouped' ? { ungrouped: true } : {}),
+    ...(effectiveView === 'favorite' && Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0
       ? { favorite_group: Number(favoriteGroup) }
       : {}),
     ...(search ? { q: search } : {}),
@@ -218,7 +223,7 @@ function TaskGallery({
     ...(filters.provider ? { provider: filters.provider } : {}),
     ...(filters.model ? { model: filters.model } : {}),
     ...(createdAfter ? { created_after: createdAfter } : {}),
-  }), [cardSort, createdAfter, favoriteGroup, filters, mode, query, view])
+  }), [cardSort, createdAfter, effectiveView, favoriteGroup, filters, mode, query])
 
   const clearFilters = useCallback(() => setFilters(DEFAULT_TASK_FILTERS), [])
   const clearSearchAndFilters = useCallback(() => {
@@ -230,7 +235,7 @@ function TaskGallery({
   const fetchFilterOptions = useCallback(async () => {
     try {
       const response = await axios.get('/api/tasks/filter-options', {
-        params: { type: mode, ...(view === 'trash' ? { deleted: true } : {}) },
+        params: { type: mode, ...(effectiveView === 'trash' ? { deleted: true } : {}) },
       })
       if (response.data.success) {
         setFilterOptions({
@@ -241,7 +246,7 @@ function TaskGallery({
     } catch (requestError) {
       console.warn('Task filter options unavailable', requestError.message)
     }
-  }, [mode, view])
+  }, [effectiveView, mode])
 
   const fetchFavoriteGroups = useCallback(async () => {
     try {
@@ -325,14 +330,14 @@ function TaskGallery({
   }), [tasks])
 
   const categoryItems = useMemo(() => items.filter(item => {
-    if (view === 'favorite' && !item.favorite) return false
-    if (view === 'active' && !ACTIVE_STATUSES.has(item.status)) return false
+    if (effectiveView === 'favorite' && !item.favorite) return false
+    if (effectiveView === 'active' && !ACTIVE_STATUSES.has(item.status)) return false
     if (filters.status && item.status !== filters.status) return false
-    if (view === 'favorite' && favoriteGroup === 'ungrouped' && item.favoriteGroups?.length) return false
-    if (view === 'favorite' && Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0 &&
+    if (effectiveView === 'favorite' && favoriteGroup === 'ungrouped' && item.favoriteGroups?.length) return false
+    if (effectiveView === 'favorite' && Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0 &&
       !item.favoriteGroups?.some(group => Number(group.id) === Number(favoriteGroup))) return false
     return true
-  }), [favoriteGroup, filters.status, items, view])
+  }), [effectiveView, favoriteGroup, filters.status, items])
 
   // Search is server-side: a matching prompt may extend beyond the summary preview.
   const visibleItems = categoryItems
@@ -359,7 +364,7 @@ function TaskGallery({
     setSelectedKey(null)
     setSelectedOverride(null)
     setNavigation(EMPTY_NAVIGATION)
-  }, [cardSort, debouncedQuery, favoriteGroup, filters, mode, view])
+  }, [cardSort, debouncedQuery, effectiveView, favoriteGroup, filters, mode])
 
   useEffect(() => {
     setSelectedKeys(new Set())
@@ -367,7 +372,7 @@ function TaskGallery({
     setSelectionMode(false)
     setBulkDownloadMenuOpen(false)
     setBulkGroupMenuOpen(false)
-  }, [mode, view])
+  }, [effectiveView, mode])
 
   const loadNavigation = useCallback(async taskId => {
     navigationRequestRef.current.controller?.abort()
@@ -567,7 +572,7 @@ function TaskGallery({
           return changed ? next : previous
         })
         // Unfiltered totals do not change when an existing task finishes.
-        if (membershipChanged || (terminal && (view === 'active' || cardSort === 'updated'))) {
+        if (membershipChanged || (terminal && (effectiveView === 'active' || cardSort === 'updated'))) {
           await fetchTasks({ preserveLoaded: true })
         }
       } catch (requestError) {
@@ -590,7 +595,7 @@ function TaskGallery({
       controller?.abort()
       document.removeEventListener('visibilitychange', visibilityChanged)
     }
-  }, [cardSort, fetchTasks, filters.status, openItem, view])
+  }, [cardSort, effectiveView, fetchTasks, filters.status, openItem])
 
   const navigate = useCallback(async direction => {
     if (!selectedItem || selectedTotal <= 1 || navigationLoading) return
@@ -614,13 +619,13 @@ function TaskGallery({
     try {
       const response = await axios.patch(`/api/tasks/${item.taskId}/favorite`, { favorite })
       const updatedTask = response.data.task
-      setTasks(previous => view === 'favorite' && !favorite
+      setTasks(previous => effectiveView === 'favorite' && !favorite
         ? previous.filter(task => Number(task.id) !== Number(item.taskId))
         : previous.map(task => Number(task.id) === Number(item.taskId)
           ? { ...task, favorite, favorite_groups: updatedTask?.favorite_groups || [] }
           : task))
-      if (view === 'favorite' && !favorite) setTotal(previous => Math.max(0, previous - 1))
-      if (view === 'favorite' && !favorite) {
+      if (effectiveView === 'favorite' && !favorite) setTotal(previous => Math.max(0, previous - 1))
+      if (effectiveView === 'favorite' && !favorite) {
         setSelectedKey(null)
         setSelectedOverride(null)
       } else {
@@ -633,7 +638,7 @@ function TaskGallery({
     } catch (requestError) {
       setError(requestError.response?.data?.error || '收藏状态更新失败')
     }
-  }, [fetchFavoriteGroups, view])
+  }, [effectiveView, fetchFavoriteGroups])
 
   const createFavoriteGroup = useCallback(async event => {
     event?.preventDefault()
@@ -694,7 +699,7 @@ function TaskGallery({
         : previous)
       await fetchFavoriteGroups()
       const updatedGroupIds = new Set((updated.favorite_groups || []).map(group => Number(group.id)))
-      const noLongerMatches = view === 'favorite' && (
+      const noLongerMatches = effectiveView === 'favorite' && (
         (favoriteGroup === 'ungrouped' && updatedGroupIds.size > 0) ||
         (Number.isInteger(Number(favoriteGroup)) && Number(favoriteGroup) > 0 && !updatedGroupIds.has(Number(favoriteGroup)))
       )
@@ -707,13 +712,15 @@ function TaskGallery({
     } catch (requestError) {
       setError(requestError.response?.data?.error || '任务收藏分组更新失败')
     }
-  }, [favoriteGroup, fetchFavoriteGroups, fetchTasks, view])
+  }, [effectiveView, favoriteGroup, fetchFavoriteGroups, fetchTasks])
 
   const deleteTask = useCallback(async item => {
-    const permanent = view === 'trash'
+    const permanent = allowTrash && effectiveView === 'trash'
     // GEN-RESULT-LIFECYCLE-20261119: trash hides the task's 生成历史 results; permanent deletion deletes them
     // (the server preview lists the canvases, groups and character cards referencing them).
-    let message = '将此任务移到回收站？它在素材库“生成历史”中的结果会暂时隐藏（画布上显示“结果在回收站”），恢复任务后原样回来。'
+    let message = allowTrash
+      ? '将此任务移到回收站？它在素材库“生成历史”中的结果会暂时隐藏（画布上显示“结果在回收站”），恢复任务后原样回来。'
+      : '将此任务移到回收站？它在素材库“生成历史”中的结果会暂时隐藏（画布上显示“结果在回收站”），可在顶部「任务中心 → 回收站」恢复或彻底删除。'
     if (permanent) {
       try { message = <TaskDeletePlan preview={await previewTaskDelete({ ids: [item.taskId] })} /> } catch (requestError) { setError(requestError.response?.data?.error || '无法读取删除影响，未删除'); return }
     }
@@ -730,7 +737,7 @@ function TaskGallery({
     } catch (requestError) {
       setError(requestError.response?.data?.error || '任务删除失败')
     }
-  }, [view])
+  }, [allowTrash, effectiveView])
 
   const cancelTask = useLiveCallback(async item => {
     if (!item.taskId || !await askConfirm({ title: '取消任务', message: '取消这个任务？已开始的上游请求可能仍会完成，但结果不会写入本地任务。', confirmLabel: '取消任务', cancelLabel: '继续任务', danger: true })) return
@@ -741,7 +748,7 @@ function TaskGallery({
       setSelectedOverride(previous => previous && Number(previous.taskId) === Number(item.taskId)
         ? { ...previous, ...serverItem(updated), key: previous.key }
         : previous)
-      if (updated.status !== item.status && (view === 'active' || filters.status)) {
+      if (updated.status !== item.status && (effectiveView === 'active' || filters.status)) {
         await fetchTasks({ preserveLoaded: true })
       }
       setError('')
@@ -894,8 +901,10 @@ function TaskGallery({
       .map(token => Number(token.slice(5)))
       .filter(Number.isInteger)
     const label = `${selectedKeys.size} 个任务卡片`
-    const permanent = view === 'trash'
-    let prompt = `将选中的 ${label} 移到回收站？它们在素材库“生成历史”中的结果会暂时隐藏，恢复任务后原样回来。`
+    const permanent = allowTrash && effectiveView === 'trash'
+    let prompt = allowTrash
+      ? `将选中的 ${label} 移到回收站？它们在素材库“生成历史”中的结果会暂时隐藏，恢复任务后原样回来。`
+      : `将选中的 ${label} 移到回收站？它们在素材库“生成历史”中的结果会暂时隐藏（画布上显示“结果在回收站”），可在顶部「任务中心 → 回收站」恢复或彻底删除。`
     if (permanent) {
       try { prompt = <TaskDeletePlan preview={await previewTaskDelete({ ids: taskIds })} /> } catch (requestError) { setError(requestError.response?.data?.error || '无法读取删除影响，未删除'); return }
     }
@@ -924,7 +933,7 @@ function TaskGallery({
     } catch (requestError) {
       setError(requestError.response?.data?.error || '批量删除失败')
     }
-  }, [fetchFavoriteGroups, selectedKeys, view])
+  }, [allowTrash, effectiveView, fetchFavoriteGroups, selectedKeys])
 
   const restoreSelected = useCallback(async () => {
     const taskIds = [...selectedKeys]
@@ -1002,30 +1011,31 @@ function TaskGallery({
   }, [fetchFavoriteGroups, fetchTasks, selectedKeys])
 
   const changeView = useCallback(nextView => {
-    if (nextView === view) return
+    const targetView = !allowTrash && nextView === 'trash' ? 'all' : nextView
+    if (targetView === effectiveView) return
     setTasks([])
     setTotal(0)
-    setView(nextView)
-    if (nextView !== 'favorite') setFavoriteGroup('all')
-  }, [view])
+    setView(targetView)
+    if (targetView !== 'favorite') setFavoriteGroup('all')
+  }, [allowTrash, effectiveView])
 
   const hasSearchOrFilters = Boolean(query.trim() || activeFilters.length)
   const emptyArtKind = hasSearchOrFilters
     ? 'empty-search'
-    : view === 'trash'
+    : effectiveView === 'trash'
       ? 'empty-trash'
-      : view === 'favorite'
+      : effectiveView === 'favorite'
         ? 'empty-favorites'
-        : view === 'active'
+        : effectiveView === 'active'
           ? 'empty-active'
           : 'empty-tasks'
   const emptyTitle = hasSearchOrFilters
     ? '没有匹配的任务'
-    : view === 'active'
+    : effectiveView === 'active'
       ? '没有正在生成的任务'
-      : view === 'favorite'
+      : effectiveView === 'favorite'
         ? '当前收藏为空'
-        : view === 'trash'
+        : effectiveView === 'trash'
           ? '回收站为空'
           : mode === 'all'
             ? '还没有生成任务'
@@ -1056,13 +1066,15 @@ function TaskGallery({
           </div>
         ) : (
           <div className="task-view-segment ml-1 flex shrink-0 items-center gap-1" role="group" aria-label="任务视图">
-            <button type="button" aria-pressed={view === 'all'} onClick={() => changeView('all')} className={`task-view-button ${view === 'all' ? 'task-view-button-active' : ''}`}>全部</button>
-            <button type="button" aria-pressed={view === 'favorite'} onClick={() => changeView('favorite')} className={`task-view-button ${view === 'favorite' ? 'task-view-button-active' : ''}`}><Heart size={12} /> 收藏</button>
-            <button type="button" aria-pressed={view === 'active'} onClick={() => changeView('active')} className={`task-view-button ${view === 'active' ? 'task-view-button-active' : ''}`}><LoaderCircle size={12} /> 进行中</button>
-            <button type="button" aria-pressed={view === 'trash'} onClick={() => changeView('trash')} className={`task-view-button ${view === 'trash' ? 'task-view-button-active' : ''}`}><Trash2 size={12} /> 回收站</button>
+            <button type="button" aria-pressed={effectiveView === 'all'} onClick={() => changeView('all')} className={`task-view-button ${effectiveView === 'all' ? 'task-view-button-active' : ''}`}>全部</button>
+            <button type="button" aria-pressed={effectiveView === 'favorite'} onClick={() => changeView('favorite')} className={`task-view-button ${effectiveView === 'favorite' ? 'task-view-button-active' : ''}`}><Heart size={12} /> 收藏</button>
+            <button type="button" aria-pressed={effectiveView === 'active'} onClick={() => changeView('active')} className={`task-view-button ${effectiveView === 'active' ? 'task-view-button-active' : ''}`}><LoaderCircle size={12} /> 进行中</button>
+            {allowTrash && (
+              <button type="button" aria-pressed={effectiveView === 'trash'} onClick={() => changeView('trash')} className={`task-view-button ${effectiveView === 'trash' ? 'task-view-button-active' : ''}`}><Trash2 size={12} /> 回收站</button>
+            )}
           </div>
         )}
-        {!selectionMode && view === 'favorite' && (
+        {!selectionMode && effectiveView === 'favorite' && (
           <div ref={groupMenuRef} className="relative">
             <button
               type="button"
@@ -1356,7 +1368,7 @@ function TaskGallery({
                 <Download size={15} />
               </IconButton>
             )}
-            {view !== 'trash' && favoriteGroups.length > 0 && (
+            {effectiveView !== 'trash' && favoriteGroups.length > 0 && (
               <div ref={bulkGroupMenuRef} className="relative">
                 <IconButton
                   label="将已选任务加入收藏分组"
@@ -1390,18 +1402,18 @@ function TaskGallery({
                 </AnimatePresence>
               </div>
             )}
-            {view !== 'trash' && (
+            {effectiveView !== 'trash' && (
               <IconButton label="已选任务结果复制到文件夹" onClick={moveSelectedResults} disabled={selectedTaskCount === 0 || collectingMedia}>
                 <FolderInput size={15} />
               </IconButton>
             )}
-            {view === 'trash' && (
+            {allowTrash && effectiveView === 'trash' && (
               <IconButton label="恢复已选任务" onClick={restoreSelected} disabled={selectedTaskCount === 0}>
                 <ArchiveRestore size={15} />
               </IconButton>
             )}
             <IconButton
-              label={view === 'trash' ? '彻底删除已选任务' : '将已选任务移到回收站'}
+              label={allowTrash && effectiveView === 'trash' ? '彻底删除已选任务' : '将已选任务移到回收站'}
               onClick={deleteSelected}
               disabled={!selectedKeys.size}
               className="hover:text-nexus-red"
@@ -1415,7 +1427,7 @@ function TaskGallery({
         </div>
       </div>
 
-      {!selectionMode && view === 'trash' && (
+      {!selectionMode && allowTrash && effectiveView === 'trash' && (
         <div
           className="task-trash-strip flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-black/25 px-3 py-1.5"
           data-testid="task-trash-strip"
@@ -1485,7 +1497,7 @@ function TaskGallery({
           onRestore={restoreTask}
           onReveal={revealTaskResults}
           onMove={moveTaskResults}
-          trash={view === 'trash'}
+          trash={allowTrash && effectiveView === 'trash'}
         />
         {!loading && visibleItems.length === 0 && (
           <div className="task-empty-state" data-empty-kind={emptyArtKind}>
@@ -1531,7 +1543,7 @@ function TaskGallery({
             onReveal={revealTaskResults}
             onMove={moveTaskResults}
             favoriteGroups={favoriteGroups}
-            trash={view === 'trash'}
+            trash={allowTrash && effectiveView === 'trash'}
           />
         )}
       </AnimatePresence>
@@ -1586,7 +1598,7 @@ function TaskGallery({
 
 const MemoTaskGallery = React.memo(TaskGallery)
 
-export default function TaskGalleryBoundary({ mode, showTypeBadge = false, refreshToken, onReuseTask }) {
+export default function TaskGalleryBoundary({ mode, showTypeBadge = false, allowTrash = false, refreshToken, onReuseTask }) {
   const reuseTask = useLiveCallback(onReuseTask)
-  return <MemoTaskGallery mode={mode} showTypeBadge={showTypeBadge} refreshToken={refreshToken} onReuseTask={reuseTask} />
+  return <MemoTaskGallery mode={mode} showTypeBadge={showTypeBadge} allowTrash={allowTrash} refreshToken={refreshToken} onReuseTask={reuseTask} />
 }

@@ -10,13 +10,16 @@ sys.path.insert(0, str(ROOT))
 from deploy import configure_public_source as deployment
 
 
-def write_config(tmp_path, source_url, server_port=5000, email='', client_port=4545):
+def write_config(tmp_path, source_url, server_port=5000, email='', client_port=4545, public_base_url=''):
     path = tmp_path / 'config.json'
+    deployment_cfg = {'cupsy_source': {'base_url': source_url, 'certificate_email': email}}
+    if public_base_url:
+        deployment_cfg['public_base_url'] = public_base_url
     path.write_text(json.dumps({
         'config_version': 2,
         'server': {'port': server_port},
         'client': {'port': client_port},
-        'deployment': {'cupsy_source': {'base_url': source_url, 'certificate_email': email}},
+        'deployment': deployment_cfg,
     }), encoding='utf-8')
     return path
 
@@ -160,3 +163,54 @@ def test_load_spec_rejects_v1_config(tmp_path):
     path.write_text(json.dumps({'video': {'cupsy': {'source_base_url': 'https://8.8.8.8'}}}), encoding='utf-8')
     with pytest.raises(deployment.DeploymentError, match='not config v2'):
         deployment.load_spec(path)
+
+
+def test_resolve_template_uses_workspace_when_public_base_url_matches(tmp_path):
+    spec_cupsy_only = deployment.load_spec(write_config(tmp_path, 'https://8.8.4.4:8443', 18802, client_port=8802))
+    assert spec_cupsy_only.workspace_proxy is False
+    assert deployment.resolve_template(None, spec_cupsy_only) == deployment.DEFAULT_TEMPLATE
+
+    spec_workspace = deployment.load_spec(
+        write_config(
+            tmp_path, 'https://8.8.4.4:8443', 18802, client_port=8802,
+            public_base_url='https://8.8.4.4:8443/',
+        )
+    )
+    assert spec_workspace.workspace_proxy is True
+    assert deployment.resolve_template(None, spec_workspace) == deployment.WORKSPACE_TEMPLATE
+
+    # Default HTTPS port normalization (https://host vs https://host:443)
+    spec_norm = deployment.load_spec(
+        write_config(tmp_path, 'https://8.8.8.8', 5000, public_base_url='https://8.8.8.8:443')
+    )
+    assert spec_norm.workspace_proxy is True
+    assert deployment.resolve_template(None, spec_norm) == deployment.WORKSPACE_TEMPLATE
+
+    # Explicit --template always overrides auto-selection
+    assert deployment.resolve_template(deployment.DEFAULT_TEMPLATE, spec_workspace) == deployment.DEFAULT_TEMPLATE
+
+
+def test_resolve_template_preserves_existing_managed_workspace_proxy(tmp_path):
+    spec = deployment.load_spec(
+        write_config(tmp_path, 'https://8.8.8.8', 5000, public_base_url='http://8.8.8.8:5000')
+    )
+    assert spec.workspace_proxy is False
+
+    workspace_site = tmp_path / 'nanobanana-workspace-active'
+    workspace_site.write_text(
+        deployment.render_https_proxy(
+            spec, deployment.WORKSPACE_TEMPLATE, Path('/var/www/certbot'), Path('/etc/letsencrypt'),
+        ),
+        encoding='utf-8',
+    )
+    assert deployment.resolve_template(None, spec, workspace_site) == deployment.WORKSPACE_TEMPLATE
+    assert deployment.resolve_template(deployment.DEFAULT_TEMPLATE, spec, workspace_site) == deployment.DEFAULT_TEMPLATE
+
+    cupsy_site = tmp_path / 'nanobanana-cupsy-active'
+    cupsy_site.write_text(
+        deployment.render_https_proxy(
+            spec, deployment.DEFAULT_TEMPLATE, Path('/var/www/certbot'), Path('/etc/letsencrypt'),
+        ),
+        encoding='utf-8',
+    )
+    assert deployment.resolve_template(None, spec, cupsy_site) == deployment.DEFAULT_TEMPLATE

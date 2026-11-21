@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios'
 import LayerOcrDetails from './LayerOcrDetails'
 import './layer-options.css'
+import './properties/propertiesPrimitives.css'
 import {renderLayerDocument} from '../lib/layerExport'
 import {isSeedream55} from '../lib/imageGenerationRules'
 import LayerCostEstimate from './LayerCostEstimate'
@@ -746,8 +747,12 @@ export default function LayerStudio({ notify }) {
         )}
       </main>
 
-      <aside className="layer-studio-right liquid-glass">
-        <div className="layer-panel-heading">图层<span>{documentState.layers.length}</span></div>
+      <aside className="layer-studio-right">
+        <div className="layer-panel-heading layer-studio-right-head">
+          <span className="pf-kind-box"><Layers3 size={14} aria-hidden="true" className="pf-kind-icon" /></span>
+          <strong>图层</strong>
+          <span className="layer-count-badge">{documentState.layers.length}</span>
+        </div>
         <div className="studio-layer-list custom-scrollbar">
           {[...documentState.layers].reverse().map(item => (
             <div
@@ -768,7 +773,7 @@ export default function LayerStudio({ notify }) {
           ))}
         </div>
         <div className="layer-properties">
-          <div className="layer-panel-heading">属性</div>
+          <div className="layer-panel-heading layer-properties-heading">属性</div>
           {selectedLayer ? <>
             <label>名称<input value={selectedLayer.name} onChange={event => updateLayer(selectedLayer.id, { name: event.target.value })} /></label>
             <div className="layer-property-grid">

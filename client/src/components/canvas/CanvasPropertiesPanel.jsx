@@ -20,8 +20,11 @@ import {positionalMentionRebinds} from '../../lib/canvasReferences'
 import {FAILURE_ACTION_LABELS,formatTaskError} from '../../lib/canvasTaskEcho'
 import {decodeProviderError,sanitizeErrorText} from '../../lib/providerErrorHints'
 import {formatCostRange} from '../../lib/canvasBatchRun'
+import {RatioGlyph,CollapsibleAdvanced,imageRatioPrefix} from '../properties/PropertiesPrimitives'
 import './propertiesPanel.css'
 import './propertiesForm.css'
+
+export {RatioGlyph}
 
 // CANVAS-LAYOUT-1-20261117 (user decision 11-17; replaces the 11-13 "panel below the preview" and the 11-14 "panel
 // always below the node"): one fixed column right of the canvas. Its content follows the selection; generation is
@@ -51,26 +54,14 @@ const Section=({id,title,children,className='',actions=null})=><section classNam
 // 36px control, optional decorative prefix (aria-hidden; the control keeps its own aria-label). Presentation only.
 const Field=({label,hint,prefix,className='',children})=><label className={`cv-pf-field ${prefix?'has-prefix':''} ${className}`}><span className="cv-pf-label">{label}{hint&&<small>{hint}</small>}</span>{children}{prefix&&<span className="cv-pf-prefix" aria-hidden="true">{prefix}</span>}</label>
 const Toggle=({label,className='',children})=><label className={`cv-pf-toggle ${className}`}><span>{label}</span>{children}</label>
-// Aspect-ratio box glyph (decorative): 16:9 draws a wide box, 9:16 a tall one, auto/custom a dashed square.
-export function RatioGlyph({value}) {
- const m=/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(String(value||''));let w=12,h=12
- if(m){const a=Number(m[1]),b=Number(m[2]);if(a>=b){w=14;h=Math.max(5,Math.round(14*b/a))}else{h=14;w=Math.max(5,Math.round(14*a/b))}}
- return <span className={`cv-pf-ratio ${m?'':'is-free'}`} style={{width:w,height:h}}/>
-}
 // 高级 group: collapsed by default; the open/closed choice is a per-browser preference. It opens by itself when a
 // hidden field becomes the one that matters (自定义尺寸 chosen, or a parameter issue to fix). Content stays mounted
 // (hidden) so drafts and validation messages are kept.
 const ADVANCED_KEY='ink-traces.canvas.properties-advanced.v1'
-function PropAdvanced({summary,autoOpen,children}) {
- const [open,setOpen]=useState(()=>readStored(ADVANCED_KEY)==='1'),seen=useRef(false),id=useRef(`cv-pf-advanced-${Math.random().toString(36).slice(2,8)}`).current
- useEffect(()=>{if(autoOpen&&!seen.current)setOpen(true);seen.current=!!autoOpen},[autoOpen])
- const toggle=()=>{const next=!open;setOpen(next);writeStored(ADVANCED_KEY,next?'1':'0')}
- return <div className={`cv-pf-advanced ${open?'is-open':''}`}>
-  <button type="button" className="cv-pf-advanced-toggle" aria-expanded={open} aria-controls={id} title={open?'收起高级参数':'展开高级参数'} onClick={toggle}><ChevronRight size={14} aria-hidden="true" className="cv-pf-chevron"/><span>高级</span>{!open&&summary&&<small>{summary}</small>}</button>
-  <div id={id} className="cv-pf-advanced-body" hidden={!open}>{children}</div>
- </div>
+function PropAdvanced(props) {
+ return <CollapsibleAdvanced storageKey={ADVANCED_KEY} {...props}/>
 }
-const imagePrefix=(name,value)=>name==='ratio'?<span className="cv-pf-prefix" aria-hidden="true"><RatioGlyph value={value}/></span>:null
+const imagePrefix=(name,value)=>name==='model'?<span className="cv-pf-prefix" aria-hidden="true"><Cpu size={14}/></span>:imageRatioPrefix(name,value)
 
 export default function CanvasPropertiesPanel({prefs,content,onFocusCanvas}) {
  const asideRef=useRef(null),gesture=useRef(null),[dragging,setDragging]=useState(false)

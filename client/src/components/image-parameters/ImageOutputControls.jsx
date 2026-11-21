@@ -2,10 +2,10 @@ import React,{useState} from 'react'
 import {isSeedream55,imageCapabilities,imageEffectiveParams,imageDefaults,imageSizePatch} from '../../lib/imageGenerationRules'
 import {alignSeedreamDimension,fitSeedreamSizeToReference,formatDimensionRatio} from '../../lib/generationSettings'
 import './image-parameters.css'
-// PROPS-PANEL-REDESIGN-20261118: variant="panel" (canvas right properties panel only) reorders the same fields into one
-// column and moves 自定义尺寸 / 图片背景 / 添加水印 into the panel's collapsible 高级 group (Advanced, supplied by the panel).
-// Without variant the old image tool renders exactly as before. Fields, labels, validation and patches are shared.
-export default function ImageOutputControls({provider,params,onChange,model,hideModel=false,references=[],dimensions,issues=[],metadataError='',children,variant,fieldPrefix,Advanced}){
+// PROPS-PANEL-REDESIGN-20261118 + UNIFY-PROPS-PANEL-20261122: variant="panel" (canvas right properties panel
+// and standalone image tool) reorders the same fields into one column and moves 自定义尺寸 / 图片背景 / 添加水印
+// into the panel's collapsible 高级 group (Advanced, supplied by the panel). Fields, labels, validation and patches are shared.
+export default function ImageOutputControls({provider,params,onChange,model,hideModel=false,references=[],dimensions,issues=[],metadataError='',children,variant,fieldPrefix,Advanced,advancedAutoOpenSignal=0}){
  const [referenceId,setReferenceId]=useState(''),[notice,setNotice]=useState(''),p=imageEffectiveParams(provider,params),spec=imageCapabilities(provider,model),eligible=provider==='ark'&&(isSeedream55(model)||(references.length===1&&references[0].has_alpha===true))
  const change=patch=>{setNotice('');const next=imageSizePatch(provider,params,patch,model);dimensions.sync(next);onChange(next)},refs=references.filter(a=>a.width>0&&a.height>0),selected=refs.find(a=>String(a.id)===referenceId)
  function fit(asset){const size=fitSeedreamSizeToReference(asset.width,asset.height);if(size.error){setNotice(size.error);return}change({ratio:'custom',custom_width:size.width,custom_height:size.height});setNotice(size.adjusted?`参考素材 ${asset.width}×${asset.height} 已适配为 ${size.width}×${size.height}`:'已使用参考素材尺寸')}
@@ -17,12 +17,14 @@ export default function ImageOutputControls({provider,params,onChange,model,hide
  const messages=<>{metadataError&&<small role="status">{metadataError}</small>}{notice&&<small role="status">{notice}</small>}{dimensions.error&&spec.custom&&<p role="alert">{dimensions.error}</p>}{issues.length>0&&<div className="ip-errors" role="alert">{issues.map(issue=><p key={issue}>{issue}</p>)}<button type="button" onClick={()=>{const next=imageDefaults(provider);dimensions.sync(next);onChange(next)}}>重设为当前接口默认参数</button></div>}</>
  if(variant==='panel'){
   const prefixed=(name,label,values)=>{const prefix=fieldPrefix?.(name,p[name]);const el=field(name,label,values);return prefix?<div className="ip-prefixed" key={name} data-field={name}>{prefix}{el}</div>:el}
+  const modelPrefix=fieldPrefix?.('model',model)
   const summary=[spec.custom&&p.ratio==='custom'?`${p.custom_width}×${p.custom_height}`:'',provider==='ark'&&!['default','auto'].includes(p.background)?({transparent:'透明背景',opaque:'不透明背景'}[p.background]||p.background):'',p.watermark===true?'水印':'无水印'].filter(Boolean).join(' · ')
   const advanced=<>{spec.custom&&sizeEl}{provider==='ark'&&backgroundEl}{watermarkEl}</>
+  const autoOpen=p.ratio==='custom'||issues.length>0||(provider==='ark'&&!['default','auto'].includes(p.background))||p.watermark===true
   return <div className="ip-controls is-panel">
-  {model&&<div className="ip-model" aria-label="有效图片模型"><span className="ip-model-label">模型<small>由当前接口配置决定</small></span><strong title={model}>{model}</strong></div>}
+  {model&&!hideModel&&<div className={`ip-model ${modelPrefix?'has-prefix':''}`} aria-label="有效图片模型"><span className="ip-model-label">模型<small>由当前接口配置决定</small></span><strong title={model}>{model}</strong>{modelPrefix}</div>}
   {prefixed('ratio','画幅',spec.ratios)}{p.ratio!=='custom'&&field('resolution','图片分辨率',spec.resolutions)}{field('output_format','图片输出格式',spec.formats)}
-  {Advanced?<Advanced summary={summary} autoOpen={p.ratio==='custom'||issues.length>0}>{advanced}</Advanced>:advanced}
+  {Advanced?<Advanced summary={summary} autoOpen={autoOpen} autoOpenSignal={advancedAutoOpenSignal}>{advanced}</Advanced>:advanced}
   {messages}
   </div>
  }

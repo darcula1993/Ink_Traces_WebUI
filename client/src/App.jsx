@@ -17,15 +17,15 @@ import SortableReferenceItem, { moveArrayItem } from './components/SortableRefer
 import IconButton from './components/ui/IconButton'
 import BrandMark from './components/ui/BrandMark'
 import SegmentedControl from './components/ui/SegmentedControl'
-import ToggleSwitch from './components/ui/ToggleSwitch'
+import { RatioGlyph, imageRatioPrefix, PanelHeader, PanelSection, PanelField, PanelToggle, CollapsibleAdvanced, CostEstimateFooter } from './components/properties/PropertiesPrimitives'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
-import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Images, Library, ListTodo, Plus, SlidersHorizontal, AudioLines, CircleAlert, FileSearch, Layers3 } from 'lucide-react'
-import {videoCapabilities as getVideoCapabilities,videoDurations,videoRatio,VIDEO_RATIOS,VIDEO_AUTO_DURATION} from './lib/videoGenerationRules.js'
+import { Play, Settings, Cpu, Grid3X3, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Images, Library, ListTodo, Plus, AudioLines, CircleAlert, FileSearch, Layers3, Plug, Clock3, Mic, Music } from 'lucide-react'
+import {videoCapabilities as getVideoCapabilities,videoDurations,videoRatio,videoRatioLabel,videoOutputSummary,VIDEO_RATIOS,VIDEO_AUTO_DURATION} from './lib/videoGenerationRules.js'
 import { estimateBytePlusVideoCost, estimateImageParamsCost, formatUsdEstimate, formatWanTokens, IMAGE_PRICING } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceObjectUrls, useWorkspaceState, workspaceImageFields } from './lib/useWorkspaceState'
 import { initialTabMode, writeTabMode } from './lib/canvasLastLocation'
-import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CUPSY_AUDIO_MODEL, AUDIO_SAMPLE_RATES, AUDIO_SPEAKERS, VIDEO_MODEL_CAPABILITIES } from './lib/generationSettings.js'
+import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CUPSY_AUDIO_MODEL, AUDIO_OUTPUT_FORMATS, AUDIO_SAMPLE_RATES, AUDIO_SPEAKERS, VIDEO_MODEL_CAPABILITIES } from './lib/generationSettings.js'
 import { currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile, readFileDataUrl, videoDropZoneHandlers } from './lib/referenceMedia.js'
 import { makeImgTab, makeVideoTab, DEFAULT_AUDIO_FORM, IMAGE_WORKSPACE_OPTIONS, VIDEO_WORKSPACE_OPTIONS } from './lib/workspaceTabs.js'
 import { TASK_CENTER_EVENT, TASK_CENTER_MODES } from './lib/taskCenterLink.js'
@@ -46,6 +46,13 @@ axios.defaults.withCredentials = true
 const LayerStudio = React.lazy(() => import('./components/LayerStudio'))
 const CanvasStudio = React.lazy(() => import('./components/canvas/CanvasStudio'))
 const ProviderSettings = React.lazy(() => import('./components/providers/ProviderSettings'))
+
+const IMAGE_TOOL_ADVANCED_KEY = 'ink-traces.tool.image-advanced.v1'
+const VIDEO_TOOL_ADVANCED_KEY = 'ink-traces.tool.video-advanced.v1'
+const AUDIO_TOOL_ADVANCED_KEY = 'ink-traces.tool.audio-advanced.v1'
+function ImageToolAdvanced(props) {
+  return <CollapsibleAdvanced storageKey={IMAGE_TOOL_ADVANCED_KEY} {...props} />
+}
 
 function App({ onLogout }) {
   const handleLogout = async () => {
@@ -647,6 +654,13 @@ function App({ onLogout }) {
     size_bytes: image.file?.size || image.size || 0,
   }))
   const [imageSubmitError, setImageSubmitError] = useState('')
+  const [imageAdvOpenSignal, setImageAdvOpenSignal] = useState(0)
+  const imageHasSingleAlpha = effectiveImageProvider === 'ark' && imageReferences.length === 1 && imageReferences[0].has_alpha === true
+  const prevSingleAlphaRef = useRef(imageHasSingleAlpha)
+  useEffect(() => {
+    if (imageHasSingleAlpha && !prevSingleAlphaRef.current) setImageAdvOpenSignal(n => n + 1)
+    prevSingleAlphaRef.current = imageHasSingleAlpha
+  }, [imageHasSingleAlpha])
   const imageActionAlertRef = useRef(null)
   const imageOutputSectionRef = useRef(null)
   const changeImageParams = patch => { setImageSubmitError(''); updateImgTab(activeImgTab.id, imageTabPatch(patch)) }
@@ -780,6 +794,7 @@ function App({ onLogout }) {
     imageDimensions.sync(sanitized.params)
     setImageSubmitError('')
     updateImgTab(activeImgTab.id, { providerSelection: selection, ...sanitized.patch })
+    if (option.provider === 'ark' && isSeedream55(nextCapabilityModel)) setImageAdvOpenSignal(n => n + 1)
     setApiProvider(option.provider)
     // Keep legacy session provider in sync on a best-effort basis without blocking custom profiles.
     if (!option.profile_id || option.source_key === `config:image:${option.provider}`) {
@@ -1451,129 +1466,152 @@ function App({ onLogout }) {
         </section>
 
         {/* 右侧：图片参数 */}
-        <aside className="inspector-pane custom-scrollbar">
-          <div className="inspector-header">
-            <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />图片参数</div>
-            <span className="font-mono text-xs text-nexus-muted">{imageSizeSummary}</span>
-          </div>
-
-            <div className="inspector-section">
-              <div className="inspector-title">
-                <Cpu size={14} className="text-nexus-green" /> 生成设置
-              </div>
-              <div className="inspector-fields">
-                <div className="inspector-field-row">
-                  <span className="field-label">端点</span>
+        <aside key="inspector-image" className="inspector-pane pf-panel">
+          <PanelHeader
+            className="inspector-header"
+            icon={ImageIcon}
+            title="图片参数"
+            summary={imageSizeSummary}
+          />
+          <div className="pf-panel-body custom-scrollbar">
+            <PanelSection id="tool-image-provider" title="生成设置">
+              <div className="pf-fields">
+                <PanelField label="接口" prefix={<Plug size={14} />}>
                   <select
                     aria-label="图片端点"
                     value={imageSelectionState.selectValue}
                     disabled={!capabilitiesReady || (!imageSelectionState.options.length && !imageSelectionState.staleOptionLabel)}
                     onChange={event => handleImageProviderChange(event.target.value)}
-                    className="field-select min-w-0"
                   >
-                    {!capabilitiesReady && <option value="" className="bg-nexus-bg">读取中…</option>}
+                    {!capabilitiesReady && <option value="">读取中…</option>}
                     {capabilitiesReady && imageSelectionState.staleOptionLabel && (
-                      <option value={imageSelectionState.selectValue} disabled className="bg-nexus-bg">
+                      <option value={imageSelectionState.selectValue} disabled>
                         {imageSelectionState.staleOptionLabel}
                       </option>
                     )}
                     {capabilitiesReady && !imageSelectionState.options.length && !imageSelectionState.staleOptionLabel && (
-                      <option value="" className="bg-nexus-bg">暂无可用接口</option>
+                      <option value="">暂无可用接口</option>
                     )}
                     {imageSelectionState.options.map(option => (
-                      <option key={option.id} value={option.id} className="bg-nexus-bg">
+                      <option key={option.id} value={option.id}>
                         {option.name}
                       </option>
                     ))}
                   </select>
-                </div>
+                </PanelField>
                 {capabilitiesReady && imageSelectionState.unavailableReason && (
-                  <div role="alert" data-testid="image-provider-alert" className="text-xs text-nexus-red leading-5">
+                  <div role="alert" data-testid="image-provider-alert" className="pf-alert">
                     {imageSelectionState.unavailableReason}
                   </div>
                 )}
-                <div className="inspector-field-row">
-                  <span className="field-label">模型</span>
+                <PanelField label="模型" hint="由当前接口配置决定" prefix={<Cpu size={14} />}>
                   <select
                     aria-label="图片模型"
                     value={imageModelValue}
                     disabled
                     onChange={() => {}}
-                    className="field-select min-w-0"
+                    className="pf-readonly-select"
                   >
                     {isSeedream ? (
-                      <option value={imageModelValue} className="bg-nexus-bg">{isSeedream55(imageCapabilityModel) ? 'Seedream 5.5' : 'Seedream 5.0 Pro'}</option>
+                      <option value={imageModelValue}>{isSeedream55(imageCapabilityModel) ? 'Seedream 5.5' : 'Seedream 5.0 Pro'}</option>
                     ) : (
                       <option value="">—</option>
                     )}
                   </select>
-                </div>
+                </PanelField>
               </div>
-            </div>
-            
-            <div className="inspector-section" ref={imageOutputSectionRef}>
-              <div className="inspector-title"><Settings size={14}/> 输出设置</div>
-              <ImageOutputControls hideModel model={imageCapabilityModel} provider={effectiveImageProvider} params={imageParams} onChange={changeImageParams}
-                references={imageReferences} dimensions={imageDimensions} issues={imageIssues}>
-              </ImageOutputControls>
-            </div>
+            </PanelSection>
+
+            <PanelSection
+              id="tool-image-output"
+              title="输出参数"
+              summary={imageSizeSummary}
+              sectionRef={imageOutputSectionRef}
+            >
+              <ImageOutputControls
+                variant="panel"
+                hideModel
+                fieldPrefix={imageRatioPrefix}
+                Advanced={ImageToolAdvanced}
+                advancedAutoOpenSignal={imageAdvOpenSignal}
+                model={imageCapabilityModel}
+                provider={effectiveImageProvider}
+                params={imageParams}
+                onChange={changeImageParams}
+                references={imageReferences}
+                dimensions={imageDimensions}
+                issues={imageIssues}
+              />
+            </PanelSection>
 
             {/* SOURCE NODE */}
-            <div className="inspector-section">
-              <div className="inspector-title justify-between">
-                <span className="flex items-center gap-2"><HardDrive size={14} className="text-nexus-violet" /> 参考素材</span>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13} /> 素材库</button>
-              </div>
+            <PanelSection
+              id="tool-image-refs"
+              title="参考素材"
+              actions={<button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13} /> 素材库</button>}
+            >
               <div className="flex-grow min-h-0">
-                 <ImageToImage
-                   uploadedImages={activeImgTab.uploadedImages}
-                   createPreviewUrl={createReferencePreview}
-                   onPreview={setReferenceMedia}
-                   setUploadedImages={value => {
-                     setImageSubmitError('')
-                     updateImgTab(activeImgTab.id, tab => ({
-                       uploadedImages: typeof value === 'function'
-                         ? value(Array.isArray(tab.uploadedImages) ? tab.uploadedImages : [])
-                         : value,
-                     }))
-                   }}
-                   maxImages={isSeedream ? 10 : 14}
-                 />
+                <ImageToImage
+                  uploadedImages={activeImgTab.uploadedImages}
+                  createPreviewUrl={createReferencePreview}
+                  onPreview={setReferenceMedia}
+                  setUploadedImages={value => {
+                    setImageSubmitError('')
+                    updateImgTab(activeImgTab.id, tab => ({
+                      uploadedImages: typeof value === 'function'
+                        ? value(Array.isArray(tab.uploadedImages) ? tab.uploadedImages : [])
+                        : value,
+                    }))
+                  }}
+                  maxImages={isSeedream ? 10 : 14}
+                />
               </div>
-            </div>
+            </PanelSection>
+          </div>
 
-            {/* PRICE ESTIMATE */}
-            <div className="inspector-section">
-              <div className="inspector-title">
-                <Database size={14} className="text-nexus-amber" /> 费用估算 (USD)
-              </div>
-              <div className="flex flex-col justify-between flex-grow gap-2">
-                {imageCostEstimate.known ? (() => {
-                  const est = imageCostEstimate.estimate
-                  const pricing = IMAGE_PRICING[est.model]
-                  const billedRefs = Math.max(0, est.referenceCount - pricing.freeInputImages)
-                  const refLine = est.referenceCount
-                    ? `参考图 ${est.referenceCount} 张${pricing.freeInputImages ? `（首张免费，计 ${billedRefs} 张）` : ''}`
-                    : '无参考图'
-                  return (<>
-                    <div data-testid="image-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatUsdEstimate(est)}</div>
-                    <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
-                      <div>{pricing.label} · {isCupsyImage ? 'Cupsy 费率' : 'BytePlus Ark'}</div>
-                      <div>{est.width}×{est.height} · {(est.pixels / 1_000_000).toFixed(2)}M 像素</div>
+          {(() => {
+            if (imageCostEstimate.known) {
+              const est = imageCostEstimate.estimate
+              const pricing = IMAGE_PRICING[est.model]
+              const billedRefs = Math.max(0, est.referenceCount - pricing.freeInputImages)
+              const refLine = est.referenceCount
+                ? `参考图 ${est.referenceCount} 张${pricing.freeInputImages ? `（首张免费，计 ${billedRefs} 张）` : ''}`
+                : '无参考图'
+              const providerLine = `${pricing.label} · ${isCupsyImage ? 'Cupsy 费率' : 'BytePlus Ark'}`
+              const pixelLine = `${est.width}×${est.height} · ${(est.pixels / 1_000_000).toFixed(2)}M 像素`
+              const noteLine = `${est.sizeAssumed ? 'Auto 按同分辨率 1:1 估算 · ' : ''}估算，非实际扣费`
+              return (
+                <CostEstimateFooter
+                  testId="image-cost-estimate"
+                  amount={formatUsdEstimate(est)}
+                  summaryTitle={[providerLine, pixelLine, refLine, noteLine].join('；')}
+                  details={
+                    <div className="pf-cost-detail-list">
+                      <div>{providerLine}</div>
+                      <div>{pixelLine}</div>
                       <div>{refLine}</div>
-                      <div className="mt-1 opacity-60">{est.sizeAssumed ? 'Auto 按同分辨率 1:1 估算 · ' : ''}估算，非实际扣费</div>
+                      <div className="pf-cost-detail-muted">{noteLine}</div>
                     </div>
-                  </>)
-                })() : (<>
-                  <div data-testid="image-cost-estimate" className="text-xl font-mono text-nexus-amber">费用待估</div>
-                  <div className="text-xs text-nexus-muted leading-5">
-                    <div>{imageCostEstimate.reason || '当前参数暂无法估算'}</div>
-                    <div className="mt-1 opacity-70">未知费用不计作 $0</div>
+                  }
+                />
+              )
+            }
+            const reason = imageCostEstimate.reason || '当前参数暂无法估算'
+            return (
+              <CostEstimateFooter
+                testId="image-cost-estimate"
+                amount="费用待估"
+                tone="warn"
+                summaryTitle={`${reason}；未知费用不计作 $0`}
+                details={
+                  <div className="pf-cost-detail-list">
+                    <div>{reason}</div>
+                    <div className="pf-cost-detail-muted">未知费用不计作 $0</div>
                   </div>
-                </>)}
-              </div>
-            </div>
-
+                }
+              />
+            )
+          })()}
         </aside>
 
       </>) : appMode === 'layer' ? (
@@ -1659,466 +1697,481 @@ function App({ onLogout }) {
           </section>
 
           {/* 右侧：视频参数 */}
-          <aside className="inspector-pane custom-scrollbar">
-            <div className="inspector-header">
-              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-blue" />视频参数</div>
-              <span className="font-mono text-xs text-nexus-muted">{activeTab.resolution} · {effectiveVideoDuration === -1 ? 'Auto' : `${effectiveVideoDuration}s`}</span>
-            </div>
-
-              {/* 生成模式 */}
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  <Grid3X3 size={14} className="text-nexus-blue" /> 生成设置
-                </div>
-                <div className="inspector-fields flex-grow">
-                  <div className="inspector-field-row">
-                    <span className="field-label">端点</span>
-                    <select
-                      aria-label="视频端点"
-                      value={videoSelectionState.selectValue}
-                      disabled={!capabilitiesReady || (!videoSelectionState.options.length && !videoSelectionState.staleOptionLabel)}
-                      onChange={event => handleVideoProviderChange(event.target.value)}
-                      className="field-select min-w-0"
-                    >
-                      {!capabilitiesReady && <option value="" className="bg-nexus-bg">读取中…</option>}
-                      {capabilitiesReady && videoSelectionState.staleOptionLabel && (
-                        <option value={videoSelectionState.selectValue} disabled className="bg-nexus-bg">
-                          {videoSelectionState.staleOptionLabel}
-                        </option>
-                      )}
-                      {capabilitiesReady && !videoSelectionState.options.length && !videoSelectionState.staleOptionLabel && (
-                        <option value="" className="bg-nexus-bg">暂无可用接口</option>
-                      )}
-                      {videoSelectionState.options.map(option => (
-                        <option key={option.id} value={option.id} className="bg-nexus-bg">
-                          {option.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {capabilitiesReady && videoSelectionState.unavailableReason && (
-                    <div role="alert" data-testid="video-provider-alert" className="text-xs text-nexus-red leading-5">
-                      {videoSelectionState.unavailableReason}
-                    </div>
-                  )}
-                  <div className="inspector-field-row">
-                    <span className="field-label">模型</span>
-                    <select
-                      aria-label="视频模型"
-                      value={effectiveVideoModel}
-                      title={effectiveVideoModel === SEEDANCE_25_MODERATED
-                        ? 'Seedance 2.5 Enhanced Moderation'
-                        : effectiveVideoModel === SEEDANCE_25 ? 'Seedance 2.5' : 'Seedance 2.0'}
-                      onChange={e => handleVideoModelChange(e.target.value)}
-                      className="field-select min-w-0"
-                    >
-                      {activeVideoProvider === 'ark' ? (<>
-                        <option value={SEEDANCE_20} className="bg-nexus-bg">Seedance 2.0</option>
-                        <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
-                      </>) : (<>
-                        <option value={SEEDANCE_25} className="bg-nexus-bg">Seedance 2.5</option>
-                        <option value={SEEDANCE_25_MODERATED} className="bg-nexus-bg">2.5 · 加强审核</option>
-                      </>)}
-                    </select>
-                  </div>
-                  <div className="inspector-field-row">
-                    <span className="field-label">画幅</span>
-                    <select
-                      aria-label="视频画幅"
-                      value={effectiveVideoRatio}
-                      disabled={videoRatioLocked}
-                      title={videoRatioLocked ? 'Seedance 2.5 首尾帧模式自动保持首帧比例' : '视频画幅'}
-                      onChange={e => updateTab(activeTab.id, { ratio: e.target.value })}
-                      className="field-select font-mono"
-                    >
-                      {VIDEO_RATIOS.map(r => (
-                        <option key={r} value={r} className="bg-nexus-bg">{r}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="inspector-field-row">
-                    <span className="field-label">模式</span>
-                    <select
-                      aria-label="视频生成模式"
-                      value={activeTab.mode}
-                      onChange={e => {
-                        const mode = e.target.value
-                        updateTab(activeTab.id, tab => ({
-                          mode,
-                          ...(isSeedance25 && mode === 'keyframe' && (tab.firstFrame || tab.lastFrame)
-                            ? { ratio: 'adaptive' }
-                            : {}),
-                        }))
-                      }}
-                      className="field-select"
-                    >
-                      <option value="keyframe" className="bg-nexus-bg">首尾帧</option>
-                      <option value="reference" className="bg-nexus-bg">全能参考</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* ENGINE PARAMS */}
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  <Settings size={14} className="text-nexus-green" /> 输出参数
-                </div>
-                <div className="inspector-fields flex-grow">
-                  <div className="inspector-field-row">
-                    <span className="field-label">分辨率</span>
-                    <select aria-label="视频分辨率" value={activeTab.resolution} onChange={e => updateTab(activeTab.id, { resolution: e.target.value })}
-                      className="field-select font-mono">
-                      {videoCapabilities.resolutions.map(resolution => (
-                        <option key={resolution} value={resolution} className="bg-nexus-bg">{resolution}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="inspector-field-row">
-                    <span className="field-label">时长</span>
-                    <select
-                      aria-label="视频时长"
-                      value={effectiveVideoDuration}
-                      title={isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
-                        ? '参考生视频可指定 4–30 秒；视频编辑必须选择 Auto'
-                        : '视频时长'}
-                      onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
-                      className="field-select font-mono"
-                    >
-                      {videoDurationOptions.map(d => (
-                        <option key={d} value={d} className="bg-nexus-bg">{d}s</option>
-                      ))}
-                      <option value={VIDEO_AUTO_DURATION} className="bg-nexus-bg">
-                        {activeVideoProvider === 'cupsy'
-                          ? 'Auto'
-                          : isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
-                            ? 'Auto · 编辑跟随输入'
-                            : 'Auto'}
-                      </option>
-                    </select>
-                  </div>
-                  {!isSeedance25 && (
-                    <div className="inspector-field-row inspector-toggle-row">
-                      <span className="field-label" title={activeVideoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}>
-                        快速模式{!activeVideoFastAvailable && <span className="ml-1 text-xs text-nexus-muted">未配置</span>}
-                      </span>
-                      <ToggleSwitch label="快速模式" checked={activeTab.fast} disabled={!activeVideoFastAvailable} onChange={fast => updateTab(activeTab.id, { fast })} />
-                    </div>
-                  )}
-                  {isSeedance25 && activeVideoProvider === 'ark' && (
-                    <div className="inspector-field-row">
-                      <span className="field-label">格式</span>
-                      <select
-                        aria-label="视频输出格式"
-                        value={activeTab.outputFormat || 'mp4'}
-                        onChange={e => updateTab(activeTab.id, { outputFormat: e.target.value })}
-                        className="field-select font-mono"
-                      >
-                        <option value="mp4" className="bg-nexus-bg">MP4</option>
-                        <option value="mov" className="bg-nexus-bg">MOV</option>
-                      </select>
-                    </div>
-                  )}
-                  <div className="inspector-field-row inspector-toggle-row">
-                    <span className="field-label">生成音频</span>
-                    <ToggleSwitch label="生成音频" checked={activeTab.audio} onChange={audio => updateTab(activeTab.id, { audio })} />
-                  </div>
-                  {activeVideoProvider === 'ark' && <div className="inspector-field-row inspector-toggle-row">
-                    <span className="field-label">返回尾帧</span>
-                    <ToggleSwitch label="返回尾帧" checked={activeTab.returnLastFrame} onChange={returnLastFrame => updateTab(activeTab.id, { returnLastFrame })} />
-                  </div>}
-                </div>
-              </div>
-
-              {/* KEYFRAMES / REFERENCE */}
-              <div className="inspector-section">
-                <div className="inspector-title justify-between">
-                  <span className="flex items-center gap-2"><Film size={14} className="text-nexus-violet" /> {activeTab.mode === 'keyframe' ? '关键帧' : '参考素材'}</span>
-                  {(
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}>
-                      <Library size={13} /> 素材库
-                    </button>
-                  )}
-                </div>
-
-                {activeTab.mode === 'keyframe' ? (
-                <div className="flex-grow flex gap-3">
-                  <div
-                    className="video-material-drop-zone flex w-[120px] flex-col"
-                    data-testid="video-first-frame-drop-zone"
-                    data-dragging="false"
-                    {...videoDropZoneHandlers(files => setVideoKeyframeFile(activeTab.id, 'firstFrame', files))}
-                  >
-                    <span className="mb-1.5 text-xs text-nexus-text">首帧</span>
-                    {activeTab.firstFrame ? (
-                      <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
-                        <button
-                          type="button"
-                          aria-label="打开首帧全图"
-                          title="查看全图"
-                          onClick={() => setReferenceMedia({ type: 'image', src: activeTab.firstFrame.preview, name: activeTab.firstFrame.file?.name || '首帧' })}
-                          className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+          {(() => {
+            const videoSummary = videoOutputSummary({
+              ratio: effectiveVideoRatio,
+              resolution: activeTab.resolution || '720p',
+              duration: effectiveVideoDuration,
+            })
+            const hasVideoAdvanced = !isSeedance25 || activeVideoProvider === 'ark'
+            const videoAdvancedParts = [
+              !isSeedance25 && activeTab.fast ? '快速' : '',
+              isSeedance25 && activeVideoProvider === 'ark' ? (activeTab.outputFormat || 'mp4').toUpperCase() : '',
+              activeVideoProvider === 'ark' && activeTab.returnLastFrame ? '返回尾帧' : '',
+            ].filter(Boolean)
+            const videoAdvancedSummary = videoAdvancedParts.length ? videoAdvancedParts.join(' · ') : '默认'
+            const videoAdvancedAutoOpen = Boolean(
+              (!isSeedance25 && activeTab.fast)
+              || (isSeedance25 && activeVideoProvider === 'ark' && activeTab.outputFormat === 'mov')
+              || (activeVideoProvider === 'ark' && activeTab.returnLastFrame),
+            )
+            const videoEstimate = estimateBytePlusVideoCost({
+              model: effectiveVideoModel,
+              provider: activeVideoProvider,
+              resolution: activeTab.resolution,
+              ratio: effectiveVideoRatio,
+              duration: effectiveVideoDuration,
+              fast: activeTab.fast,
+              referenceVideos: activeTab.refVideos,
+            })
+            const outputDuration = videoEstimate.minimumOutputSeconds === videoEstimate.maximumOutputSeconds
+              ? `${videoEstimate.minimumOutputSeconds}s`
+              : `${videoEstimate.minimumOutputSeconds}~${videoEstimate.maximumOutputSeconds}s`
+            const inputVideo = videoEstimate.hasVideo
+              ? `参考视频 ${videoEstimate.inputVideoSeconds.toFixed(1).replace(/\.0$/, '')}s${videoEstimate.inputDurationAssumed ? '（含 5s 默认值）' : ''}`
+              : '无参考视频'
+            const videoModelRateLine = activeVideoProvider === 'cupsy'
+              ? effectiveVideoModel === SEEDANCE_25_MODERATED ? 'Seedance 2.5 · Cupsy 加强审核' : 'Seedance 2.5 · Cupsy 费率'
+              : isSeedance25 ? `Seedance 2.5 · BytePlus${videoEstimate.promotionActive ? ' 限时按 72% 计费' : ''}`
+                : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'
+            const videoSizeLine = `${videoEstimate.width}×${videoEstimate.height} · ${outputDuration} · ${videoEstimate.fps}fps`
+            const videoTokenLine = `≈${formatWanTokens(videoEstimate.minimumTokens, videoEstimate.maximumTokens)}${videoEstimate.ratioAssumed ? ' · Adaptive 按 16:9' : ''} · 估算，非实际扣费`
+            return (
+              <aside key="inspector-video" className="inspector-pane pf-panel">
+                <PanelHeader
+                  className="inspector-header"
+                  icon={Film}
+                  title="视频参数"
+                  summary={videoSummary}
+                />
+                <div className="pf-panel-body custom-scrollbar">
+                  <PanelSection id="tool-video-provider" title="生成设置">
+                    <div className="pf-fields">
+                      <PanelField label="接口" prefix={<Plug size={14} />}>
+                        <select
+                          aria-label="视频端点"
+                          value={videoSelectionState.selectValue}
+                          disabled={!capabilitiesReady || (!videoSelectionState.options.length && !videoSelectionState.staleOptionLabel)}
+                          onChange={event => handleVideoProviderChange(event.target.value)}
                         >
-                          <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
-                          <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
-                        </button>
-                        <button type="button" aria-label="删除首帧" title="删除首帧" onClick={() => updateTab(activeTab.id, { firstFrame: null })}
-                          className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
-                          <X size={10} />
-                        </button>
+                          {!capabilitiesReady && <option value="">读取中…</option>}
+                          {capabilitiesReady && videoSelectionState.staleOptionLabel && (
+                            <option value={videoSelectionState.selectValue} disabled>
+                              {videoSelectionState.staleOptionLabel}
+                            </option>
+                          )}
+                          {capabilitiesReady && !videoSelectionState.options.length && !videoSelectionState.staleOptionLabel && (
+                            <option value="">暂无可用接口</option>
+                          )}
+                          {videoSelectionState.options.map(option => (
+                            <option key={option.id} value={option.id}>
+                              {option.name}
+                            </option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      {capabilitiesReady && videoSelectionState.unavailableReason && (
+                        <div role="alert" data-testid="video-provider-alert" className="pf-alert">
+                          {videoSelectionState.unavailableReason}
+                        </div>
+                      )}
+                      <PanelField label="模型" prefix={<Cpu size={14} />}>
+                        <select
+                          aria-label="视频模型"
+                          value={effectiveVideoModel}
+                          title={effectiveVideoModel === SEEDANCE_25_MODERATED
+                            ? 'Seedance 2.5 Enhanced Moderation'
+                            : effectiveVideoModel === SEEDANCE_25 ? 'Seedance 2.5' : 'Seedance 2.0'}
+                          onChange={e => handleVideoModelChange(e.target.value)}
+                        >
+                          {activeVideoProvider === 'ark' ? (<>
+                            <option value={SEEDANCE_20}>Seedance 2.0</option>
+                            <option value={SEEDANCE_25}>Seedance 2.5</option>
+                          </>) : (<>
+                            <option value={SEEDANCE_25}>Seedance 2.5</option>
+                            <option value={SEEDANCE_25_MODERATED}>2.5 · 加强审核</option>
+                          </>)}
+                        </select>
+                      </PanelField>
+                      <PanelField label="模式">
+                        <select
+                          aria-label="视频生成模式"
+                          value={activeTab.mode}
+                          onChange={e => {
+                            const mode = e.target.value
+                            updateTab(activeTab.id, tab => ({
+                              mode,
+                              ...(isSeedance25 && mode === 'keyframe' && (tab.firstFrame || tab.lastFrame)
+                                ? { ratio: 'adaptive' }
+                                : {}),
+                            }))
+                          }}
+                        >
+                          <option value="reference">全能参考</option>
+                          <option value="keyframe">首尾帧</option>
+                        </select>
+                      </PanelField>
+                    </div>
+                  </PanelSection>
+
+                  <PanelSection id="tool-video-output" title="输出参数" summary={videoSummary}>
+                    <div className="pf-fields">
+                      <PanelField label="画幅" prefix={<RatioGlyph value={effectiveVideoRatio} />}>
+                        <select
+                          aria-label="视频画幅"
+                          value={effectiveVideoRatio}
+                          disabled={videoRatioLocked}
+                          title={videoRatioLocked ? 'Seedance 2.5 首尾帧模式自动保持首帧比例' : '视频画幅'}
+                          onChange={e => updateTab(activeTab.id, { ratio: e.target.value })}
+                        >
+                          {VIDEO_RATIOS.map(r => (
+                            <option key={r} value={r}>{videoRatioLabel(r)}</option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      <PanelField label="分辨率">
+                        <select
+                          aria-label="视频分辨率"
+                          value={activeTab.resolution}
+                          onChange={e => updateTab(activeTab.id, { resolution: e.target.value })}
+                        >
+                          {videoCapabilities.resolutions.map(resolution => (
+                            <option key={resolution} value={resolution}>{resolution}</option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      <PanelField label="时长" prefix={<Clock3 size={14} />}>
+                        <select
+                          aria-label="视频时长"
+                          value={effectiveVideoDuration}
+                          title={isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
+                            ? '参考生视频可指定 4–30 秒；视频编辑必须选择 Auto'
+                            : '视频时长'}
+                          onChange={e => updateTab(activeTab.id, { duration: Number(e.target.value) })}
+                        >
+                          {videoDurationOptions.map(d => (
+                            <option key={d} value={d}>{d}s</option>
+                          ))}
+                          <option value={VIDEO_AUTO_DURATION}>
+                            {activeVideoProvider === 'cupsy'
+                              ? 'Auto'
+                              : isSeedance25 && activeTab.mode === 'reference' && hasReadyReferenceVideo
+                                ? 'Auto · 编辑跟随输入'
+                                : 'Auto'}
+                          </option>
+                        </select>
+                      </PanelField>
+                      <PanelToggle
+                        label="输出音频"
+                        checked={activeTab.audio}
+                        onChange={audio => updateTab(activeTab.id, { audio })}
+                      />
+                      {hasVideoAdvanced && (
+                        <CollapsibleAdvanced
+                          storageKey={VIDEO_TOOL_ADVANCED_KEY}
+                          summary={videoAdvancedSummary}
+                          autoOpen={videoAdvancedAutoOpen}
+                        >
+                          {!isSeedance25 && (
+                            <PanelToggle
+                              label="快速模式"
+                              hint={!activeVideoFastAvailable ? '未配置' : null}
+                              title={activeVideoFastAvailable ? '' : '需要配置 Ark Fast endpoint ID'}
+                              checked={activeTab.fast}
+                              disabled={!activeVideoFastAvailable}
+                              onChange={fast => updateTab(activeTab.id, { fast })}
+                            />
+                          )}
+                          {isSeedance25 && activeVideoProvider === 'ark' && (
+                            <PanelField label="格式">
+                              <select
+                                aria-label="视频输出格式"
+                                value={activeTab.outputFormat || 'mp4'}
+                                onChange={e => updateTab(activeTab.id, { outputFormat: e.target.value })}
+                              >
+                                <option value="mp4">MP4</option>
+                                <option value="mov">MOV</option>
+                              </select>
+                            </PanelField>
+                          )}
+                          {activeVideoProvider === 'ark' && (
+                            <PanelToggle
+                              label="返回尾帧"
+                              checked={activeTab.returnLastFrame}
+                              onChange={returnLastFrame => updateTab(activeTab.id, { returnLastFrame })}
+                            />
+                          )}
+                        </CollapsibleAdvanced>
+                      )}
+                    </div>
+                  </PanelSection>
+
+                  {/* KEYFRAMES / REFERENCE */}
+                  <PanelSection
+                    id="tool-video-refs"
+                    title={activeTab.mode === 'keyframe' ? '关键帧' : '参考素材'}
+                    actions={
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}>
+                        <Library size={13} /> 素材库
+                      </button>
+                    }
+                  >
+                    {activeTab.mode === 'keyframe' ? (
+                      <div className="flex-grow flex gap-3">
+                        <div
+                          className="video-material-drop-zone flex w-[120px] flex-col"
+                          data-testid="video-first-frame-drop-zone"
+                          data-dragging="false"
+                          {...videoDropZoneHandlers(files => setVideoKeyframeFile(activeTab.id, 'firstFrame', files))}
+                        >
+                          <span className="mb-1.5 text-xs text-nexus-text">首帧</span>
+                          {activeTab.firstFrame ? (
+                            <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
+                              <button
+                                type="button"
+                                aria-label="打开首帧全图"
+                                title="查看全图"
+                                onClick={() => setReferenceMedia({ type: 'image', src: activeTab.firstFrame.preview, name: activeTab.firstFrame.file?.name || '首帧' })}
+                                className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                              >
+                                <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
+                                <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                              </button>
+                              <button type="button" aria-label="删除首帧" title="删除首帧" onClick={() => updateTab(activeTab.id, { firstFrame: null })}
+                                className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
+                              <Plus size={16} /> 添加
+                              <input aria-label="上传首帧" type="file" accept="image/*" className="hidden" onChange={event => {
+                                setVideoKeyframeFile(activeTab.id, 'firstFrame', event.target.files)
+                                event.target.value = ''
+                              }} />
+                            </label>
+                          )}
+                        </div>
+                        <div
+                          className="video-material-drop-zone flex w-[120px] flex-col"
+                          data-testid="video-last-frame-drop-zone"
+                          data-dragging="false"
+                          {...videoDropZoneHandlers(files => setVideoKeyframeFile(activeTab.id, 'lastFrame', files))}
+                        >
+                          <span className="mb-1.5 text-xs text-nexus-text">尾帧</span>
+                          {activeTab.lastFrame ? (
+                            <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
+                              <button
+                                type="button"
+                                aria-label="打开尾帧全图"
+                                title="查看全图"
+                                onClick={() => setReferenceMedia({ type: 'image', src: activeTab.lastFrame.preview, name: activeTab.lastFrame.file?.name || '尾帧' })}
+                                className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                              >
+                                <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
+                                <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                              </button>
+                              <button type="button" aria-label="删除尾帧" title="删除尾帧" onClick={() => updateTab(activeTab.id, { lastFrame: null })}
+                                className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
+                                <X size={10} />
+                              </button>
+                            </div>
+                          ) : (
+                            <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
+                              <Plus size={16} /> 添加
+                              <input aria-label="上传尾帧" type="file" accept="image/*" className="hidden" onChange={event => {
+                                setVideoKeyframeFile(activeTab.id, 'lastFrame', event.target.files)
+                                event.target.value = ''
+                              }} />
+                            </label>
+                          )}
+                        </div>
                       </div>
                     ) : (
-                      <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
-                        <Plus size={16} /> 添加
-                        <input aria-label="上传首帧" type="file" accept="image/*" className="hidden" onChange={event => {
-                          setVideoKeyframeFile(activeTab.id, 'firstFrame', event.target.files)
-                          event.target.value = ''
-                        }} />
-                      </label>
-                    )}
-                  </div>
-                  <div
-                    className="video-material-drop-zone flex w-[120px] flex-col"
-                    data-testid="video-last-frame-drop-zone"
-                    data-dragging="false"
-                    {...videoDropZoneHandlers(files => setVideoKeyframeFile(activeTab.id, 'lastFrame', files))}
-                  >
-                    <span className="mb-1.5 text-xs text-nexus-text">尾帧</span>
-                    {activeTab.lastFrame ? (
-                      <div className="w-[120px] h-[120px] relative group rounded overflow-hidden border border-nexus-border">
-                        <button
-                          type="button"
-                          aria-label="打开尾帧全图"
-                          title="查看全图"
-                          onClick={() => setReferenceMedia({ type: 'image', src: activeTab.lastFrame.preview, name: activeTab.lastFrame.file?.name || '尾帧' })}
-                          className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                      <div className="grid flex-grow grid-cols-3 gap-2">
+                        {/* Reference images */}
+                        <div
+                          className="video-material-drop-zone flex min-w-0 flex-col"
+                          data-testid="video-reference-images-drop-zone"
+                          data-dragging="false"
+                          {...videoDropZoneHandlers(files => addVideoReferenceImages(activeTab.id, files))}
                         >
-                          <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
-                          <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
-                        </button>
-                        <button type="button" aria-label="删除尾帧" title="删除尾帧" onClick={() => updateTab(activeTab.id, { lastFrame: null })}
-                          className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white transition-colors hover:bg-nexus-red">
-                          <X size={10} />
-                        </button>
-                      </div>
-                    ) : (
-                      <label className="flex h-[120px] w-[120px] cursor-pointer flex-col items-center justify-center gap-2 rounded border border-dashed border-nexus-border text-xs text-nexus-text transition-colors hover:border-nexus-green hover:bg-nexus-green/5 hover:text-nexus-green">
-                        <Plus size={16} /> 添加
-                        <input aria-label="上传尾帧" type="file" accept="image/*" className="hidden" onChange={event => {
-                          setVideoKeyframeFile(activeTab.id, 'lastFrame', event.target.files)
-                          event.target.value = ''
-                        }} />
-                      </label>
-                    )}
-                  </div>
-                </div>
-                ) : (
-                <div className="grid flex-grow grid-cols-3 gap-2">
-                  {/* Reference images */}
-                  <div
-                    className="video-material-drop-zone flex min-w-0 flex-col"
-                    data-testid="video-reference-images-drop-zone"
-                    data-dragging="false"
-                    {...videoDropZoneHandlers(files => addVideoReferenceImages(activeTab.id, files))}
-                  >
-                    <span className="mb-1.5 truncate text-xs text-nexus-text" title={`图片（最多 ${videoCapabilities.maxRefImages} 个）`}>图片 · {videoCapabilities.maxRefImages}</span>
-                    <div className="flex-grow flex gap-1.5 flex-wrap items-start">
-                      {activeTab.refImages.map((img, i) => (
-                        <SortableReferenceItem
-                          key={i}
-                          listId="video-reference-images"
-                          index={i}
-                          itemCount={activeTab.refImages.length}
-                          label="视频参考图片"
-                          onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refImages', fromIndex, toIndex)}
-                          testId={`video-reference-image-item-${i}`}
-                          className="group h-14 w-14 shrink-0 overflow-hidden rounded border border-nexus-border"
-                        >
-                          <button
-                            type="button"
-                            aria-label={`打开视频参考图片 ${i + 1}`}
-                            title="查看全图"
-                            onClick={() => setReferenceMedia({ type: 'image', src: img.preview, name: img.name || `参考图片 ${i + 1}` })}
-                            className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
-                          >
-                            <img src={img.preview} className="w-full h-full object-cover" alt={`视频参考图片 ${i + 1}`} />
-                            <Maximize2 size={10} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
-                          </button>
-                          <button type="button" aria-label={`删除参考图片 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
-                            className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
-                            <X size={8} />
-                          </button>
-                        </SortableReferenceItem>
-                      ))}
-                      {activeTab.refImages.length < videoCapabilities.maxRefImages && (
-                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
-                          <Plus size={14} />
-                          <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={event => {
-                            addVideoReferenceImages(activeTab.id, event.target.files)
-                            event.target.value = ''
-                          }} />
-                        </label>
-                      )}
-                    </div>
-                  </div>
-                  {/* Reference videos */}
-                  <div
-                    className="video-material-drop-zone flex min-w-0 flex-col"
-                    data-testid="video-reference-videos-drop-zone"
-                    data-dragging="false"
-                    {...videoDropZoneHandlers(files => addVideoReferenceVideos(activeTab.id, files))}
-                  >
-                    <span className="mb-1.5 truncate text-xs text-nexus-text" title={`视频（最多 ${videoCapabilities.maxRefVideos} 个）`}>视频 · {videoCapabilities.maxRefVideos}</span>
-                    <div className="flex-grow flex gap-1.5 flex-wrap items-start">
-                      {activeTab.refVideos.map((vid, i) => (
-                        <SortableReferenceItem
-                          key={vid.uid || i}
-                          listId="video-reference-videos"
-                          index={i}
-                          itemCount={activeTab.refVideos.length}
-                          label="参考视频"
-                          onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refVideos', fromIndex, toIndex)}
-                          testId={`video-reference-video-item-${i}`}
-                          className="group flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-nexus-border bg-[#111]"
-                        >
-                          <button
-                            type="button"
-                            disabled={vid.uploading || !vid.url}
-                            aria-label={`播放参考视频 ${i + 1}`}
-                            title={vid.uploading ? '视频上传中' : '播放视频'}
-                            onClick={() => setReferenceMedia({ type: 'video', src: vid.url, name: vid.name || `参考视频 ${i + 1}` })}
-                            className="absolute inset-0 flex items-center justify-center outline-none enabled:cursor-pointer focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green disabled:cursor-default"
-                          >
-                            {vid.uploading ? (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <div className="w-10 h-1 bg-[#333] rounded overflow-hidden">
-                                  <div className="h-full bg-nexus-green transition-all" style={{ width: `${vid.progress || 0}%` }}></div>
-                                </div>
-                              </div>
-                            ) : vid.thumbnail ? (
-                              <img src={vid.thumbnail} className="w-full h-full object-cover" alt={`参考视频 ${i + 1}`} />
-                            ) : (
-                              <Film size={14} className="text-nexus-green" />
+                          <span className="mb-1.5 truncate text-xs text-nexus-text" title={`图片（最多 ${videoCapabilities.maxRefImages} 个）`}>图片 · {videoCapabilities.maxRefImages}</span>
+                          <div className="flex-grow flex gap-1.5 flex-wrap items-start">
+                            {activeTab.refImages.map((img, i) => (
+                              <SortableReferenceItem
+                                key={i}
+                                listId="video-reference-images"
+                                index={i}
+                                itemCount={activeTab.refImages.length}
+                                label="视频参考图片"
+                                onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refImages', fromIndex, toIndex)}
+                                testId={`video-reference-image-item-${i}`}
+                                className="group h-14 w-14 shrink-0 overflow-hidden rounded border border-nexus-border"
+                              >
+                                <button
+                                  type="button"
+                                  aria-label={`打开视频参考图片 ${i + 1}`}
+                                  title="查看全图"
+                                  onClick={() => setReferenceMedia({ type: 'image', src: img.preview, name: img.name || `参考图片 ${i + 1}` })}
+                                  className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
+                                >
+                                  <img src={img.preview} className="w-full h-full object-cover" alt={`视频参考图片 ${i + 1}`} />
+                                  <Maximize2 size={10} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                                </button>
+                                <button type="button" aria-label={`删除参考图片 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
+                                  className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
+                                  <X size={8} />
+                                </button>
+                              </SortableReferenceItem>
+                            ))}
+                            {activeTab.refImages.length < videoCapabilities.maxRefImages && (
+                              <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
+                                <Plus size={14} />
+                                <input aria-label="上传参考图片" type="file" accept="image/*" multiple className="hidden" onChange={event => {
+                                  addVideoReferenceImages(activeTab.id, event.target.files)
+                                  event.target.value = ''
+                                }} />
+                              </label>
                             )}
-                            <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{vid.name?.slice(0,6)}</span>
-                          </button>
-                          <button type="button" aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
-                              if (vid.url && !vid.cupsyAssetId) {
-                                axios.delete('/api/upload_video', { data: { url: vid.url } }).catch(() => {})
-                              }
-                              updateTab(activeTab.id, { refVideos: activeTab.refVideos.filter((_, j) => j !== i) })
-                            }}
-                            className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
-                            <X size={8} />
-                          </button>
-                        </SortableReferenceItem>
-                      ))}
-                      {activeTab.refVideos.length < videoCapabilities.maxRefVideos && (
-                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
-                          <Plus size={14} />
-                          <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={event => {
-                            addVideoReferenceVideos(activeTab.id, event.target.files)
-                            event.target.value = ''
-                          }} />
-                        </label>
-                      )}
-                    </div>
-                  </div>
-                  {/* Reference audio */}
-                  <div
-                    className="video-material-drop-zone flex min-w-0 flex-col"
-                    data-testid="video-reference-audios-drop-zone"
-                    data-dragging="false"
-                    {...videoDropZoneHandlers(files => addVideoReferenceAudios(activeTab.id, files))}
-                  >
-                    <span className="mb-1.5 truncate text-xs text-nexus-text" title={`音频（最多 ${videoCapabilities.maxRefAudios} 个）`}>音频 · {videoCapabilities.maxRefAudios}</span>
-                    <div className="flex-grow flex gap-1.5 flex-wrap items-start">
-                      {activeTab.refAudios.map((aud, i) => (
-                        <SortableReferenceItem
-                          key={i}
-                          listId="video-reference-audios"
-                          index={i}
-                          itemCount={activeTab.refAudios.length}
-                          label="参考音频"
-                          onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refAudios', fromIndex, toIndex)}
-                          testId={`video-reference-audio-item-${i}`}
-                          className="group flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-nexus-border bg-[#111]"
+                          </div>
+                        </div>
+                        {/* Reference videos */}
+                        <div
+                          className="video-material-drop-zone flex min-w-0 flex-col"
+                          data-testid="video-reference-videos-drop-zone"
+                          data-dragging="false"
+                          {...videoDropZoneHandlers(files => addVideoReferenceVideos(activeTab.id, files))}
                         >
-                          <button
-                            type="button"
-                            aria-label={`播放参考音频 ${i + 1}`}
-                            title="播放音频"
-                            onClick={() => setReferenceMedia({
-                              type: 'audio',
-                              src: aud.preview || aud.url,
-                              file: aud.file,
-                              name: aud.file?.name || aud.name || `参考音频 ${i + 1}`,
-                            })}
-                            className="absolute inset-0 flex cursor-pointer items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-cyan"
-                          >
-                            <AudioLines size={15} className="text-nexus-cyan" />
-                            <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{(aud.file?.name || aud.name || 'audio').slice(0,6)}</span>
-                          </button>
-                          <button type="button" aria-label={`删除参考音频 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
-                            className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
-                            <X size={8} />
-                          </button>
-                        </SortableReferenceItem>
-                      ))}
-                      {activeTab.refAudios.length < videoCapabilities.maxRefAudios && (
-                        <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
-                          <Plus size={14} />
-                          <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={event => {
-                            addVideoReferenceAudios(activeTab.id, event.target.files)
-                            event.target.value = ''
-                          }} />
-                        </label>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                )}
-              </div>
-
-              {/* PRICE ESTIMATE */}
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  <Database size={14} className="text-nexus-amber" /> 费用估算 (USD)
-                </div>
-                <div className="flex flex-col justify-between flex-grow gap-2">
-                  {(() => {
-                    const estimate = estimateBytePlusVideoCost({
-                      model: effectiveVideoModel,
-                      provider: activeVideoProvider,
-                      resolution: activeTab.resolution,
-                      ratio: effectiveVideoRatio,
-                      duration: effectiveVideoDuration,
-                      fast: activeTab.fast,
-                      referenceVideos: activeTab.refVideos,
-                    })
-                    const outputDuration = estimate.minimumOutputSeconds === estimate.maximumOutputSeconds
-                      ? `${estimate.minimumOutputSeconds}s`
-                      : `${estimate.minimumOutputSeconds}~${estimate.maximumOutputSeconds}s`
-                    const inputVideo = estimate.hasVideo
-                      ? `参考视频 ${estimate.inputVideoSeconds.toFixed(1).replace(/\.0$/, '')}s${estimate.inputDurationAssumed ? '（含 5s 默认值）' : ''}`
-                      : '无参考视频'
-                    return (<>
-                      <div data-testid="video-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatUsdEstimate(estimate)}</div>
-                      <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
-                        <div>{activeVideoProvider === 'cupsy'
-                          ? effectiveVideoModel === SEEDANCE_25_MODERATED ? 'Seedance 2.5 · Cupsy 加强审核' : 'Seedance 2.5 · Cupsy 费率'
-                          : isSeedance25 ? `Seedance 2.5 · BytePlus${estimate.promotionActive ? ' 限时按 72% 计费' : ''}`
-                            : activeTab.fast ? 'Seedance 2.0 Fast' : 'Seedance 2.0'}</div>
-                        <div>{estimate.width}×{estimate.height} · {outputDuration} · {estimate.fps}fps</div>
-                        <div>{inputVideo}</div>
-                        <div className="mt-1 opacity-50">≈{formatWanTokens(estimate.minimumTokens, estimate.maximumTokens)}{estimate.ratioAssumed ? ' · Adaptive 按 16:9' : ''}</div>
+                          <span className="mb-1.5 truncate text-xs text-nexus-text" title={`视频（最多 ${videoCapabilities.maxRefVideos} 个）`}>视频 · {videoCapabilities.maxRefVideos}</span>
+                          <div className="flex-grow flex gap-1.5 flex-wrap items-start">
+                            {activeTab.refVideos.map((vid, i) => (
+                              <SortableReferenceItem
+                                key={vid.uid || i}
+                                listId="video-reference-videos"
+                                index={i}
+                                itemCount={activeTab.refVideos.length}
+                                label="参考视频"
+                                onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refVideos', fromIndex, toIndex)}
+                                testId={`video-reference-video-item-${i}`}
+                                className="group flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-nexus-border bg-[#111]"
+                              >
+                                <button
+                                  type="button"
+                                  disabled={vid.uploading || !vid.url}
+                                  aria-label={`播放参考视频 ${i + 1}`}
+                                  title={vid.uploading ? '视频上传中' : '播放视频'}
+                                  onClick={() => setReferenceMedia({ type: 'video', src: vid.url, name: vid.name || `参考视频 ${i + 1}` })}
+                                  className="absolute inset-0 flex items-center justify-center outline-none enabled:cursor-pointer focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green disabled:cursor-default"
+                                >
+                                  {vid.uploading ? (
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                      <div className="w-10 h-1 bg-[#333] rounded overflow-hidden">
+                                        <div className="h-full bg-nexus-green transition-all" style={{ width: `${vid.progress || 0}%` }}></div>
+                                      </div>
+                                    </div>
+                                  ) : vid.thumbnail ? (
+                                    <img src={vid.thumbnail} className="w-full h-full object-cover" alt={`参考视频 ${i + 1}`} />
+                                  ) : (
+                                    <Film size={14} className="text-nexus-green" />
+                                  )}
+                                  <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{vid.name?.slice(0, 6)}</span>
+                                </button>
+                                <button type="button" aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
+                                  if (vid.url && !vid.cupsyAssetId) {
+                                    axios.delete('/api/upload_video', { data: { url: vid.url } }).catch(() => {})
+                                  }
+                                  updateTab(activeTab.id, { refVideos: activeTab.refVideos.filter((_, j) => j !== i) })
+                                }}
+                                  className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
+                                  <X size={8} />
+                                </button>
+                              </SortableReferenceItem>
+                            ))}
+                            {activeTab.refVideos.length < videoCapabilities.maxRefVideos && (
+                              <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
+                                <Plus size={14} />
+                                <input aria-label="上传参考视频" type="file" accept="video/mp4,video/quicktime" multiple className="hidden" onChange={event => {
+                                  addVideoReferenceVideos(activeTab.id, event.target.files)
+                                  event.target.value = ''
+                                }} />
+                              </label>
+                            )}
+                          </div>
+                        </div>
+                        {/* Reference audio */}
+                        <div
+                          className="video-material-drop-zone flex min-w-0 flex-col"
+                          data-testid="video-reference-audios-drop-zone"
+                          data-dragging="false"
+                          {...videoDropZoneHandlers(files => addVideoReferenceAudios(activeTab.id, files))}
+                        >
+                          <span className="mb-1.5 truncate text-xs text-nexus-text" title={`音频（最多 ${videoCapabilities.maxRefAudios} 个）`}>音频 · {videoCapabilities.maxRefAudios}</span>
+                          <div className="flex-grow flex gap-1.5 flex-wrap items-start">
+                            {activeTab.refAudios.map((aud, i) => (
+                              <SortableReferenceItem
+                                key={i}
+                                listId="video-reference-audios"
+                                index={i}
+                                itemCount={activeTab.refAudios.length}
+                                label="参考音频"
+                                onMove={(fromIndex, toIndex) => moveVideoReference(activeTab.id, 'refAudios', fromIndex, toIndex)}
+                                testId={`video-reference-audio-item-${i}`}
+                                className="group flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-nexus-border bg-[#111]"
+                              >
+                                <button
+                                  type="button"
+                                  aria-label={`播放参考音频 ${i + 1}`}
+                                  title="播放音频"
+                                  onClick={() => setReferenceMedia({
+                                    type: 'audio',
+                                    src: aud.preview || aud.url,
+                                    file: aud.file,
+                                    name: aud.file?.name || aud.name || `参考音频 ${i + 1}`,
+                                  })}
+                                  className="absolute inset-0 flex cursor-pointer items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-cyan"
+                                >
+                                  <AudioLines size={15} className="text-nexus-cyan" />
+                                  <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{(aud.file?.name || aud.name || 'audio').slice(0, 6)}</span>
+                                </button>
+                                <button type="button" aria-label={`删除参考音频 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refAudios: activeTab.refAudios.filter((_, j) => j !== i) })}
+                                  className="absolute right-0.5 top-0.5 z-10 rounded bg-black/75 p-0.5 text-white transition-colors hover:bg-nexus-red">
+                                  <X size={8} />
+                                </button>
+                              </SortableReferenceItem>
+                            ))}
+                            {activeTab.refAudios.length < videoCapabilities.maxRefAudios && (
+                              <label className="w-14 h-14 shrink-0 border border-dashed border-nexus-border rounded flex items-center justify-center text-nexus-text hover:text-nexus-green hover:border-nexus-green transition-colors cursor-pointer text-xs font-mono">
+                                <Plus size={14} />
+                                <input aria-label="上传参考音频" type="file" accept="audio/wav,audio/mp3,audio/mpeg" multiple className="hidden" onChange={event => {
+                                  addVideoReferenceAudios(activeTab.id, event.target.files)
+                                  event.target.value = ''
+                                }} />
+                              </label>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </>)
-                  })()}
+                    )}
+                  </PanelSection>
                 </div>
-              </div>
 
-          </aside>
+                <CostEstimateFooter
+                  testId="video-cost-estimate"
+                  amount={formatUsdEstimate(videoEstimate)}
+                  summaryTitle={[videoModelRateLine, videoSizeLine, inputVideo, videoTokenLine].join('；')}
+                  details={
+                    <div className="pf-cost-detail-list">
+                      <div>{videoModelRateLine}</div>
+                      <div>{videoSizeLine}</div>
+                      <div>{inputVideo}</div>
+                      <div className="pf-cost-detail-muted">{videoTokenLine}</div>
+                    </div>
+                  }
+                />
+              </aside>
+            )
+          })()}
         </>
       ) : (
         /* ============ AUDIO MODE ============ */
@@ -2188,122 +2241,185 @@ function App({ onLogout }) {
             <TaskGallery mode="audio" refreshToken={taskGalleryRevision} onReuseTask={handleLoadTask} />
           </section>
 
-          <aside className="inspector-pane custom-scrollbar">
-            <div className="inspector-header">
-              <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light"><SlidersHorizontal size={15} className="text-nexus-cyan" />音频参数</div>
-              <span className="font-mono text-xs text-nexus-muted">{audioForm.outputFormat.toUpperCase()} · {(audioForm.sampleRate / 1000).toFixed(audioForm.sampleRate % 1000 ? 1 : 0)} kHz</span>
-            </div>
+          {(() => {
+            const audioFormatLabel = AUDIO_OUTPUT_FORMATS.find(item => item.value === audioForm.outputFormat)?.label || audioForm.outputFormat.toUpperCase()
+            const audioRateLabel = `${(audioForm.sampleRate / 1000).toFixed(audioForm.sampleRate % 1000 ? 1 : 0)} kHz`
+            const audioSummary = `${audioFormatLabel} · ${audioRateLabel}`
+            const speakerBlocked = audioForm.referenceMode === 'image'
+            return (
+              <aside key="inspector-audio" className="inspector-pane pf-panel">
+                <PanelHeader
+                  className="inspector-header"
+                  icon={Music}
+                  title="音频参数"
+                  summary={audioSummary}
+                />
+                <div className="pf-panel-body custom-scrollbar">
+                  <PanelSection id="tool-audio-provider" title="生成设置">
+                    <div className="pf-fields">
+                      <PanelField label="接口" prefix={<Plug size={14} />}>
+                        <select
+                          aria-label="音频端点"
+                          value={audioSelectionState.selectValue}
+                          disabled={!capabilitiesReady || (!audioSelectionState.options.length && !audioSelectionState.staleOptionLabel)}
+                          onChange={event => handleAudioProviderChange(event.target.value)}
+                        >
+                          {!capabilitiesReady && <option value="">读取中…</option>}
+                          {capabilitiesReady && audioSelectionState.staleOptionLabel && (
+                            <option value={audioSelectionState.selectValue} disabled>
+                              {audioSelectionState.staleOptionLabel}
+                            </option>
+                          )}
+                          {capabilitiesReady && !audioSelectionState.options.length && !audioSelectionState.staleOptionLabel && (
+                            <option value="">暂无可用接口</option>
+                          )}
+                          {audioSelectionState.options.map(option => (
+                            <option key={option.id} value={option.id}>
+                              {option.name}
+                            </option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      {capabilitiesReady && audioSelectionState.unavailableReason && (
+                        <div role="alert" data-testid="audio-provider-alert" className="pf-alert">
+                          {audioSelectionState.unavailableReason}
+                        </div>
+                      )}
+                      <PanelField label="模型" hint="由当前接口配置决定" prefix={<Cpu size={14} />}>
+                        <select aria-label="音频模型" value={CUPSY_AUDIO_MODEL} disabled onChange={() => {}} className="pf-readonly-select">
+                          <option value={CUPSY_AUDIO_MODEL}>Seed Audio 1.0</option>
+                        </select>
+                      </PanelField>
+                    </div>
+                  </PanelSection>
 
-            <div className="inspector-section">
-              <div className="inspector-title"><Cpu size={14} className="text-nexus-cyan" /> 生成设置</div>
-              <div className="inspector-fields">
-                <div className="inspector-field-row">
-                  <span className="field-label">端点</span>
-                  <select
-                    aria-label="音频端点"
-                    value={audioSelectionState.selectValue}
-                    disabled={!capabilitiesReady || (!audioSelectionState.options.length && !audioSelectionState.staleOptionLabel)}
-                    onChange={event => handleAudioProviderChange(event.target.value)}
-                    className="field-select min-w-0"
+                  <PanelSection id="tool-audio-output" title="输出参数" summary={audioSummary}>
+                    <div className="pf-fields">
+                      <PanelField
+                        label="声线"
+                        prefix={<Mic size={14} />}
+                        note={speakerBlocked ? '预设声线不能与图片参考同时使用' : null}
+                      >
+                        <select
+                          aria-label="音频预设声线"
+                          value={speakerBlocked ? '' : audioForm.speaker}
+                          disabled={speakerBlocked}
+                          title={speakerBlocked ? '预设声线不能与图片参考同时使用' : '音频预设声线'}
+                          onChange={event => {
+                            const speaker = event.target.value
+                            const maxAssets = speaker ? 2 : 3
+                            updateAudioForm(form => ({
+                              speaker,
+                              ...(speaker && form.referenceMode === 'none' ? { referenceMode: 'audio' } : {}),
+                              references: form.references.slice(0, maxAssets),
+                            }))
+                          }}
+                        >
+                          {AUDIO_SPEAKERS.map(item => (
+                            <option key={item.value || 'auto'} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      <PanelField label="格式">
+                        <select
+                          aria-label="音频输出格式"
+                          value={audioForm.outputFormat}
+                          onChange={event => updateAudioForm({ outputFormat: event.target.value })}
+                        >
+                          {AUDIO_OUTPUT_FORMATS.map(item => (
+                            <option key={item.value} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      <PanelField label="采样率">
+                        <select
+                          aria-label="音频采样率"
+                          value={audioForm.sampleRate}
+                          onChange={event => updateAudioForm({ sampleRate: Number(event.target.value) })}
+                        >
+                          {AUDIO_SAMPLE_RATES.map(rate => (
+                            <option key={rate} value={rate}>{rate === 44100 ? '44.1' : rate / 1000} kHz</option>
+                          ))}
+                        </select>
+                      </PanelField>
+                      <PanelToggle
+                        label="生成字幕"
+                        checked={audioForm.enableSubtitle}
+                        onChange={enableSubtitle => updateAudioForm({ enableSubtitle })}
+                      />
+                      <CollapsibleAdvanced
+                        storageKey={AUDIO_TOOL_ADVANCED_KEY}
+                        summary={audioForm.watermark ? '可听水印' : '无水印'}
+                        autoOpen={Boolean(audioForm.watermark)}
+                      >
+                        <PanelToggle
+                          label="可听水印"
+                          checked={audioForm.watermark}
+                          onChange={watermark => updateAudioForm({ watermark })}
+                        />
+                      </CollapsibleAdvanced>
+                      <p className="pf-note">时长由内容决定，最长 120 秒。预设声线不能与图片参考同时使用。</p>
+                    </div>
+                  </PanelSection>
+
+                  <PanelSection
+                    id="tool-audio-refs"
+                    title="参考素材"
+                    actions={<button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13} /> 素材库</button>}
                   >
-                    {!capabilitiesReady && <option value="" className="bg-nexus-bg">读取中…</option>}
-                    {capabilitiesReady && audioSelectionState.staleOptionLabel && (
-                      <option value={audioSelectionState.selectValue} disabled className="bg-nexus-bg">
-                        {audioSelectionState.staleOptionLabel}
-                      </option>
-                    )}
-                    {capabilitiesReady && !audioSelectionState.options.length && !audioSelectionState.staleOptionLabel && (
-                      <option value="" className="bg-nexus-bg">暂无可用接口</option>
-                    )}
-                    {audioSelectionState.options.map(option => (
-                      <option key={option.id} value={option.id} className="bg-nexus-bg">
-                        {option.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {capabilitiesReady && audioSelectionState.unavailableReason && (
-                  <div role="alert" data-testid="audio-provider-alert" className="text-xs text-nexus-red leading-5">
-                    {audioSelectionState.unavailableReason}
-                  </div>
-                )}
-                <div className="inspector-field-row">
-                  <span className="field-label">模型</span>
-                  <select aria-label="音频模型" value={CUPSY_AUDIO_MODEL} disabled className="field-select"><option value={CUPSY_AUDIO_MODEL} className="bg-nexus-bg">Seed Audio 1.0</option></select>
-                </div>
-                <div className="inspector-field-row">
-                  <span className="field-label">格式</span>
-                  <select aria-label="音频输出格式" value={audioForm.outputFormat} onChange={event => updateAudioForm({ outputFormat: event.target.value })} className="field-select font-mono">
-                    <option value="mp3" className="bg-nexus-bg">MP3</option>
-                    <option value="wav" className="bg-nexus-bg">WAV</option>
-                    <option value="ogg_opus" className="bg-nexus-bg">OGG Opus</option>
-                  </select>
-                </div>
-                <div className="inspector-field-row">
-                  <span className="field-label">采样率</span>
-                  <select aria-label="音频采样率" value={audioForm.sampleRate} onChange={event => updateAudioForm({ sampleRate: Number(event.target.value) })} className="field-select font-mono">
-                    {AUDIO_SAMPLE_RATES.map(rate => <option key={rate} value={rate} className="bg-nexus-bg">{rate === 44100 ? '44.1' : rate / 1000} kHz</option>)}
-                  </select>
-                </div>
-                <div className="inspector-field-row inspector-toggle-row"><span className="field-label">生成字幕</span><ToggleSwitch label="生成字幕" checked={audioForm.enableSubtitle} onChange={enableSubtitle => updateAudioForm({ enableSubtitle })} /></div>
-                <div className="inspector-field-row inspector-toggle-row"><span className="field-label">可听水印</span><ToggleSwitch label="可听水印" checked={audioForm.watermark} onChange={watermark => updateAudioForm({ watermark })} /></div>
-              </div>
-            </div>
-
-            <div className="inspector-section">
-              <div className="inspector-title justify-between">
-                <span className="flex items-center gap-2"><HardDrive size={14} className="text-nexus-violet" /> 参考素材</span>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={openToolLibrary}><Library size={13} /> 素材库</button>
-              </div>
-              <SegmentedControl
-                label="音频参考模式"
-                value={audioForm.referenceMode}
-                onChange={referenceMode => updateAudioForm({ referenceMode, references: [], ...(referenceMode !== 'audio' ? { speaker: '' } : {}) })}
-                options={[{ value: 'none', label: '纯文本' }, { value: 'audio', label: '音频' }, { value: 'image', label: '图片' }]}
-              />
-              {audioForm.referenceMode === 'audio' && (
-                <div className="inspector-field-row mt-3">
-                  <span className="field-label">预设声线</span>
-                  <select aria-label="音频预设声线" value={audioForm.speaker} onChange={event => {
-                    const speaker = event.target.value
-                    const maxAssets = speaker ? 2 : 3
-                    updateAudioForm(form => ({ speaker, references: form.references.slice(0, maxAssets) }))
-                  }} className="field-select">
-                    {AUDIO_SPEAKERS.map(item => <option key={item.value || 'auto'} value={item.value} className="bg-nexus-bg">{item.label}</option>)}
-                  </select>
-                </div>
-              )}
-              {audioForm.referenceMode !== 'none' && (
-                <div
-                  className="audio-reference-drop-zone mt-3"
-                  data-dragging="false"
-                  {...videoDropZoneHandlers(addAudioReferences)}
-                >
-                  <div className="grid grid-cols-3 gap-2">
-                    {audioForm.references.map((reference, index) => (
-                      <div key={`${reference.cupsyAssetId}-${index}`} className="audio-reference-card group relative">
-                        <button type="button" className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2" onClick={() => setReferenceMedia({ type: reference.kind, src: reference.preview, name: reference.name })}>
-                          {reference.kind === 'image' ? <img src={reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
-                          {reference.kind === 'audio' && <span className="w-full truncate text-center text-xs text-nexus-muted">[Audio{index + (audioForm.speaker ? 2 : 1)}]</span>}
-                        </button>
-                        <button type="button" aria-label={`删除参考素材 ${index + 1}`} onClick={() => updateAudioForm(form => ({ references: form.references.filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white opacity-0 group-hover:opacity-100 hover:bg-nexus-red"><X size={10} /></button>
+                    <SegmentedControl
+                      label="音频参考模式"
+                      value={audioForm.referenceMode}
+                      onChange={referenceMode => updateAudioForm({ referenceMode, references: [], ...(referenceMode !== 'audio' ? { speaker: '' } : {}) })}
+                      options={[{ value: 'none', label: '纯文本' }, { value: 'audio', label: '音频' }, { value: 'image', label: '图片' }]}
+                    />
+                    {audioForm.referenceMode !== 'none' && (
+                      <div
+                        className="audio-reference-drop-zone"
+                        data-dragging="false"
+                        {...videoDropZoneHandlers(addAudioReferences)}
+                      >
+                        <div className="grid grid-cols-3 gap-2">
+                          {audioForm.references.map((reference, index) => (
+                            <div key={`${reference.cupsyAssetId}-${index}`} className="audio-reference-card group relative">
+                              <button type="button" className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2" onClick={() => setReferenceMedia({ type: reference.kind, src: reference.preview, name: reference.name })}>
+                                {reference.kind === 'image' ? <img src={reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
+                                {reference.kind === 'audio' && <span className="w-full truncate text-center text-xs text-nexus-muted">[Audio{index + (audioForm.speaker ? 2 : 1)}]</span>}
+                              </button>
+                              <button type="button" aria-label={`删除参考素材 ${index + 1}`} onClick={() => updateAudioForm(form => ({ references: form.references.filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white opacity-0 group-hover:opacity-100 hover:bg-nexus-red"><X size={10} /></button>
+                            </div>
+                          ))}
+                          {audioForm.references.length < (audioForm.referenceMode === 'image' ? 1 : 3 - (audioForm.speaker ? 1 : 0)) && (
+                            <label className="audio-reference-add">
+                              <Plus size={15} />
+                              <span>{audioUploading ? '上传中' : '添加'}</span>
+                              <input type="file" className="hidden" disabled={audioUploading} multiple={audioForm.referenceMode === 'audio'} accept={audioForm.referenceMode === 'image' ? 'image/*' : 'audio/wav,audio/mp3,audio/mpeg'} onChange={event => { addAudioReferences(event.target.files); event.target.value = '' }} />
+                            </label>
+                          )}
+                        </div>
+                        <div className="mt-2 font-mono text-xs text-nexus-muted">
+                          {audioForm.referenceMode === 'audio' ? '按顺序对应 [Audio1]–[Audio3]' : '图片用于引导完整音频场景'}
+                        </div>
                       </div>
-                    ))}
-                    {audioForm.references.length < (audioForm.referenceMode === 'image' ? 1 : 3 - (audioForm.speaker ? 1 : 0)) && (
-                      <label className="audio-reference-add">
-                        <Plus size={15} />
-                        <span>{audioUploading ? '上传中' : '添加'}</span>
-                        <input type="file" className="hidden" disabled={audioUploading} multiple={audioForm.referenceMode === 'audio'} accept={audioForm.referenceMode === 'image' ? 'image/*' : 'audio/wav,audio/mp3,audio/mpeg'} onChange={event => { addAudioReferences(event.target.files); event.target.value = '' }} />
-                      </label>
                     )}
-                  </div>
-                  <div className="mt-2 font-mono text-xs text-nexus-muted">
-                    {audioForm.referenceMode === 'audio' ? '按顺序对应 [Audio1]–[Audio3]' : '图片用于引导完整音频场景'}
-                  </div>
+                  </PanelSection>
                 </div>
-              )}
-            </div>
-          </aside>
+
+                <CostEstimateFooter
+                  testId="audio-cost-estimate"
+                  amount="未知"
+                  tone="muted"
+                  summaryTitle="音频生成暂无官方定价依据，不计作 $0"
+                  details={
+                    <div className="pf-cost-detail-list">
+                      <div>Seed Audio 1.0 · Cupsy</div>
+                      <div className="pf-cost-detail-muted">音频生成暂无官方定价依据，不计作 $0</div>
+                    </div>
+                  }
+                />
+              </aside>
+            )
+          })()}
         </>
       )}
 

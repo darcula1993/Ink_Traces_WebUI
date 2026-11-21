@@ -53,6 +53,7 @@ export default function GlobalTaskCenter({
       <div className="global-task-center-body">
         <TaskGallery
           mode={safeType}
+          allowTrash
           showTypeBadge={safeType === 'all'}
           refreshToken={refreshToken}
           onReuseTask={onReuseTask}

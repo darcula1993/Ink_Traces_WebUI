@@ -1225,7 +1225,9 @@
 }
 
 .inspector-pane {
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 0;
   border-left: 1px solid var(--border);
   border-radius: 0;
@@ -1234,10 +1236,9 @@
 }
 
 .inspector-header {
-  position: sticky;
-  top: 0;
-  z-index: 4;
+  flex: 0 0 auto;
   display: flex;
+  height: 44px;
   min-height: 44px;
   align-items: center;
   justify-content: space-between;
@@ -1245,7 +1246,7 @@
   background: var(--surface-1);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  padding: 0 14px;
+  padding: 0 16px;
   box-shadow: none;
 }
 
@@ -1262,6 +1263,11 @@
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
+}
+
+.inspector-pane .pf-section-head.inspector-title {
+  margin-bottom: 0;
+  justify-content: space-between;
 }
 
 .inspector-fields {
@@ -1317,246 +1323,7 @@
   flex-shrink: 0;
 }
 
-/* Standalone tool ImageOutputControls aligned with canvas propertiesForm.css 36px single-column Linear rhythm */
-.inspector-pane .ip-controls {
-  padding: 0;
-  gap: 12px;
-  font-size: 12px;
-}
-
-.inspector-pane .ip-controls .ip-grid {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 12px;
-}
-
-.inspector-pane .ip-controls .ip-size .ip-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.inspector-pane .ip-controls .ip-field {
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 16px;
-  color: var(--text-2);
-}
-
-.inspector-pane .ip-controls .ip-field > small,
-.inspector-pane .ip-controls small {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--text-3);
-}
-
-.inspector-pane .ip-controls .ip-model {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--text-2);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.inspector-pane .ip-controls .ip-model strong {
-  display: block;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: var(--r-md);
-  background: transparent;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 34px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow-wrap: normal;
-}
-
-.inspector-pane .ip-controls select,
-.inspector-pane .ip-controls input:not([type=checkbox]) {
-  width: 100%;
-  min-width: 0;
-  height: 36px;
-  min-height: 36px;
-  margin: 0;
-  padding: 0 32px 0 12px;
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: var(--r-md);
-  background-color: var(--field);
-  color: var(--text);
-  font-size: 13px;
-  line-height: 20px;
-  text-overflow: ellipsis;
-  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
-}
-
-.inspector-pane .ip-controls select {
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a4a9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 14px 14px;
-}
-
-.inspector-pane .ip-controls select option {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.inspector-pane .ip-controls input:not([type=checkbox]) {
-  padding-right: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.inspector-pane .ip-controls :is(select, input:not([type=checkbox])):hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, .16);
-  background-color: rgba(255, 255, 255, .05);
-}
-
-.inspector-pane .ip-controls :is(select, input:not([type=checkbox])):focus-visible {
-  outline: none;
-  border-color: var(--border-focus);
-  box-shadow: var(--ring-focus);
-}
-
-.inspector-pane .ip-controls select:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-}
-
-.inspector-pane .ip-controls .ip-size {
-  margin: 0;
-  padding: 12px;
-  gap: 12px;
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: var(--r-md);
-}
-
-.inspector-pane .ip-controls .ip-size legend {
-  padding: 0 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-2);
-}
-
-.inspector-pane .ip-controls .ip-size-tools {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.inspector-pane .ip-controls .ip-reference-size {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.inspector-pane .ip-controls .ip-reference-size select {
-  min-width: 0;
-}
-
-.inspector-pane .ip-controls button:where(:not(.btn)) {
-  min-height: 32px;
-  height: 32px;
-  padding: 0 8px;
-  border: 1px solid var(--btn-rim);
-  border-radius: var(--r-sm);
-  background: var(--btn-fill);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--btn-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: var(--btn-transition);
-}
-
-.inspector-pane .ip-controls button:where(:not(.btn)):hover:not(:disabled) {
-  border-color: var(--btn-rim-hover);
-  background: var(--btn-fill-hover);
-}
-
-.inspector-pane .ip-controls button:where(:not(.btn))[aria-pressed=true] {
-  border-color: var(--btn-active-rim);
-  background: var(--btn-active-fill);
-  color: var(--btn-active-text);
-}
-
-.inspector-pane .ip-controls .ip-reference-size button:where(:not(.btn)) {
-  height: 36px;
-  min-height: 36px;
-  border-radius: var(--r-md);
-  padding: 0 12px;
-}
-
-.inspector-pane .ip-controls .ip-toggle {
-  display: flex;
-  flex-direction: row-reverse;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: var(--r-md);
-  background: var(--field);
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.inspector-pane .ip-controls .ip-toggle input {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  flex: 0 0 auto;
-  width: 32px;
-  height: 18px;
-  min-height: 0;
-  margin: 0;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .08);
-  cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
-}
-
-.inspector-pane .ip-controls .ip-toggle input::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--text-2);
-  transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
-}
-
-.inspector-pane .ip-controls .ip-toggle input:checked {
-  border-color: transparent;
-  background: var(--accent);
-}
-
-.inspector-pane .ip-controls .ip-toggle input:checked::after {
-  transform: translateX(14px);
-  background: var(--on-accent);
-}
-
-.inspector-pane .ip-controls .ip-toggle input:focus-visible {
-  outline: none;
-  box-shadow: var(--ring-focus);
-}
-
-.inspector-pane .ip-controls p {
-  color: var(--danger);
-}
+/* Standalone tool ImageOutputControls styling now lives in components/properties/propertiesPrimitives.css (.pf-panel .ip-controls.is-panel). */
 
 .audio-reference-drop-zone {
   min-height: 112px;
@@ -2038,7 +1805,7 @@
 @media (max-width: 1280px) {
   .workspace-main {
     --prompt-width: min(var(--prompt-user-width, 400px), 360px);
-    grid-template-columns: var(--prompt-width) 1px minmax(0, 1fr) 280px;
+    grid-template-columns: var(--prompt-width) 1px minmax(0, 1fr) 288px;
   }
 }
 
@@ -2517,22 +2284,61 @@
   grid-column: 4;
   grid-row: 2;
   flex-direction: column;
-  border-width: 0 0 0 1px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface-1);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .layer-panel-heading {
   min-height: 38px;
   flex: 0 0 auto;
   gap: 7px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
+  border-bottom: 1px solid var(--border);
   padding: 0 10px;
-  color: #ced0d1;
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
 }
-.layer-panel-heading > button { margin-left: auto; color: #919699; }
-.layer-panel-heading > span { margin-left: auto; color: #7b8185; font: 12px monospace; }
-.layer-versions-heading { border-top: 1px solid rgba(255,255,255,.08); }
+.layer-panel-heading > button { margin-left: auto; color: var(--text-2); }
+.layer-panel-heading > span { margin-left: auto; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.layer-studio-right .layer-studio-right-head {
+  height: 44px;
+  min-height: 44px;
+  gap: 8px;
+  padding: 0 var(--pf-pad, 16px);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.layer-studio-right .layer-studio-right-head > .pf-kind-box {
+  margin-left: 0;
+}
+.layer-studio-right .layer-studio-right-head > strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.layer-studio-right .layer-studio-right-head > .layer-count-badge {
+  margin-left: auto;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.layer-studio-right .layer-properties-heading {
+  min-height: 36px;
+  padding: 0 var(--pf-pad, 16px);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.layer-versions-heading { border-top: 1px solid var(--border); }
 
 .layer-project-list { min-height: 120px; flex: 1 1 auto; overflow-y: auto; padding: 6px; }
 .layer-project-list button,
@@ -2624,14 +2430,38 @@
 .studio-layer-row small { margin-top: 3px; color: #6e7477; font: 12px monospace; }
 .layer-row-grip { color: #5f6466; cursor: grab; }
 
-.layer-properties { min-height: 250px; flex: 1 1 45%; overflow-y: auto; border-top: 1px solid rgba(255,255,255,.08); }
+.layer-properties { min-height: 250px; flex: 1 1 45%; overflow-y: auto; border-top: 1px solid var(--border); padding-bottom: 12px; }
 .layer-properties > label,
-.layer-property-grid label { display: block; padding: 7px 10px 0; color: #83898d; font-size: 12px; }
-.layer-properties input { width: 100%; height: 29px; margin-top: 4px; border: 1px solid rgba(255,255,255,.11); border-radius: 4px; background: #141516; padding: 0 7px; color: #dbdddd; font: 12px monospace; outline: none; }
-.layer-properties input:focus { border-color: rgba(144,152,152,.5); }
-.layer-property-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
-.layer-properties p { margin: 10px; color: #898f93; font-size: 12px; line-height: 1.5; }
-.layer-properties-empty { display: grid; min-height: 130px; place-items: center; color: #6e7477; font-size: 12px; }
+.layer-property-grid label { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 0; color: var(--text-2); font-size: 12px; font-weight: 500; line-height: 16px; }
+.layer-property-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 8px; padding: 0 16px; }
+.layer-property-grid label { padding: 10px 0 0; }
+.layer-properties input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  margin-top: 0;
+  border: 1px solid var(--pf-rim, rgba(255,255,255,.10));
+  border-radius: 8px;
+  background: var(--pf-fill, rgba(255,255,255,.03));
+  padding: 0 10px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.layer-properties input:hover:not(:disabled) {
+  border-color: var(--pf-rim-hover, rgba(255,255,255,.16));
+  background: var(--pf-fill-hover, rgba(255,255,255,.05));
+}
+.layer-properties input:focus-visible,
+.layer-properties input:focus {
+  border-color: var(--border-focus);
+  box-shadow: var(--ring-focus);
+}
+.layer-properties p { margin: 10px 16px; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.layer-properties-empty { display: grid; min-height: 130px; place-items: center; color: var(--text-3); font-size: 12px; }
 .layer-property-delete { display: flex; align-items: center; gap: 5px; margin: 12px 10px; color: #cf8187; font-size: 12px; }
 
 .layer-prompt-dock {
