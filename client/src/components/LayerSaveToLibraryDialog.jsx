@@ -22,6 +22,8 @@ export default function LayerSaveToLibraryDialog({
   documentState,
   selectedLayer,
   initialTarget = 'composite',
+  canvasContext = null,
+  onReturnToCanvas = null,
   onClose,
   onLocate,
   notify,
@@ -120,22 +122,34 @@ export default function LayerSaveToLibraryDialog({
       {outcome ? (
         <div className="layer-save-outcome" data-testid="layer-save-library-outcome">
           <p role="status"><strong>{outcome.text}</strong></p>
-          {onLocate && (
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              data-testid="layer-save-library-locate"
-              onClick={() => onLocate(outcome.media)}
-            >
-              在素材库中定位
-            </button>
-          )}
+          <div className="layer-save-outcome-actions">
+            {canvasContext?.workflowId && onReturnToCanvas && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                data-testid="layer-save-library-return-canvas"
+                onClick={() => onReturnToCanvas(outcome.media)}
+              >
+                作为素材节点回到原画布
+              </button>
+            )}
+            {onLocate && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                data-testid="layer-save-library-locate"
+                onClick={() => onLocate(outcome.media)}
+              >
+                在素材库中定位
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="layer-save-form">
           {canSaveLayer && (
             <div className="layer-save-target" role="radiogroup" aria-label="保存内容">
-              <label>
+              <label className="layer-save-radio-option">
                 <input
                   type="radio"
                   name="layer-save-target"
@@ -144,9 +158,9 @@ export default function LayerSaveToLibraryDialog({
                   disabled={busy}
                   onChange={() => switchTarget('composite')}
                 />
-                <span>当前画布合成图</span>
+                <span className="layer-save-radio-text">当前画布合成图</span>
               </label>
-              <label>
+              <label className="layer-save-radio-option">
                 <input
                   type="radio"
                   name="layer-save-target"
@@ -155,7 +169,7 @@ export default function LayerSaveToLibraryDialog({
                   disabled={busy}
                   onChange={() => switchTarget('layer')}
                 />
-                <span>当前选中图层（{selectedLayer.name}）</span>
+                <span className="layer-save-radio-text">当前选中图层（{selectedLayer.name}）</span>
               </label>
             </div>
           )}

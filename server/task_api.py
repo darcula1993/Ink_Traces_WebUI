@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, send_file, after_this_request
 import gen_results
 import storage
+import task_duration_stats
 import tasks as task_db
 from request_utils import as_bool, positive_id
 from task_public import public_task, public_tasks
@@ -155,6 +156,23 @@ def api_task_filter_options():
         'success': True,
         **task_db.get_task_filter_options(task_type=task_type, deleted=deleted),
     })
+
+
+@task_api.route('/api/tasks/duration-stats', methods=['GET'])
+def api_task_duration_stats():
+    """Read-only P50 & P25-P75 historical task duration hints over the last 30 days."""
+    task_type, type_error = _parse_optional_task_type(request.args.get('type'))
+    if type_error:
+        return type_error
+    model = request.args.get('model', '').strip()
+    if len(model) > 160:
+        return jsonify({'success': False, 'error': 'model 过滤值过长'}), 400
+    stats = task_duration_stats.compute_duration_stats(
+        window_days=task_duration_stats.DEFAULT_WINDOW_DAYS,
+        task_type=task_type,
+        model=model or None,
+    )
+    return jsonify({'success': True, **stats})
 
 
 @task_api.route('/api/tasks/status', methods=['GET'])

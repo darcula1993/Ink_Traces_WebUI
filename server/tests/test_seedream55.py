@@ -243,3 +243,105 @@ def test_independent_tool_custom_profile_audio_upload_and_disable_block(monkeypa
         'provider': 'cupsy', 'profile_id': aud1['id'], 'prompt': 'after delete',
     })
     assert blocked.status_code == 409
+
+
+def test_ark_explicit_capability_model_declares_55_for_custom_ep_and_preflight(monkeypatch):
+    import json
+    import cost_estimate
+    import profile_runtime
+    from provider_profiles import ProfileError, check_profile, init_profiles_db, save_profile
+
+    init_profiles_db()
+    custom_ep = 'ep-20990101000000-v24cap'  # secret-scan: allow
+    monkeypatch.setitem(app.config['generation']['image']['byteplus'], 'model', 'ep-confirmed55')
+    monkeypatch.setitem(
+        app.API_PROVIDERS, 'ark',
+        profile_runtime.ProfileConfig({'api_key': 'dep-key', 'endpoint': 'https://dep.invalid', 'model': 'ep-confirmed55'}, 'ark', kind='image'),
+    )
+
+    # Whitelist enforcement: reject invalid capability_model & reject on non-Ark-image profiles.
+    with pytest.raises(ProfileError) as exc_bad:
+        save_profile({
+            'name': '非法能力版本', 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'api_key': 'k',
+            'settings': {'endpoint': 'https://bad.invalid', 'model': custom_ep, 'capability_model': 'seedream-9-9'},
+        })
+    assert exc_bad.value.status == 400
+    with pytest.raises(ProfileError) as exc_cupsy:
+        save_profile({
+            'name': 'Cupsy不支持能力版本', 'kind': 'image', 'adapter': 'cupsy', 'enabled': True, 'api_key': 'k',
+            'settings': {'endpoint': 'https://cupsy.invalid', 'capability_model': seedream55.MODEL},
+        })
+    assert exc_cupsy.value.status == 400
+
+    # 1. Custom ep- WITHOUT capability_model -> preflight warns about 5.0 Pro $0.045 fallback (no raw ep- leak).
+    p_undeclared = save_profile({
+        'name': '未声明EP', 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'api_key': 'test-key-undeclared',
+        'settings': {'endpoint': 'https://ep1.invalid', 'model': custom_ep},
+    })
+    assert p_undeclared['capability_model'] == custom_ep
+    pre_warn = check_profile(p_undeclared['id'])
+    assert custom_ep not in json.dumps(pre_warn, ensure_ascii=False)
+    assert 'test-key-undeclared' not in json.dumps(pre_warn, ensure_ascii=False)
+    cap_warn = next(c for c in pre_warn['checks'] if c['key'] == 'capability_model')
+    assert cap_warn['status'] == 'warn'
+    assert '$0.045' in cap_warn['message']
+
+    # 2. Custom ep- WITH explicit capability_model=dola-seedream-5-5-261028 -> full 5.5 capability + $0.020/1K!
+    p_declared_55 = save_profile({
+        'name': '声明55的EP', 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'api_key': 'test-key-ep-55',
+        'settings': {'endpoint': 'https://ep55.invalid', 'model': custom_ep, 'capability_model': seedream55.MODEL},
+    })
+    assert p_declared_55['capability_model'] == seedream55.MODEL
+    pre_ok = check_profile(p_declared_55['id'])
+    assert custom_ep not in json.dumps(pre_ok, ensure_ascii=False)
+    assert pre_ok['status'] == 'ok'
+    cap_ok = next(c for c in pre_ok['checks'] if c['key'] == 'capability_model')
+    assert cap_ok['status'] == 'ok'
+    assert 'Seedream 5.5' in cap_ok['message'] and '$0.020' in cap_ok['message']
+
+    client = app.app.test_client()
+    r55 = client.post('/api/generate', json={
+        'provider': 'ark', 'profile_id': p_declared_55['id'], 'prompt': 'declared 55',
+        'aspect_ratio': '1:1', 'resolution': '1.5K', 'background': 'transparent', 'output_format': 'png',
+    })
+    assert r55.status_code == 202, r55.get_json()
+    t55 = tasks.get_task(r55.get_json()['task_id'])
+    assert t55['params']['seedream55'] is True
+    assert t55['params']['cost_estimate']['model'] == 'seedream-5.5'
+    assert t55['params']['cost_estimate']['minimum_cost'] == pytest.approx(0.020)
+
+    # Even without seedream55 flag, cost_estimate recognizes explicit capability_model / profile declaration.
+    derived_from_profile = cost_estimate.compute_task_estimate({
+        'id': t55['id'], 'type': 'image', 'provider': 'ark', 'status': 'succeeded',
+        'params': {'model': custom_ep, 'size': '1024x1024', 'profile_id': p_declared_55['id'], 'profile_revision': 1},
+    }, tasks.get_db())
+    assert derived_from_profile['model'] == 'seedream-5.5'
+    assert derived_from_profile['minimum_cost'] == pytest.approx(0.020)
+
+    derived_from_param = cost_estimate.compute_task_estimate({
+        'id': t55['id'], 'type': 'image', 'provider': 'ark', 'status': 'succeeded',
+        'params': {'model': custom_ep, 'size': '1024x1024', 'capability_model': seedream55.MODEL},
+    }, tasks.get_db())
+    assert derived_from_param['model'] == 'seedream-5.5'
+    assert derived_from_param['minimum_cost'] == pytest.approx(0.020)
+
+    # 3. Explicit seedream-5-0-pro overrides even deployment-matched ep-confirmed55.
+    p_force_50 = save_profile({
+        'name': '显式50覆盖', 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'api_key': 'secret-ep-50',
+        'settings': {'endpoint': 'https://ep50.invalid', 'model': 'ep-confirmed55', 'capability_model': 'seedream-5-0-pro'},
+    })
+    assert p_force_50['capability_model'] == 'seedream-5-0-pro'
+    r_bad_res = client.post('/api/generate', json={
+        'provider': 'ark', 'profile_id': p_force_50['id'], 'prompt': 'force 50',
+        'aspect_ratio': '1:1', 'resolution': '1.5K',
+    })
+    assert r_bad_res.status_code == 400
+    r_50_ok = client.post('/api/generate', json={
+        'provider': 'ark', 'profile_id': p_force_50['id'], 'prompt': 'force 50 1k',
+        'aspect_ratio': '1:1', 'resolution': '1K',
+    })
+    assert r_50_ok.status_code == 202, r_50_ok.get_json()
+    t50 = tasks.get_task(r_50_ok.get_json()['task_id'])
+    assert t50['params']['seedream55'] is False
+    assert t50['params']['cost_estimate']['model'] == 'seedream-5.0-pro'
+    assert t50['params']['cost_estimate']['minimum_cost'] == pytest.approx(0.045)

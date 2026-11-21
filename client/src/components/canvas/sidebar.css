@@ -158,3 +158,10 @@
 .cv-sidebar .cv-tree-bulk-bar button:where(:not(.btn)){height:26px;padding:0 8px;font-size:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04)}
 .cv-sidebar .cv-tree-bulk-bar button.is-danger:where(:not(.btn)){color:var(--btn-danger-text,#d9959a);border-color:rgba(223,138,144,.3)}
 .cv-sidebar .cv-tree-bulk-bar button.is-danger:where(:not(.btn)):hover:not(:disabled){background:rgba(223,138,144,.12)}
+
+/* V24-W2-COMPARE-FINAL-20261121: finalized filter pill & sidebar node finalized badge. */
+.canvas-studio .cv-panel-project .cv-final-filter-btn{height:24px;min-height:24px;padding:0 8px;border:1px solid var(--cv-border,rgba(255,255,255,.1));border-radius:999px;background:transparent;color:var(--cv-secondary);font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.canvas-studio .cv-panel-project .cv-final-filter-btn:hover:not(:disabled){background:rgba(255,255,255,.06);color:var(--cv-text)}
+.canvas-studio .cv-panel-project .cv-final-filter-btn.is-active{border-color:rgba(69,192,136,.48);background:var(--accent-soft,rgba(69,192,136,.14));color:var(--cv-focus,#6ce0a8)}
+.canvas-studio .cv-sidebar .cv-node-list .cv-sidebar-final-badge{flex:0 0 auto;display:inline-flex;align-items:center;gap:2px;margin-right:0;padding:1px 6px;border-radius:999px;border:1px solid rgba(69,192,136,.42);background:var(--accent-soft,rgba(69,192,136,.14));color:var(--cv-focus,#6ce0a8);font-size:11px;line-height:15px;font-weight:500;white-space:nowrap}
+.canvas-studio .cv-panel-project .cv-sidebar-node-actions .cv-sidebar-node-final-btn.is-finalized{color:var(--cv-focus,#6ce0a8)}

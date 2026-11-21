@@ -41,3 +41,37 @@ export const imageSizeSummary=(provider,params={})=>{const p=imageEffectiveParam
 export const imageTabParams=(provider,tab)=>({ratio:tab.aspectRatio,resolution:tab.resolution,custom_width:tab.customWidth,custom_height:tab.customHeight,lock_aspect_ratio:!!tab.customAspectLocked,output_format:tab.outputFormat||'png',background:provider==='ark'?tab.background||'default':'default',watermark:!!tab.watermark})
 const tabKeys={ratio:'aspectRatio',resolution:'resolution',custom_width:'customWidth',custom_height:'customHeight',lock_aspect_ratio:'customAspectLocked',output_format:'outputFormat',background:'background',watermark:'watermark'}
 export const imageTabPatch=patch=>Object.fromEntries(Object.entries(patch).filter(([key])=>tabKeys[key]).map(([key,value])=>[tabKeys[key],value]))
+export function sanitizeImageParamsForProvider(provider,params={},model='',references=[]){
+ const p=imageEffectiveParams(provider,params),spec=imageCapabilities(provider,model),defaults=imageDefaults(provider),modern=provider==='ark'&&isSeedream55(model)
+ const next={...p}
+ if(spec.ratios.length&&!spec.ratios.includes(next.ratio))next.ratio=defaults.ratio
+ if(next.ratio!=='custom'&&spec.resolutions.length&&!spec.resolutions.includes(next.resolution))next.resolution=defaults.resolution
+ if(spec.formats.length&&!spec.formats.includes(next.output_format))next.output_format=defaults.output_format
+ const validBackgrounds=provider!=='ark'?['default']:modern?['default','auto','transparent','opaque']:['default','transparent','opaque']
+ if(!validBackgrounds.includes(next.background))next.background='default'
+ if(provider==='ark'&&!modern&&next.background!=='default'){
+  const hasSingleAlpha=references.length===1&&references[0]?.has_alpha===true
+  if(!hasSingleAlpha)next.background='default'
+ }
+ if(next.background==='transparent'&&next.output_format!=='png')next.output_format='png'
+ if(next.ratio!=='custom'){
+  const dimensions=spec.sizeMap[next.resolution]?.[next.ratio]
+  if(dimensions&&(next.ratio!==p.ratio||next.resolution!==p.resolution)){next.custom_width=dimensions[0];next.custom_height=dimensions[1]}
+ }
+ const changed=['ratio','resolution','custom_width','custom_height','output_format','background'].some(key=>next[key]!==p[key])
+ return {params:next,changed}
+}
+export function sanitizeImageTabForProvider(provider,tab={},model='',references=[]){
+ const raw={ratio:tab.aspectRatio,resolution:tab.resolution,custom_width:tab.customWidth,custom_height:tab.customHeight,lock_aspect_ratio:!!tab.customAspectLocked,output_format:tab.outputFormat||'png',background:tab.background||'default',watermark:!!tab.watermark}
+ const {params,changed}=sanitizeImageParamsForProvider(provider,raw,model,references)
+ const tabPatch=imageTabPatch({
+  ratio:params.ratio,
+  resolution:params.resolution,
+  custom_width:params.custom_width,
+  custom_height:params.custom_height,
+  output_format:params.output_format,
+  background:params.background,
+ })
+ const tabChanged=tabPatch.aspectRatio!==tab.aspectRatio||tabPatch.resolution!==tab.resolution||tabPatch.outputFormat!==(tab.outputFormat||'png')||tabPatch.background!==(tab.background||'default')
+ return {patch:tabPatch,params,changed:changed||tabChanged}
+}

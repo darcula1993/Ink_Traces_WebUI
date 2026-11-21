@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react'
-import {Copy,Play,PanelRightClose,PanelRightOpen,Pencil,FileText,Image,Film,Music,Layers,FolderInput,UserPlus,Search,Sparkles,ChevronRight,Plug,Cpu,Clock3,Mic,Trash2,LayoutGrid} from 'lucide-react'
+import {AlertTriangle,Check,ChevronDown,ChevronUp,Copy,Play,PanelRightClose,PanelRightOpen,Pencil,FileText,Image,Film,Music,Layers,FolderInput,UserPlus,Search,Sparkles,ChevronRight,Plug,Cpu,Clock3,Mic,Trash2,LayoutGrid} from 'lucide-react'
 import LibraryUploadMenu from '../library/LibraryUploadMenu'
 import ImageOutputControls from '../image-parameters/ImageOutputControls'
 import ReferenceThumbnails from './ReferenceThumbnails'
@@ -7,16 +7,18 @@ import CanvasVideoEstimate from './CanvasVideoEstimate'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import CanvasGroupColors,{GROUP_COLORS} from './CanvasGroupColors'
 import PromptLibraryPicker from './PromptLibraryPicker'
-import {GroupRunBadge} from './CanvasGroupRun'
+import {GroupRunBadge,useProjectBudget} from './CanvasGroupRun'
+import {evaluateBudgetWarning} from '../../lib/projectBudget'
 import {isActiveRun} from '../../lib/canvasGroupRun'
 import {isBusyTaskStatus,isCancellableTask,isFailureTaskStatus,isGeneratingTaskStatus,taskStatusLabel} from '../../lib/taskStatus'
 import {imageSizeSummary} from '../../lib/imageGenerationRules'
-import {videoDurations,VIDEO_RATIOS,videoRatioLabel,videoOutputSummary} from '../../lib/videoGenerationRules'
+import {videoDurations,VIDEO_RATIOS,videoRatioLabel,videoOutputSummary,videoAdaptiveRatioGuardrail} from '../../lib/videoGenerationRules'
 import {selectionOptionId,toSelection} from '../../lib/canvasProviderSelection'
 import {AUDIO_SPEAKERS,AUDIO_OUTPUT_FORMATS,AUDIO_SAMPLE_RATES} from '../../lib/generationSettings'
 import {MIXED_VALUE,batchParamSummary} from '../../lib/canvasBatchParams'
 import {positionalMentionRebinds} from '../../lib/canvasReferences'
 import {FAILURE_ACTION_LABELS,formatTaskError} from '../../lib/canvasTaskEcho'
+import {decodeProviderError,sanitizeErrorText} from '../../lib/providerErrorHints'
 import {formatCostRange} from '../../lib/canvasBatchRun'
 import './propertiesPanel.css'
 import './propertiesForm.css'
@@ -238,7 +240,13 @@ export function multiContent({nodes,plan,capabilities,onBatchChange,onLocate,onM
     <div className="cv-prop-actions"><button type="button" className="btn btn-secondary btn-sm" disabled={groupDisabled} onClick={onMakeGroup}>创建节点组</button></div>
    </Section>
   </div>,
-  footer:generation?<>{plan&&plan.ready.length>0&&<div className="cv-pf-estimate"><span>合计预估</span><span>{plan.total.text}</span></div>}{reason&&<span id={reasonId} className="cv-sr-only">{reason}</span>}<button type="button" className="btn btn-primary btn-block cv-pf-primary cv-run-selected" aria-describedby={reason?reasonId:undefined} title={reason?`无法运行：${reason}`:'一次提交所选节点中输入已就绪的生成节点，每个节点独立任务，不连锁下游'} disabled={!!reason} onClick={onRun}><Play size={14} aria-hidden="true"/>运行所选</button></>:null}
+  footer:generation?<MultiRunFooter plan={plan} reason={reason} reasonId={reasonId} onRun={onRun}/>:null}
+}
+
+function MultiRunFooter({plan,reason,reasonId,onRun}) {
+ const budget=useProjectBudget({enabled:Boolean(plan&&plan.ready.length>0),refreshKey:`multi:${plan?.ready?.length||0}:${plan?.total?.max||0}`})
+ const warning=plan&&plan.ready.length>0?evaluateBudgetWarning({spent:budget?.billable,incoming:plan.total,budgetUsd:budget?.budget_usd??null}):{exceeds:false}
+ return <>{plan&&plan.ready.length>0&&<div className="cv-pf-estimate"><span>合计预估</span><span>{plan.total.text}</span></div>}{warning.exceeds&&<div className="cv-budget-soft-warning" role="status" data-testid="budget-soft-warning"><AlertTriangle size={14} aria-hidden="true"/><span>{warning.message}</span></div>}{reason&&<span id={reasonId} className="cv-sr-only">{reason}</span>}<button type="button" className="btn btn-primary btn-block cv-pf-primary cv-run-selected" aria-describedby={reason?reasonId:undefined} title={reason?`无法运行：${reason}`:'一次提交所选节点中输入已就绪的生成节点，每个节点独立任务，不连锁下游'} disabled={!!reason} onClick={onRun}><Play size={14} aria-hidden="true"/>运行所选</button></>
 }
 
 export function groupContent({group,nodes,run,titleOf,disabled,onRename,onColor,onUngroup,onRun,onCancelRun}) {
@@ -300,13 +308,35 @@ export function generationContent(props) {
 
 function GenerateBar({node,gen,estimate,onGenerate}) {
  const label=KIND_LABEL[node.type],reasonId=`cv-generate-reason-${node.id}`,reason=gen.disabledReason
- return <div className="cv-generation-actions"><div className="cv-pf-estimate"><span>费用估算</span><CanvasVideoEstimate estimate={estimate}/></div>{reason&&<span id={reasonId} className="cv-sr-only" data-testid="generate-disabled-reason">{reason}</span>}<button type="button" className="btn btn-primary btn-block cv-pf-primary cv-generate" aria-label={`生成${label}`} title={reason?`无法生成：${reason}`:`生成${label}`} aria-describedby={reason?reasonId:undefined} disabled={!!reason} onClick={onGenerate}><Sparkles size={14} aria-hidden="true"/>生成</button></div>
+ const budget=useProjectBudget({enabled:true,refreshKey:`${node.id}:${node.task?.id||''}:${node.task?.status||''}`})
+ const warning=evaluateBudgetWarning({spent:budget?.billable,incoming:estimate,budgetUsd:budget?.budget_usd??null})
+ return <div className="cv-generation-actions"><div className="cv-pf-estimate"><span>费用估算</span><CanvasVideoEstimate estimate={estimate}/></div>{warning.exceeds&&<div className="cv-budget-soft-warning" role="status" data-testid="budget-soft-warning"><AlertTriangle size={14} aria-hidden="true"/><span>{warning.message}</span></div>}{reason&&<span id={reasonId} className="cv-sr-only" data-testid="generate-disabled-reason">{reason}</span>}<button type="button" className="btn btn-primary btn-block cv-pf-primary cv-generate" aria-label={`生成${label}`} title={reason?`无法生成：${reason}`:`生成${label}`} aria-describedby={reason?reasonId:undefined} disabled={!!reason} onClick={onGenerate}><Sparkles size={14} aria-hidden="true"/>生成</button></div>
+}
+
+const copyText=(text,onDone)=>{
+ const fallback=()=>{
+  try{
+   const ta=document.createElement('textarea')
+   ta.value=text
+   ta.setAttribute('readonly','')
+   ta.style.cssText='position:fixed;left:-9999px;top:0;opacity:0'
+   document.body.appendChild(ta)
+   ta.select()
+   const ok=document.execCommand?.('copy')
+   document.body.removeChild(ta)
+   if(ok)onDone(true)
+  }catch{/* clipboard unavailable */}
+ }
+ if(navigator.clipboard?.writeText){navigator.clipboard.writeText(text).then(()=>onDone(true)).catch(fallback);return}
+ fallback()
 }
 
 function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets=[],resultUnknown,errorMessage='',mentionNotice,onChange,onGenerate,onCancelTask,cancellingTaskIds,groupRunActive=false,onReorderReferences,onRemoveReference,onPreviewReference,onClearReferences,portWarnings=[],overLimitCount=0,onRemoveOverLimit,onUpload,onLibrary,onLinkTask,onOpenTask,onDismissStale,onNotice,onEditPrompt,onOrganizeGroup}) {
- const [taskNumber,setTaskNumber]=useState(''),[copied,setCopied]=useState(false),[regenerateConfirm,setRegenerateConfirm]=useState(false),outputRef=useRef(null)
+ const [taskNumber,setTaskNumber]=useState(''),[copied,setCopied]=useState(false),[errorCopied,setErrorCopied]=useState(false),[errorExpanded,setErrorExpanded]=useState(false),[regenerateConfirm,setRegenerateConfirm]=useState(false),outputRef=useRef(null),rootRef=useRef(null)
  const {params,model,spec,ratio,unsupported,frames,imageAdapter,imageMetadata,imageDimensions,imageIssues,imageInvalid,audioParams,audioIssue,failure,failureClass,disabledReason}=gen
  const task=node.task,selection=node.providerSelection,selectionId=provider?provider.id:selectionOptionId(selection)
+ useEffect(()=>{setErrorExpanded(false);setErrorCopied(false);setCopied(false)},[node.id,task?.id,task?.error])
+ useEffect(()=>{if(!errorCopied)return;const timer=setTimeout(()=>setErrorCopied(false),2000);return()=>clearTimeout(timer)},[errorCopied])
  const setParam=(key,value)=>onChange({params:{...params,[key]:value}})
  const recovery=task&&(task.status==='unknown'||task.status==='submitting'&&!task.id)
  const inFlight=!!task&&isGeneratingTaskStatus(task.status)
@@ -314,9 +344,28 @@ function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets
  const cancelling=cancellable&&!!cancellingTaskIds?.has(Number(task.id))
  const outputSummary=node.type==='audio'?`${AUDIO_SPEAKERS.find(item=>item.value===audioParams.speaker)?.label||audioParams.speaker} · ${AUDIO_OUTPUT_FORMATS.find(item=>item.value===audioParams.output_format)?.label||audioParams.output_format} · ${audioParams.sample_rate/1000}kHz`:node.type==='image'?imageSizeSummary(imageAdapter,params):videoOutputSummary({ratio:ratio.value,resolution:params.resolution||'720p',duration:params.duration??5})
  const showOutput=()=>{const box=outputRef.current;box?.scrollIntoView?.({block:'nearest'});box?.querySelector('select,input,button')?.focus({preventScroll:true})}
+ const focusTargetField=targetField=>{
+  const root=rootRef.current
+  const selectors={
+   ratio:'select[aria-label="视频画幅"], select[aria-label*="画幅"]',
+   resolution:'select[aria-label="视频分辨率"], select[aria-label*="分辨率"]',
+   model:'select[aria-label="视频模型"]',
+   provider:'select[aria-label="节点生成接口"]',
+   references:'.cv-pf-refs summary, .cv-pf-refs button',
+  }
+  const el=targetField&&selectors[targetField]?root?.querySelector(selectors[targetField]):null
+  if(el){el.scrollIntoView?.({block:'nearest'});el.focus?.({preventScroll:true});return}
+  showOutput()
+ }
+ const rawError=failure?sanitizeErrorText(formatTaskError(task?.error)||''):''
+ const errorDisplayText=rawError||'服务端未返回失败原因'
+ const isLongError=Boolean(rawError)&&(rawError.length>140||rawError.split(/\r?\n/).length>3)
+ const decodedHint=failure?decodeProviderError(task?.error,{resultUnknown,status:task?.status,failureCategory:failureClass?.category||'',nodeType:node.type,ratio:ratio.value,params}):null
+ const referenceVideos=inputAssets.filter(asset=>asset?.kind==='video')
+ const videoGuardrail=node.type==='video'?videoAdaptiveRatioGuardrail({model,ratio:ratio.value,videoMode:params.video_mode,params,referenceVideos,prompt:node.text||''}):null
  const rebind=positionalMentionRebinds(node,inputAssets).map(item=>`${item.token} 已改为指向 ${item.name}`).join('；'),rebindText=mentionNotice||rebind
  const issueText=editor?.mentionError||editor?.mentionIssues.join('；')
- return <div className="cv-generation-body" data-testid="properties-generation">
+ return <div ref={rootRef} className="cv-generation-body" data-testid="properties-generation">
   {(inFlight||failure||node.upstreamStale||recovery)&&<Section id={`cv-prop-status-${node.id}`} title="状态">
    {inFlight&&<div className="cv-task-active" data-testid="panel-task-active" data-task-status={task.status}>
     <div className="cv-task-active-head">
@@ -332,7 +381,25 @@ function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets
     {task.status==='cancel_requested'&&<p className="cv-task-active-note">已请求取消，等待执行器停止；若请求已发往外部服务，可能仍会产生部分费用。</p>}
     {cancellable&&groupRunActive&&<p className="cv-task-active-note">该节点属于运行中节点组；单节点取消将阻断其下游节点，其他分支继续运行。</p>}
    </div>}
-   {failure&&<div className={`cv-task-failure ${resultUnknown||task.status==='unknown'?'is-unknown':''}`} role={errorMessage&&errorMessage===task.error?undefined:'alert'} data-testid="node-task-error"><strong>{resultUnknown?'结果未知，可能已计费':task.status==='unknown'?'提交结果未知':(failureClass?.label||'生成失败')}{(resultUnknown||task.status==='unknown')&&<span> · 请求可能已发出，请先核查；不会自动重试</span>}</strong>{failureClass?.hint&&<p className="cv-task-failure-hint" data-testid="panel-failure-hint" data-failure-category={failureClass.category||undefined}>{failureClass.hint}</p>}<p title={formatTaskError(task.error)||undefined}>{formatTaskError(task.error)||'服务端未返回失败原因'}</p>{failureClass&&failureClass.action!=='none'&&<div className="cv-task-failure-actions">{failureClass.action==='regenerate_confirm'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="regenerate_confirm" disabled={!!disabledReason} title={disabledReason?`无法生成：${disabledReason}`:'重新生成会提交新任务并再次计费，需先确认'} onClick={()=>setRegenerateConfirm(true)}>{FAILURE_ACTION_LABELS.regenerate_confirm}</button>}{failureClass.action==='edit_params'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="edit_params" onClick={showOutput}>{FAILURE_ACTION_LABELS.edit_params}</button>}{failureClass.action==='check_task'&&task.id&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="check_task" onClick={()=>onOpenTask?.(task)}>{FAILURE_ACTION_LABELS.check_task}</button>}</div>}{task.id&&<span className="cv-task-check">任务 #{task.id} · 可在任务记录中按编号核查<button type="button" title="复制任务编号" aria-label={`复制任务编号 ${task.id}`} onClick={()=>{navigator.clipboard?.writeText(String(task.id)).then(()=>setCopied(true)).catch(()=>{})}}><Copy size={12}/>{copied?'已复制':'复制编号'}</button></span>}</div>}
+   {failure&&<div className={`cv-task-failure ${resultUnknown||task.status==='unknown'?'is-unknown':''}`} role={errorMessage&&errorMessage===task.error?undefined:'alert'} data-testid="node-task-error">
+    <strong>{resultUnknown?'结果未知，可能已计费':task.status==='unknown'?'提交结果未知':(failureClass?.label||'生成失败')}{(resultUnknown||task.status==='unknown')&&<span> · 请求可能已发出，请先核查；不会自动重试</span>}</strong>
+    {failureClass?.hint&&<p className="cv-task-failure-hint" data-testid="panel-failure-hint" data-failure-category={failureClass.category||undefined}>{failureClass.hint}</p>}
+    {decodedHint&&<div className="cv-provider-error-hint" data-testid="panel-provider-error-hint" data-hint-code={decodedHint.code}>
+     <span className="cv-provider-error-hint-title"><AlertTriangle size={13} aria-hidden="true"/>{decodedHint.title}</span>
+     <p className="cv-provider-error-hint-text">{decodedHint.suggestion}</p>
+     <div className="cv-provider-error-hint-actions">
+      {decodedHint.quickFix&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-error-quickfix" onClick={()=>{onChange({params:{...params,...decodedHint.quickFix.patch}});focusTargetField(decodedHint.targetField)}}>{decodedHint.quickFix.label}</button>}
+      {decodedHint.targetField&&<button type="button" className="btn btn-ghost btn-sm" data-testid="panel-error-locate" onClick={()=>focusTargetField(decodedHint.targetField)}>定位参数</button>}
+     </div>
+    </div>}
+    <p className={`cv-task-failure-raw ${isLongError?(errorExpanded?'is-expanded':'is-clamped'):''}`} data-testid="panel-error-raw" title={rawError||undefined}>{errorDisplayText}</p>
+    <div className="cv-task-failure-tools">
+     {isLongError&&<button type="button" data-testid="panel-error-expand" aria-expanded={errorExpanded} onClick={()=>setErrorExpanded(v=>!v)}>{errorExpanded?<><ChevronUp size={12} aria-hidden="true"/>收起完整错误</>:<><ChevronDown size={12} aria-hidden="true"/>展开完整错误</>}</button>}
+     <button type="button" data-testid="panel-copy-error" aria-label="复制错误信息" title="复制完整错误信息" onClick={()=>copyText(errorDisplayText,setErrorCopied)}>{errorCopied?<><Check size={12} aria-hidden="true"/>已复制错误信息</>:<><Copy size={12} aria-hidden="true"/>复制错误信息</>}</button>
+    </div>
+    {failureClass&&failureClass.action!=='none'&&<div className="cv-task-failure-actions">{failureClass.action==='regenerate_confirm'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="regenerate_confirm" disabled={!!disabledReason} title={disabledReason?`无法生成：${disabledReason}`:'重新生成会提交新任务并再次计费，需先确认'} onClick={()=>setRegenerateConfirm(true)}>{FAILURE_ACTION_LABELS.regenerate_confirm}</button>}{failureClass.action==='edit_params'&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="edit_params" onClick={showOutput}>{FAILURE_ACTION_LABELS.edit_params}</button>}{failureClass.action==='check_task'&&task.id&&<button type="button" className="btn btn-secondary btn-sm" data-testid="panel-failure-action" data-action="check_task" onClick={()=>onOpenTask?.(task)}>{FAILURE_ACTION_LABELS.check_task}</button>}</div>}
+    {task.id&&<span className="cv-task-check">任务 #{task.id} · 可在任务记录中按编号核查<button type="button" title="复制任务编号" aria-label={`复制任务编号 ${task.id}`} onClick={()=>copyText(String(task.id),setCopied)}><Copy size={12}/>{copied?'已复制':'复制编号'}</button></span>}
+   </div>}
    {node.upstreamStale&&<div className="cv-stale-notice" role="status"><span>上游已更新：此节点的结果基于旧输入，重新生成成功后标记消失；不会自动生成。</span>{onDismissStale&&<button type="button" onClick={onDismissStale}>忽略标记</button>}</div>}
    {recovery&&<div className="cv-task-recovery"><span>请核查并关联已有任务，不会重新生成。</span><label>本地任务编号<input type="number" min="1" value={taskNumber} onChange={e=>setTaskNumber(e.target.value)}/></label><button type="button" disabled={!taskNumber} onClick={()=>onLinkTask(taskNumber)}>关联已有任务</button></div>}
   </Section>}
@@ -356,9 +423,10 @@ function GenerationBody({node,provider,providerOptions=[],gen,editor,inputAssets
    :node.type==='image'?<div className="cv-image-parameters"><ImageOutputControls variant="panel" fieldPrefix={imagePrefix} Advanced={PropAdvanced} provider={imageAdapter} params={params} model={provider?.capability_model||provider?.model} references={imageMetadata.references} dimensions={imageDimensions} issues={imageIssues} metadataError={imageMetadata.error} onChange={patch=>onChange({params:{...params,...patch}})}/></div>
    :<div className="cv-pf-fields">
     <Field label="画幅" prefix={<RatioGlyph value={ratio.value}/>}><select aria-label="视频画幅" disabled={ratio.locked} title={ratio.locked?'Seedance 2.5 首尾帧自动保持首帧比例':undefined} value={ratio.value} onChange={e=>setParam('ratio',e.target.value)}>{VIDEO_RATIOS.map(v=><option key={v} value={v}>{videoRatioLabel(v)}</option>)}</select></Field>
+    {videoGuardrail&&<div className={`cv-video-guardrail ${videoGuardrail.required?'is-required':''}`} role="status" data-testid="video-adaptive-guardrail" data-severity={videoGuardrail.required?'required':'advisory'} data-reason={videoGuardrail.reason}><div className="cv-video-guardrail-head"><AlertTriangle size={14} aria-hidden="true"/><span>{videoGuardrail.message}</span></div><div className="cv-video-guardrail-actions"><button type="button" className="btn btn-secondary btn-sm" data-testid="video-switch-adaptive" onClick={()=>setParam('ratio','adaptive')}>{videoGuardrail.actionLabel}</button></div></div>}
     <Field label="分辨率"><select aria-label="视频分辨率" value={params.resolution||'720p'} onChange={e=>setParam('resolution',e.target.value)}>{(spec?.resolutions||[params.resolution||'720p']).map(v=><option key={v}>{v}</option>)}</select></Field>
     <Field label="时长" prefix={<Clock3 size={14}/>}><select aria-label="视频时长" value={params.duration??5} onChange={e=>setParam('duration',Number(e.target.value))}>{!videoDurations(model).includes(Number(params.duration??5))&&<option value={params.duration??5}>原时长不支持，请选择</option>}{videoDurations(model).map(v=><option key={v} value={v}>{v===-1?'Auto':`${v}s`}</option>)}</select></Field>
-    {provider?.provider==='cupsy'&&<Field label="任务类型"><select aria-label="任务类型" disabled={params.video_mode==='keyframe'} title={params.video_mode==='keyframe'?'仅全能参考模式使用任务类型':'选择生成任务类型'} value={params.omni_reference_task_type||'auto'} onChange={e=>setParam('omni_reference_task_type',e.target.value)}><option value="auto">自动</option><option value="reference">参考生成</option><option value="edit">视频编辑</option><option value="extend">视频延长</option></select></Field>}
+    {provider?.provider==='cupsy'&&<Field label="任务类型"><select aria-label="任务类型" disabled={params.video_mode==='keyframe'} title={params.video_mode==='keyframe'?'仅全能参考模式使用任务类型':'选择生成任务类型'} value={params.omni_reference_task_type||'auto'} onChange={e=>{const nextType=e.target.value;onChange({params:{...params,omni_reference_task_type:nextType,...(nextType==='extend'?{ratio:'adaptive'}:{})}})}}><option value="auto">自动</option><option value="reference">参考生成</option><option value="edit">视频编辑</option><option value="extend">视频延长</option></select></Field>}
     <Toggle label="输出音频"><input type="checkbox" className="cv-pf-switch" aria-label="输出音频" checked={params.generate_audio===undefined||params.generate_audio===true} onChange={e=>setParam('generate_audio',e.target.checked)}/></Toggle>{params.generate_audio!==undefined&&typeof params.generate_audio!=='boolean'&&<span role="alert">输出音频设置无效，请重新勾选或关闭。</span>}
    </div>}
   {audioIssue&&<div className="cv-reference-warning" role="status" data-testid="audio-param-issue">{audioIssue}</div>}{imageInvalid&&<div className="cv-reference-warning" role="status">图片参数不适用于当前接口。<button type="button" onClick={showOutput}>处理输出参数</button></div>}

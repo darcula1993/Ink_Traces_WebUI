@@ -1,4 +1,4 @@
-import React,{useRef,useState} from 'react'
+import React,{useEffect,useRef,useState} from 'react'
 import {ChevronDown,ChevronRight,MoreHorizontal,Plus,Check} from 'lucide-react'
 import SidebarEditableName from './SidebarEditableName'
 import ProjectOverview from './ProjectOverview'
@@ -62,12 +62,15 @@ export function CanvasProjectHeader({projects=[],projectId,workflow,disabled,onP
 
 // LEFT-CANVAS-PANEL-20261120: ImagineArt-inspired left panel with Linear dark palette:
 // compact project row + collapsible "画布" list (flat pill rows) + 1px divider + collapsible "节点" section.
-export default function CanvasProjectPanel({edges=[],groups=[],nodes=[],selected,selectedIds,disabled,onLocateGroup,onRenameGroup,onUngroup,onLocate,onSelect,onCopy,onDelete,onRenameNode,onRating,workflows=[],workflow,onWorkflow,onNewWorkflow,onRenameWorkflow,onDuplicateWorkflow,onDeleteWorkflow,...header}) {
+export default function CanvasProjectPanel({edges=[],groups=[],nodes=[],selected,selectedIds,disabled,onLocateGroup,onRenameGroup,onUngroup,onLocate,onSelect,onCopy,onDelete,onRenameNode,onRating,onToggleFinalized,workflows=[],workflow,onWorkflow,onNewWorkflow,onRenameWorkflow,onDuplicateWorkflow,onDeleteWorkflow,...header}) {
  const [pagesOpen,setPagesOpen]=useState(true)
  const [nodesOpen,setNodesOpen]=useState(true)
+ const [onlyFinalized,setOnlyFinalized]=useState(false)
  const [workflowMenu,setWorkflowMenu]=useState(null)
  const [renamingId,setRenamingId]=useState(null)
  const panelRef=useRef(null),menuJustClosed=useRef(null)
+ const finalizedCount=nodes.filter(node=>node.finalized===true).length
+ useEffect(()=>{setOnlyFinalized(false)},[workflow?.id])
 
  const focusWorkflow=id=>requestAnimationFrame(()=>{
   const selector=`button[data-workflow-id="${typeof CSS!=='undefined'&&CSS.escape?CSS.escape(String(id)):String(id)}"]`
@@ -116,11 +119,12 @@ export default function CanvasProjectPanel({edges=[],groups=[],nodes=[],selected
    <div className="cv-section-head">
     <h3 id="cv-section-nodes-title" className="cv-section-title" onClick={()=>setNodesOpen(v=>!v)}><span>节点</span><span className="cv-section-count" aria-label={`共 ${nodes.length} 节点`}>{nodes.length}</span></h3>
     <div className="cv-section-actions">
+     <button type="button" className={`cv-final-filter-btn${onlyFinalized?' is-active':''}`} data-testid="sidebar-final-filter" aria-pressed={onlyFinalized} title={onlyFinalized?'显示全部节点':'仅显示已标为定稿的节点'} onClick={()=>{setOnlyFinalized(v=>!v);if(!nodesOpen)setNodesOpen(true)}}>仅看定稿 ({finalizedCount})</button>
      <button type="button" className="cv-section-btn" aria-label={nodesOpen?'折叠节点列表':'展开节点列表'} title={nodesOpen?'折叠节点列表':'展开节点列表'} aria-expanded={nodesOpen} aria-controls="cv-nodes-section-body" onClick={()=>setNodesOpen(v=>!v)}>{nodesOpen?<ChevronDown size={15} aria-hidden="true"/>:<ChevronRight size={15} aria-hidden="true"/>}</button>
     </div>
    </div>
    {nodesOpen&&<div id="cv-nodes-section-body" className="cv-nodes-section-body">
-    <SidebarNodeList edges={edges} groups={groups} onLocateGroup={onLocateGroup} onRenameGroup={onRenameGroup} onUngroup={onUngroup} nodes={nodes} selected={selected} selectedIds={selectedIds} disabled={disabled} onLocate={onLocate} onSelect={onSelect} onCopy={onCopy} onDelete={onDelete} onRename={onRenameNode} onRating={onRating}/>
+    <SidebarNodeList edges={edges} groups={groups} onLocateGroup={onLocateGroup} onRenameGroup={onRenameGroup} onUngroup={onUngroup} nodes={nodes} selected={selected} selectedIds={selectedIds} disabled={disabled} onLocate={onLocate} onSelect={onSelect} onCopy={onCopy} onDelete={onDelete} onRename={onRenameNode} onRating={onRating} onToggleFinalized={onToggleFinalized} onlyFinalized={onlyFinalized} onOnlyFinalizedChange={setOnlyFinalized}/>
    </div>}
   </section>
 

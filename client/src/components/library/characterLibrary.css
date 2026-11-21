@@ -117,6 +117,23 @@
 /* Sub-dialog form fields */
 .ul-subdialog .cl-field label{display:flex;flex-direction:column;align-items:stretch;gap:6px}
 .ul-subdialog .cl-field textarea{color:inherit;background:var(--field,#151718);border:1px solid var(--border,rgba(255,255,255,.14));border-radius:7px;padding:8px 10px;font:inherit}
+/* V24-W2-CHAR-CARD-20261121: hide create-character dialog while nested library picker is open (keeps form state & z-index clean). */
+.ul-subdialog.cl-create-dialog.is-picking{display:none}
+.cl-create-images-field{gap:8px}
+.cl-create-images-meta{display:inline-flex;align-items:center;gap:8px}
+.ul-subdialog .cl-pick-lib-btn{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.cl-create-images{list-style:none;margin:2px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;max-height:190px;overflow:auto}
+.cl-create-image{position:relative;border:1px solid var(--border,rgba(255,255,255,.12));border-radius:7px;overflow:hidden;background:var(--surface-2,#16181a);aspect-ratio:1}
+.cl-create-image.is-cover{border-color:rgba(69,192,136,.42)}
+.cl-create-image.is-failed{border-color:var(--danger,#df8a90);box-shadow:0 0 0 1px rgba(223,138,144,.45)}
+.ul-subdialog .cl-create-image-thumb{display:block;width:100%;height:100%;padding:0;border:0;border-radius:0;background:transparent;cursor:zoom-in}
+.ul-subdialog .cl-create-image-thumb:focus-visible{outline:2px solid var(--border-focus);outline-offset:-2px}
+.cl-create-image-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.cl-create-image-badge{position:absolute;left:4px;top:4px;min-width:18px;height:18px;padding:0 5px;border-radius:4px;background:rgba(12,13,14,.82);border:1px solid rgba(255,255,255,.14);color:#eef1ef;font-size:10.5px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;pointer-events:none}
+.cl-create-image-badge.is-cover{background:rgba(14,34,25,.9);border-color:rgba(69,192,136,.48);color:#9fe0c0}
+.cl-create-image-bound{position:absolute;left:4px;right:4px;bottom:4px;padding:1px 4px;border-radius:4px;background:rgba(14,34,25,.88);border:1px solid rgba(69,192,136,.42);color:#9fe0c0;font-size:10.5px;text-align:center;pointer-events:none}
+.ul-subdialog .cl-create-image-remove{position:absolute;right:4px;top:4px;width:20px;height:20px;min-height:0;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(12,13,14,.84);color:#eef1ef;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.ul-subdialog .cl-create-image-remove:hover:not(:disabled){background:rgba(223,138,144,.9);border-color:rgba(223,138,144,1);color:#0b0d0c}
 /* Canvas “加入角色卡” dialog */
 .cl-pick{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow:auto}
 .ul-subdialog .cl-pick button:where(:not(.btn)){width:100%;display:flex;align-items:center;gap:10px;text-align:left;padding:6px}

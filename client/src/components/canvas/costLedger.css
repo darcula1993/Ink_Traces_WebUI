@@ -45,3 +45,27 @@
 .cv-ledger-filters .cv-ledger-scope-select{min-width:220px}
 .cv-ledger-task-link{display:inline-flex;align-items:center;padding:1px 6px;margin:-1px -6px;border:1px solid transparent;border-radius:var(--r-sm);background:transparent;color:var(--accent);font:inherit;font-variant-numeric:tabular-nums;cursor:pointer;text-decoration:underline;text-decoration-color:rgba(79,196,140,.45);text-underline-offset:2px}
 .cv-ledger-task-link:hover{background:var(--accent-soft);border-color:rgba(79,196,140,.35);text-decoration-color:var(--accent)}
+/* V24-W3-BUDGET-HISTORY-20261121 (#14): project budget soft-warning bar & submit banners. */
+.cv-ledger-budget{display:flex;flex-direction:column;gap:var(--sp-2);margin-bottom:var(--sp-3);padding:var(--sp-3) var(--sp-4);background:var(--surface-1);border:1px solid var(--border);border-radius:var(--r-md)}
+.cv-ledger-budget.is-exceeded{border-color:rgba(241,206,130,.55);background:rgba(44,34,10,.32)}
+.cv-ledger-budget.is-near{border-color:rgba(241,206,130,.35)}
+.cv-ledger-budget-head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:var(--sp-3)}
+.cv-ledger-budget-meta{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 280px}
+.cv-ledger-budget-meta strong{font-size:var(--fs-control);font-weight:600;color:var(--text)}
+.cv-ledger-budget-meta span{font-size:var(--fs-caption);color:var(--text-2);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.cv-ledger-budget-meta em{font-style:normal}
+.cv-ledger-budget-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--sp-2);flex:0 1 auto}
+.cv-ledger-budget-field{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-caption);color:var(--text-2)}
+.cv-ledger-budget-field input{width:132px;min-height:30px;padding:0 var(--sp-2);background:var(--field);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);font:inherit;font-size:var(--fs-control);font-variant-numeric:tabular-nums;color-scheme:dark}
+.cv-ledger-budget-field input:hover{border-color:var(--border-strong)}
+.cv-ledger-budget-track{height:6px;width:100%;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.cv-ledger-budget-fill{height:100%;border-radius:999px;background:var(--accent);transition:width .2s ease}
+.cv-ledger-budget-fill.is-near{background:var(--warning,#e6b85c)}
+.cv-ledger-budget-fill.is-exceeded{background:#f0b955}
+.cv-ledger-budget-warn{display:flex;align-items:center;gap:6px;margin:0;font-size:var(--fs-caption);color:var(--warning,#f1ce82)}
+.cv-ledger-budget-msg{margin:0;font-size:var(--fs-caption)}
+.cv-ledger-budget-notice{color:var(--accent)}
+/* Soft warning banner in CanvasPropertiesPanel & CanvasGroupRun (never blocks submission). */
+.cv-budget-soft-warning{display:flex;align-items:flex-start;gap:6px;padding:8px 10px;border:1px solid rgba(241,206,130,.55);border-radius:8px;background:rgba(48,36,10,.52);color:#f7dea2;font-size:12px;line-height:1.45;margin:4px 0}
+.cv-budget-soft-warning svg{flex:0 0 auto;margin-top:2px;color:#f1ce82}
+.cv-budget-soft-warning span{min-width:0;overflow-wrap:anywhere}

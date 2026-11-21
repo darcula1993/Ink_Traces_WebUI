@@ -285,3 +285,46 @@ def test_ark_reference_seconds_all_local_and_paths_only(monkeypatch, tmp_path):
     remote_only = task_db.get_task(task_db.create_task('video', 'p', _video_params(
         ref_video_urls=['https://elsewhere.invalid/a.mp4'], ref_video_paths=paths), provider='ark', status='succeeded'))
     assert cost_estimate.reference_video_durations(remote_only, task_db.get_db()) == [None]
+
+
+def test_ledger_returns_readable_profile_name_model_label_and_masks_ep():
+    from provider_profiles import delete_profile, init_profiles_db, save_profile
+
+    init_profiles_db()
+    secret_ep = 'ep-20990101000000-ledger99'  # secret-scan: allow
+    active_prof = save_profile({
+        'name': 'BytePlus 图像（生产）', 'kind': 'image', 'adapter': 'ark', 'enabled': True, 'api_key': 'secret-1',
+        'settings': {'endpoint': 'https://prod.invalid', 'model': secret_ep, 'capability_model': 'dola-seedream-5-5-261028'},
+    })
+    deleted_prof = save_profile({
+        'name': '历史视频配置', 'kind': 'video', 'adapter': 'ark', 'enabled': True, 'api_key': 'secret-2',
+        'settings': {'endpoint': 'https://vid.invalid', 'model': secret_ep},
+    })
+    t_img = task_db.create_task('image', 'p', {
+        'model': secret_ep, 'size': '1024x1024', 'seedream55': True,
+        'profile_id': active_prof['id'], 'profile_revision': active_prof['revision'],
+    }, provider='ark', status='succeeded')
+    t_vid_deleted = task_db.create_task('video', 'p', _video_params(
+        model='seedance-2.5', profile_id=deleted_prof['id'], profile_revision=deleted_prof['revision'],
+    ), provider='ark', status='succeeded')
+    t_legacy = task_db.create_task('audio', 'p', {'model': 'seed-audio-1.0'}, provider='cupsy', status='succeeded')
+
+    delete_profile(deleted_prof['id'], deleted_prof['revision'])
+
+    data = _ledger()
+    raw = json.dumps(data, ensure_ascii=False)
+    assert 'ledger99' not in raw
+    assert secret_ep not in raw
+    assert '__deleted__:' not in raw
+
+    by_id = {item['id']: item for item in data['tasks']}
+    assert by_id[t_img]['profile_name'] == 'BytePlus 图像（生产）'
+    assert by_id[t_img]['model_label'] == 'Seedream 5.5'
+    assert by_id[t_img]['model'] == 'ep-***'
+    assert by_id[t_img]['estimate_usd']['min'] == pytest.approx(0.020)
+
+    assert by_id[t_vid_deleted]['profile_name'] == '历史视频配置'
+    assert by_id[t_vid_deleted]['model_label'] == 'Seedance 2.5'
+
+    assert by_id[t_legacy]['profile_name'] == 'Cupsy'
+    assert by_id[t_legacy]['model_label'] == 'Seed Audio 1.0'

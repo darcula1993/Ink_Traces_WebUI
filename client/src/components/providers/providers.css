@@ -160,6 +160,7 @@
 /* Zero-cost local preflight panel */
 .ps-preflight {
   margin: 0 0 var(--sp-4);
+  scroll-margin-top: var(--sp-4);
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-md);
   border: 1px solid var(--border-strong);

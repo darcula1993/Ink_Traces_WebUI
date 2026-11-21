@@ -94,14 +94,17 @@ def _mask_tree(value):
     return value
 
 
-# VIDEO-SIGNAL-20261115: the only stage words a client may see.  A stage is
-# meaningful only while the task is 'processing'; any other status reports None so
-# a stale value can never outlive a failure, cancellation or completion.
-PUBLIC_TASK_STAGES = frozenset({'downloading'})
+# VIDEO-SIGNAL-20261115 / V24-W3-STAGE-ETA-20261121: the only stage words a client
+# may see.  A stage is meaningful only while the task is 'processing'; any other
+# status reports None so a stale value can never outlive a failure, cancellation
+# or completion.
+PUBLIC_TASK_STAGES = frozenset({'uploading', 'queued', 'generating', 'downloading'})
 
 
 def public_stage(task):
-    stage = task.get('stage') if isinstance(task, dict) else None
+    if not isinstance(task, dict):
+        return None
+    stage = task.get('stage')
     if task.get('status') != 'processing' or stage not in PUBLIC_TASK_STAGES:
         return None
     return stage

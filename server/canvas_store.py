@@ -452,10 +452,12 @@ def validate_document(document, workflow_id):
         if not isinstance(node, dict) or not isinstance(node.get('id'), str) or not ID.fullmatch(node['id']) or node['id'] in seen:
             raise CanvasError('节点ID无效或重复')
         seen.add(node['id'])
-        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs', 'size'}:
+        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs', 'size', 'finalized'}:
             raise CanvasError('未知节点字段')
         if type(node.get('rating', 0)) is not int or not 0 <= node.get('rating', 0) <= 5:
             raise CanvasError('节点评级必须为0至5的整数')
+        if 'finalized' in node and type(node['finalized']) is not bool:
+            raise CanvasError('节点定稿标记必须为布尔值')
         if node.get('type') not in ('text', 'image', 'video', 'audio', 'asset'):
             raise CanvasError('未知节点类型')
         if 'upstreamStale' in node:
@@ -681,6 +683,7 @@ def strip_workflow_runtime(document):
                 node['asset'] = None
                 node['candidates'] = []
                 node['selectedCandidateId'] = None
+                node.pop('finalized', None)
     return cloned
 
 

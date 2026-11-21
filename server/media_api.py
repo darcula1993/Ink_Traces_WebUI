@@ -41,9 +41,20 @@ def _filters(args):
     page, limit = args.get('page', '1'), args.get('limit', '50')
     if not page.isdigit() or not limit.isdigit():
         raise media.MediaError('分页参数无效')
-    return int(page), int(limit), {'folder_id': folder, 'include_subfolders': args.get('include_subfolders') == '1',
-                                   'kind': args.get('kind') or None, 'q': args.get('q') or None, 'origin': args.get('origin') or None,
-                                   'sort': args.get('sort') or 'newest'}
+    finalized_raw = (args.get('finalized_only') or '').strip().lower()
+    if finalized_raw not in ('', '0', '1', 'false', 'true'):
+        raise media.MediaError('finalized_only 参数无效')
+    return int(page), int(limit), {
+        'folder_id': folder,
+        'include_subfolders': args.get('include_subfolders') == '1',
+        'kind': args.get('kind') or None,
+        'q': args.get('q') or None,
+        'origin': args.get('origin') or None,
+        'sort': args.get('sort') or 'newest',
+        'project_id': args.get('project_id') or None,
+        'workflow_id': args.get('workflow_id') or None,
+        'finalized_only': finalized_raw in ('1', 'true'),
+    }
 
 
 @media_api.route(PREFIX, methods=['GET', 'POST'])
@@ -63,6 +74,11 @@ def collection():
 def ids():
     _, _, filters = _filters(request.args)
     return jsonify(success=True, **media.select_ids(**filters))
+
+
+@media_api.get(PREFIX + '/history-filters')
+def history_filters():
+    return jsonify(success=True, **media.history_filter_options())
 
 
 @media_api.get(PREFIX + '/<media_id>')

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.4.0 - 2026-11-21
+
+End-to-end reliability fixes, short-drama canvas productivity upgrades, scene asset export packaging, read-only sequence playback preview, and cost/history observability.
+
+- **Wave 1 · Reliability & Trust Foundations**:
+  - Added Seedance video-reference/extend `ratio=adaptive` inline guardrail with one-click switch, expandable/copyable sanitized error display, and strict allowlisted Chinese parameter fix hints (never recommending retries on `result_unknown`, 5xx, or network failures).
+  - Added explicit Ark `capability_model` declaration (Seedream 5.5 / 5.0 Pro) in Interface Management with zero-cost preflight auto-scroll and accurate 5.5 pricing/1.5K capability unlocking, plus human-readable profile names in Cost Ledger instead of raw `ep-***`.
+  - Fixed standalone Image tool profile switching to sanitize incompatible parameters immediately, surface validation errors right above the Generate button, remove duplicate model displays, and display 3-decimal USD cost estimates.
+  - Upgraded Layer Studio with Ark profile selection (frozen revision per task), automatic canvas project Cost Ledger attribution when launched from canvas, default `max_images` lowered from `30` to `12` with range cost estimate, session project restoration, fixed save-to-library radio alignment, and one-click return of saved composites back to the source canvas.
+  - Added browser URL route persistence (`?project=...&canvas=...`) so refreshes and multi-tab sessions preserve active canvases, plus high-frequency UI fixes (narrow 1:1 cost badge visibility, auto-collapsing floating rail on new canvas focus, incremental node naming & port-aware placement, non-blocking toast placement, duplicate copy cleanup).
+- **Wave 2 · Canvas & Short-Drama Creation Productivity**:
+  - Collapsed leading `@character` prompt blocks into a compact 1-line badge strip inside node cards while keeping submitted plaintext byte-identical and expandable inline or in the full editor; added one-step image selection when creating new Character Cards.
+  - Added 2–4 candidate side-by-side Version Comparison Modal (linked image zoom; muted-by-default synced video playback with per-column mute & scrub) plus node/version 「定稿」 badges and sidebar 「仅看定稿」 filtering.
+  - Added one-click 「延长此视频」 / 「编辑此视频」 follow-up video node actions (auto-wired with `ratio=adaptive` for extensions, never auto-submitting paid tasks) and durable user-saved Node Group Structural Templates (`/api/canvas/templates`, zero bundled creative presets, explicit warnings on disabled/deleted provider bindings without auto-switching accounts).
+- **Wave 3 · Delivery Packaging, Read-Only Playback & Cost Observability**:
+  - Added one-click Scene Export Pack (`POST /api/canvas/workflows/<wid>/export-pack[/preview]` + top-bar dialog): streaming `ZIP_STORED` media archive renamed by shot sequence plus sanitized `shotlist.csv` / `shotlist.json` (zero credentials, signed URLs, `ep-` IDs, or host paths; no transcoding or compositing).
+  - Added a read-only in-browser Shot Sequence Playback Preview modal (`CanvasSequencePreviewModal`) for sequential playback of selected/finalized video nodes with optional single-audio overlay (no editing, trimming, subtitles, or video export).
+  - Added fine-grained processing stage signals (`uploading` → `queued` → `generating` → `downloading`), 30-day local P50 duration hints (`GET /api/tasks/duration-stats`), and canvas active-task parallel counts without fake progress bars.
+  - Added top-bar Cost Ledger shortcut, per-project soft budget warning thresholds (`GET/PUT /api/cost-ledger/budget`, non-blocking yellow warnings with unknown costs itemized separately), and read-only Project/Canvas/Finalized filters with sanitized hover provenance in Global Library 「生成历史」.
+
 ## 2.3.1 - 2026-11-21
 
 Unified provider profile equality and documentation refresh.

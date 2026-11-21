@@ -161,3 +161,9 @@ register_character_routes(canvas_api, body)
 
 from canvas_group_run_api import register_routes as register_group_run_routes
 register_group_run_routes(canvas_api, body)
+
+from canvas_templates import register_routes as register_template_routes
+register_template_routes(canvas_api, body)
+
+from canvas_export_pack import register_routes as register_export_pack_routes
+register_export_pack_routes(canvas_api, body)

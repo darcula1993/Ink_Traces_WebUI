@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 import canvas_store as store
 import media_schema
+import task_public
 import tasks
 
 LOG = logging.getLogger(__name__)
@@ -723,22 +724,282 @@ def _order_by(sort):
     return SORT_ORDERS[key]
 
 
-def list_media(page=1, limit=50, sort='newest', **filters):
+_PROMPT_PREVIEW_MAX = 120
+_SHORT_ENDPOINT_ID = re.compile(r'(?<![A-Za-z0-9])ep-(?:m-)?[0-9]{4,}-[A-Za-z0-9_-]+', re.IGNORECASE)
+_BEARER_SECRET = re.compile(r'\bBearer\s+[A-Za-z0-9._~+/=-]{8,}', re.IGNORECASE)
+_API_KEY_PREFIX = re.compile(r'\b(?:sk-[A-Za-z0-9_-]{8,}|AKLT[A-Za-z0-9_-]{8,}|AKIA[A-Za-z0-9]{12,})')
+_KV_SECRET = re.compile(
+    r"""(?i)\b(api[_-]?key|access[_-]?key|secret[_-]?key|secret|token|authorization)\s*([:=])\s*[^\s,;'"`<>()]{4,}"""
+)
+
+
+def _sanitize_prompt_preview(raw_prompt, max_len=_PROMPT_PREVIEW_MAX):
+    """Compact, sanitized prompt snippet (<= 120 chars; no API keys, signed URLs, or ep-... IDs)."""
+    if not isinstance(raw_prompt, str):
+        return None
+    text = re.sub(r'\s+', ' ', raw_prompt).strip()
+    if not text:
+        return None
+    text = task_public.mask_text(text)
+    text = _SHORT_ENDPOINT_ID.sub(task_public.ENDPOINT_MASK, text)
+    text = _BEARER_SECRET.sub('Bearer ***', text)
+    text = _API_KEY_PREFIX.sub('***', text)
+    text = _KV_SECRET.sub(r'\1\2***', text)
+    if len(text) > max_len:
+        text = text[: max_len - 1].rstrip() + '…'
+    return text
+
+
+def _safe_title(value):
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    return _SHORT_ENDPOINT_ID.sub(task_public.ENDPOINT_MASK, task_public.mask_endpoint_ids(cleaned))
+
+
+def _provenance_context(db):
+    """Read-only index of projects, workflows, node titles, and finalized nodes."""
+    from canvas_cleanup import is_deleted
+    projects = {}
+    for row in db.execute('SELECT id, title, updated_at FROM canvas_projects ORDER BY updated_at DESC, id').fetchall():
+        projects[row['id']] = {
+            'id': row['id'],
+            'title': _safe_title(row['title']) or row['id'],
+            'deleted': is_deleted('project', row['id']),
+            'updated_at': row['updated_at'],
+        }
+    workflows = {}
+    finalized_media_ids = set()
+    finalized_assetless_nodes = set()
+    media_node_fallback = {}
+    for row in db.execute('SELECT id, project_id, title, document, updated_at FROM canvas_workflows ORDER BY updated_at DESC, id').fetchall():
+        wf_deleted = is_deleted('workflow', row['id']) or bool((projects.get(row['project_id']) or {}).get('deleted'))
+        try:
+            document = json.loads(row['document'] or '{}')
+        except (TypeError, ValueError):
+            document = {}
+        nodes = {}
+        node_by_task = {}
+        for node in document.get('nodes', []) if isinstance(document, dict) else []:
+            if not isinstance(node, dict) or not node.get('id'):
+                continue
+            nid = str(node['id'])
+            is_finalized = node.get('finalized') is True
+            asset_raw = (node.get('asset') or {}).get('id') if isinstance(node.get('asset'), dict) else None
+            asset_id = asset_raw if isinstance(asset_raw, str) and MEDIA_ID.fullmatch(asset_raw) else None
+            if asset_raw and not asset_id:
+                asset_id = resolve(asset_raw)
+            task_obj = node.get('task') if isinstance(node.get('task'), dict) else None
+            task_id = task_obj.get('id') if task_obj and isinstance(task_obj.get('id'), int) else None
+            if task_id is not None:
+                node_by_task[task_id] = nid
+            nodes[nid] = {
+                'id': nid,
+                'title': _safe_title(node.get('title')),
+                'type': node.get('type'),
+                'finalized': is_finalized and not wf_deleted,
+                'asset_id': asset_id,
+                'task_id': task_id,
+            }
+            if not wf_deleted:
+                if asset_id:
+                    media_node_fallback.setdefault(asset_id, (row['id'], nid))
+                    if is_finalized:
+                        finalized_media_ids.add(asset_id)
+                elif is_finalized:
+                    finalized_assetless_nodes.add((row['id'], nid))
+                for cand in node.get('candidates') or []:
+                    if not isinstance(cand, dict):
+                        continue
+                    cid = cand.get('id')
+                    resolved_cid = cid if isinstance(cid, str) and MEDIA_ID.fullmatch(cid) else (resolve(cid) if isinstance(cid, str) else None)
+                    if resolved_cid:
+                        media_node_fallback.setdefault(resolved_cid, (row['id'], nid))
+        workflows[row['id']] = {
+            'id': row['id'],
+            'project_id': row['project_id'],
+            'title': _safe_title(row['title']) or row['id'],
+            'deleted': wf_deleted,
+            'updated_at': row['updated_at'],
+            'nodes': nodes,
+            'node_by_task': node_by_task,
+        }
+    return {
+        'projects': projects,
+        'workflows': workflows,
+        'finalized_media_ids': finalized_media_ids,
+        'finalized_assetless_nodes': finalized_assetless_nodes,
+        'media_node_fallback': media_node_fallback,
+    }
+
+
+def history_filter_options():
+    """Read-only list of active projects and workflows for the 生成历史 filter bar."""
+    db = tasks.get_db()
+    ctx = _provenance_context(db)
+    projects = [
+        {'id': p['id'], 'title': p['title']}
+        for p in ctx['projects'].values()
+        if not p['deleted']
+    ]
+    workflows = [
+        {'id': w['id'], 'project_id': w['project_id'], 'title': w['title']}
+        for w in ctx['workflows'].values()
+        if not w['deleted'] and w['project_id'] in ctx['projects'] and not ctx['projects'][w['project_id']]['deleted']
+    ]
+    return {'projects': projects, 'workflows': workflows}
+
+
+def _provenance_for_rows(db, rows, ctx=None):
+    """Compute read-only, sanitized provenance metadata for a batch of media rows."""
+    if not rows:
+        return {}
+    if ctx is None:
+        ctx = _provenance_context(db)
+    import cost_ledger
+
+    media_ids = [r['id'] for r in rows]
+    task_id_by_media = {}
+    for r in rows:
+        if r['source_task_id'] is not None:
+            task_id_by_media[r['id']] = r['source_task_id']
+    missing_task_media = [r['id'] for r in rows if r['id'] not in task_id_by_media]
+    if missing_task_media:
+        marks = ','.join('?' * len(missing_task_media))
+        for tr in db.execute(
+            f'SELECT media_id, task_id FROM task_assets WHERE media_id IN ({marks}) AND task_id IS NOT NULL ORDER BY id DESC',
+            missing_task_media,
+        ).fetchall():
+            task_id_by_media.setdefault(tr['media_id'], tr['task_id'])
+
+    task_ids = sorted({tid for tid in task_id_by_media.values() if tid is not None})
+    task_map = {}
+    if task_ids:
+        marks = ','.join('?' * len(task_ids))
+        for tr in db.execute(
+            f'SELECT id, type, status, prompt, params, provider FROM tasks WHERE id IN ({marks})',
+            task_ids,
+        ).fetchall():
+            td = dict(tr)
+            params = tasks._from_json(td['params']) or {}
+            if not isinstance(params, dict):
+                params = {}
+            td['params'] = params
+            task_map[td['id']] = td
+
+    out = {}
+    for r in rows:
+        mid = r['id']
+        is_gen = r['folder_id'] in GENERATED_FOLDERS or r['source_task_id'] is not None or mid in task_id_by_media
+        if not is_gen:
+            continue
+        tid = task_id_by_media.get(mid)
+        task = task_map.get(tid) if tid is not None else None
+        params = task['params'] if task else {}
+        wf_id = params.get('canvas_workflow_id') if isinstance(params.get('canvas_workflow_id'), str) else None
+        node_id = params.get('canvas_node_id') if isinstance(params.get('canvas_node_id'), str) else None
+        if wf_id and not node_id and tid is not None:
+            wf_meta = ctx['workflows'].get(wf_id)
+            if wf_meta:
+                node_id = wf_meta['node_by_task'].get(tid)
+        if not wf_id and mid in ctx['media_node_fallback']:
+            wf_id, fb_node = ctx['media_node_fallback'][mid]
+            node_id = node_id or fb_node
+
+        wf_meta = ctx['workflows'].get(wf_id) if wf_id else None
+        project_id = wf_meta['project_id'] if wf_meta else None
+        proj_meta = ctx['projects'].get(project_id) if project_id else None
+        node_meta = (wf_meta['nodes'].get(node_id) if wf_meta and node_id else None)
+
+        finalized = mid in ctx['finalized_media_ids']
+        if not finalized and wf_id and node_id and (wf_id, node_id) in ctx['finalized_assetless_nodes']:
+            finalized = True
+
+        model_label = cost_ledger._model_label(task, params, None, db) if task else None
+        prompt_preview = _sanitize_prompt_preview(task.get('prompt')) if task else None
+        out[mid] = {
+            'project_id': project_id,
+            'project_title': proj_meta['title'] if proj_meta else None,
+            'workflow_id': wf_id,
+            'workflow_title': wf_meta['title'] if wf_meta else None,
+            'node_id': node_id,
+            'node_title': node_meta['title'] if node_meta else None,
+            'model_label': model_label,
+            'prompt_preview': prompt_preview,
+            'finalized': finalized,
+        }
+    return out
+
+
+def _validate_history_filters(project_id=None, workflow_id=None, finalized_only=False):
+    if project_id is not None:
+        if not isinstance(project_id, str) or not project_id.strip() or len(project_id.strip()) > 120:
+            raise MediaError('project_id 筛选参数无效', 400, 'invalid_request')
+        project_id = project_id.strip()
+    if workflow_id is not None:
+        if not isinstance(workflow_id, str) or not workflow_id.strip() or len(workflow_id.strip()) > 120:
+            raise MediaError('workflow_id 筛选参数无效', 400, 'invalid_request')
+        workflow_id = workflow_id.strip()
+    return project_id, workflow_id, bool(finalized_only)
+
+
+def _matches_history_filters(prov, project_id, workflow_id, finalized_only):
+    if not prov:
+        return False
+    if project_id and prov.get('project_id') != project_id:
+        return False
+    if workflow_id and prov.get('workflow_id') != workflow_id:
+        return False
+    if finalized_only and not prov.get('finalized'):
+        return False
+    return True
+
+
+def list_media(page=1, limit=50, sort='newest', project_id=None, workflow_id=None, finalized_only=False, **filters):
     if type(page) is not int or page < 1 or type(limit) is not int or not 1 <= limit <= 200:
         raise MediaError('分页参数无效')
+    project_id, workflow_id, finalized_only = _validate_history_filters(project_id, workflow_id, finalized_only)
     order_by = _order_by(sort)
     where, params = _filters(**filters)
     db = tasks.get_db()
-    total = db.execute('SELECT COUNT(*) FROM media' + where, params).fetchone()[0]
-    rows = db.execute(f'SELECT * FROM media{where} ORDER BY {order_by} LIMIT ? OFFSET ?', params + [limit, (page - 1) * limit]).fetchall()
-    enriched = _enrich_rows(db, rows, persist=True)
-    return {'items': [public(r) for r in enriched], 'total': total, 'page': page, 'limit': limit}
+    has_history_filter = bool(project_id or workflow_id or finalized_only)
+    if has_history_filter:
+        all_rows = [dict(r) for r in db.execute(f'SELECT * FROM media{where} ORDER BY {order_by}', params).fetchall()]
+        prov_map = _provenance_for_rows(db, all_rows)
+        matched = [r for r in all_rows if _matches_history_filters(prov_map.get(r['id']), project_id, workflow_id, finalized_only)]
+        total = len(matched)
+        start = (page - 1) * limit
+        page_rows = matched[start:start + limit]
+    else:
+        total = db.execute('SELECT COUNT(*) FROM media' + where, params).fetchone()[0]
+        page_rows = [dict(r) for r in db.execute(f'SELECT * FROM media{where} ORDER BY {order_by} LIMIT ? OFFSET ?', params + [limit, (page - 1) * limit]).fetchall()]
+        prov_map = _provenance_for_rows(db, page_rows)
+    enriched = _enrich_rows(db, page_rows, persist=True)
+    items = []
+    for row in enriched:
+        item = public(row)
+        prov = prov_map.get(row['id'])
+        if prov is not None:
+            item['source_provenance'] = prov
+        items.append(item)
+    return {'items': items, 'total': total, 'page': page, 'limit': limit}
 
 
-def select_ids(sort='newest', **filters):
+def select_ids(sort='newest', project_id=None, workflow_id=None, finalized_only=False, **filters):
+    project_id, workflow_id, finalized_only = _validate_history_filters(project_id, workflow_id, finalized_only)
     order_by = _order_by(sort)
     where, params = _filters(**filters)
-    ids = [r[0] for r in tasks.get_db().execute(f'SELECT id FROM media{where} ORDER BY {order_by} LIMIT ?', params + [MAX_SELECT + 1])]
+    db = tasks.get_db()
+    if project_id or workflow_id or finalized_only:
+        all_rows = [dict(r) for r in db.execute(f'SELECT id, folder_id, source_task_id FROM media{where} ORDER BY {order_by}', params).fetchall()]
+        prov_map = _provenance_for_rows(db, all_rows)
+        ids = [r['id'] for r in all_rows if _matches_history_filters(prov_map.get(r['id']), project_id, workflow_id, finalized_only)]
+        if len(ids) > MAX_SELECT:
+            raise MediaError(f'匹配素材超过{MAX_SELECT}项，请缩小范围', 400, 'too_many')
+        return {'ids': ids, 'total': len(ids)}
+    ids = [r[0] for r in db.execute(f'SELECT id FROM media{where} ORDER BY {order_by} LIMIT ?', params + [MAX_SELECT + 1])]
     if len(ids) > MAX_SELECT:
         raise MediaError(f'匹配素材超过{MAX_SELECT}项，请缩小范围', 400, 'too_many')
     return {'ids': ids, 'total': len(ids)}

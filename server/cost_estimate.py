@@ -337,12 +337,45 @@ def _parse_time(value):
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
-def _image_family(task, params):
+def _profile_declared_capability(profile_id, profile_revision, db):
+    if not db or not isinstance(profile_id, str) or not profile_id:
+        return ''
+    try:
+        row = None
+        if isinstance(profile_revision, int) and profile_revision >= 1:
+            row = db.execute(
+                'SELECT private_document FROM provider_profile_revisions WHERE profile_id=? AND revision=?',
+                (profile_id, profile_revision),
+            ).fetchone()
+        if not row:
+            row = db.execute(
+                'SELECT private_document FROM provider_profile_revisions WHERE profile_id=? ORDER BY revision DESC LIMIT 1',
+                (profile_id,),
+            ).fetchone()
+        if not row:
+            return ''
+        doc = json.loads(row['private_document'] or '{}')
+        return str((doc.get('settings') or {}).get('capability_model') or '').strip().lower()
+    except Exception:
+        return ''
+
+
+def _image_family(task, params, db=None):
     if task.get('provider') == 'cupsy':
         return SEEDREAM_50_PRO
     if params.get('seedream55') is True or 'layer_decomposition_options' in params:
         return SEEDREAM_55
+    declared = str(params.get('capability_model') or '').strip().lower()
+    if declared in SEEDREAM_55_ALIASES:
+        return SEEDREAM_55
+    if declared in ('seedream-5-0-pro', 'seedream-5.0-pro'):
+        return SEEDREAM_50_PRO
     if params.get('seedream55') is False:
+        return SEEDREAM_50_PRO
+    profile_declared = _profile_declared_capability(params.get('profile_id'), params.get('profile_revision'), db)
+    if profile_declared in SEEDREAM_55_ALIASES:
+        return SEEDREAM_55
+    if profile_declared in ('seedream-5-0-pro', 'seedream-5.0-pro'):
         return SEEDREAM_50_PRO
     return SEEDREAM_55 if str(params.get('model') or '').lower() in SEEDREAM_55_ALIASES else SEEDREAM_50_PRO
 
@@ -392,7 +425,7 @@ def _image_task_estimate(task, db):
     size = _image_size(provider, params)
     if not size:
         return {'status': 'unknown', 'reason': 'no_estimate_snapshot'}
-    estimate = estimate_image_cost(_image_family(task, params), size[0], size[1],
+    estimate = estimate_image_cost(_image_family(task, params, db), size[0], size[1],
                                    _input_image_count(task, db), size_assumed=size[2])
     known = estimate.pop('known')
     if not known:
@@ -423,7 +456,7 @@ def _layer_task_estimate(task, db, family=None):
     params = task.get('params') or {}
     if task.get('provider') not in (None, 'ark'):
         return {'status': 'unknown', 'reason': 'no_price_data'}
-    family = family if family in IMAGE_PRICING else _image_family({'provider': 'ark'}, params)
+    family = family if family in IMAGE_PRICING else _image_family({'provider': 'ark'}, params, db)
     unit = estimate_layer_unit_price(family, params.get('size') or 'auto')
     if task.get('status') != 'succeeded':
         return {'status': 'unknown', 'reason': 'layer_count_unknown', **unit}
@@ -480,7 +513,7 @@ def store_snapshot(task_id):
             # Layer count is only known after the run: freeze the per-layer price basis.
             params = task.get('params') or {}
             snapshot = {'status': 'per_layer', 'formula_version': IMAGE_FORMULA_VERSION,
-                        **estimate_layer_unit_price(_image_family({'provider': 'ark'}, params),
+                        **estimate_layer_unit_price(_image_family({'provider': 'ark'}, params, db),
                                                     params.get('size') or 'auto')}
         else:
             snapshot = compute_task_estimate(task, db)

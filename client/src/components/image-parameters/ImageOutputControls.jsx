@@ -5,7 +5,7 @@ import './image-parameters.css'
 // PROPS-PANEL-REDESIGN-20261118: variant="panel" (canvas right properties panel only) reorders the same fields into one
 // column and moves 自定义尺寸 / 图片背景 / 添加水印 into the panel's collapsible 高级 group (Advanced, supplied by the panel).
 // Without variant the old image tool renders exactly as before. Fields, labels, validation and patches are shared.
-export default function ImageOutputControls({provider,params,onChange,model,references=[],dimensions,issues=[],metadataError='',children,variant,fieldPrefix,Advanced}){
+export default function ImageOutputControls({provider,params,onChange,model,hideModel=false,references=[],dimensions,issues=[],metadataError='',children,variant,fieldPrefix,Advanced}){
  const [referenceId,setReferenceId]=useState(''),[notice,setNotice]=useState(''),p=imageEffectiveParams(provider,params),spec=imageCapabilities(provider,model),eligible=provider==='ark'&&(isSeedream55(model)||(references.length===1&&references[0].has_alpha===true))
  const change=patch=>{setNotice('');const next=imageSizePatch(provider,params,patch,model);dimensions.sync(next);onChange(next)},refs=references.filter(a=>a.width>0&&a.height>0),selected=refs.find(a=>String(a.id)===referenceId)
  function fit(asset){const size=fitSeedreamSizeToReference(asset.width,asset.height);if(size.error){setNotice(size.error);return}change({ratio:'custom',custom_width:size.width,custom_height:size.height});setNotice(size.adjusted?`参考素材 ${asset.width}×${asset.height} 已适配为 ${size.width}×${size.height}`:'已使用参考素材尺寸')}
@@ -27,7 +27,7 @@ export default function ImageOutputControls({provider,params,onChange,model,refe
   </div>
  }
  return <div className="ip-controls">
- {model&&modelEl}
+ {model&&!hideModel&&modelEl}
  <div className="ip-grid">{field('ratio','画幅',spec.ratios)}{p.ratio!=='custom'&&field('resolution','图片分辨率',spec.resolutions)}{field('output_format','图片输出格式',spec.formats)}</div>
  {spec.custom&&sizeEl}
  {provider==='ark'&&backgroundEl}

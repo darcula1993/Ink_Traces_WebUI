@@ -101,13 +101,16 @@ export function buildCapabilities(image, video, audio, saved) {
     const kindProfiles = profiles.filter(p => p.kind === kind).map(p => {
       const settings = p.settings || {}
       const imageDefault = p.adapter === 'cupsy' ? 'seedream-5.0-pro' : 'seedream-5-0-pro'
-      const capabilityModel = p.capability_model !== undefined && p.capability_model !== null
-        ? p.capability_model
-        : p.adapter === 'ark' && settings.model && settings.model === image?.providers?.ark?.model
-          ? image.providers.ark.capability_model
-          : kind === 'image'
-            ? (settings.model || imageDefault)
-            : settings.model
+      const explicitCapability = kind === 'image' && p.adapter === 'ark' ? String(settings.capability_model || '').trim() : ''
+      const capabilityModel = explicitCapability
+        ? explicitCapability
+        : p.capability_model !== undefined && p.capability_model !== null
+          ? p.capability_model
+          : p.adapter === 'ark' && settings.model && settings.model === image?.providers?.ark?.model
+            ? image.providers.ark.capability_model
+            : kind === 'image'
+              ? (settings.model || imageDefault)
+              : settings.model
       return {
         id: `profile:${p.id}`, provider: p.adapter, profile_id: p.id, is_default: !!p.is_default,
         ...(p.source_key ? { source_key: p.source_key } : {}),

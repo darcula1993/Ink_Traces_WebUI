@@ -3,7 +3,7 @@ import LibraryDialog from './LibraryDialog'
 import FolderSelect from './FolderSelect'
 import {listMediaFolders,lookupMedia,moveMedia} from '../../lib/libraryApi'
 import {notifyLibraryChanged} from '../../lib/librarySync'
-import {moveFolderOptions,currentFolderOf,folderPathLabel,libraryErrorText,GENERATED_ONLY_HINT,transferMode,TRANSFER_TITLES,generatedFolderIds,mediaFolderId} from './mediaLibrary'
+import {moveFolderOptions,currentFolderOf,folderPathLabel,libraryErrorText,transferMode,TRANSFER_TITLES,generatedFolderIds,mediaFolderId} from './mediaLibrary'
 import './library.css'
 // Unified “移动到文件夹 / 复制到文件夹” dialog shared by the global library, canvas sidebar, canvas node menu
 // and task center. Items in “生成历史” (or task results without a known user folder) are copied (hard link;
@@ -44,11 +44,11 @@ export default function MoveToFolderDialog({media,overlay=false,showOutcome=fals
  return <LibraryDialog title={TRANSFER_TITLES[mode]} className={overlay?'ul-subdialog-top':''} busy={busy} error={error} onClose={onClose} onConfirm={outcome?null:run} disabled={!folders||!kinds||!ids.length||target===null} confirmLabel={mode==='copy'?'复制':mode==='mixed'?'移动/复制':'移动'} cancelLabel={outcome?'完成':'取消'}>
   {outcome?<p ref={outcomeRef} role="status" data-testid="move-to-folder-outcome"><strong>{outcome}</strong></p>:<>
    {mode==='copy'?<p data-testid="transfer-copy-note">将所选 {ids.length} 项生成结果复制到目标文件夹：生成独立的新素材（硬链接，不额外占空间），原结果仍留在“生成历史”并随任务删除，复制出的不受影响。</p>
-    :mode==='mixed'?<p data-testid="transfer-mixed-note">所选 {ids.length} 项中，{copies} 项生成结果复制到目标文件夹（原结果留在“生成历史”），其余 {ids.length-copies} 项移动过去。</p>
+    :mode==='mixed'?<p data-testid="transfer-mixed-note">所选 {ids.length} 项中，{copies} 项生成结果复制到目标文件夹（原结果仍留在“生成历史”并随任务删除，复制出的不受影响），其余 {ids.length-copies} 项移动过去。</p>
     :<p>将所选 {ids.length} 项移动到目标文件夹。只改变素材所在文件夹，不复制文件；画布与任务中的引用保持不变。</p>}
    {folders&&kinds?<FolderSelect label="目标文件夹" folders={folders} options={options} value={target} placeholder="请选择目标文件夹" onChange={setTarget} onCreated={loadFolders} disabled={busy}/>:!error&&<p role="status">正在载入文件夹…</p>}
    {options&&target===null&&<p className="ul-muted" role="status">{mixedFolders?'所选素材位于不同文件夹，请选择目标文件夹。':'请选择目标文件夹。'}</p>}
-   <p className="ul-muted">{GENERATED_ONLY_HINT}</p>
+   {mode==='move'&&<p className="ul-muted">“生成历史”只接收新生成的结果，不可移入。</p>}
   </>}
  </LibraryDialog>
 }

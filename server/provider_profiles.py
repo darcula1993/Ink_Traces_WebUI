@@ -22,6 +22,7 @@ UNSUPPORTED_ADAPTER_ERROR = '生成类型与适配器组合不受支持'
 ENDPOINT_ID_PLACEHOLDER_ERROR = 'Seedance 2.5 接入点ID仍是示例占位，请填写 BytePlus 控制台的真实 ep-... 接入点ID或留空'
 TIMEOUTS = {'request_timeout_seconds', 'upload_timeout_seconds', 'poll_timeout_seconds', 'download_timeout_seconds'}
 COMMON_SETTINGS = {'endpoint', 'model', 'poll_interval_seconds', 'poll_max_attempts'} | TIMEOUTS
+ARK_IMAGE_CAPABILITY_MODELS = {'', 'dola-seedream-5-5-261028', 'seedream-5-0-pro'}
 
 
 class ProfileError(ValueError):
@@ -83,8 +84,10 @@ def public_profile(profile):
             result['capability_model'] = 'seedream-5.0-pro'
         elif profile.get('adapter') == 'ark':
             import seedream55
-            raw_model = (profile.get('settings') or {}).get('model') or 'seedream-5-0-pro'
-            result['capability_model'] = seedream55.capability_model(raw_model)
+            settings = profile.get('settings') or {}
+            declared = str(settings.get('capability_model') or '').strip()
+            raw_model = settings.get('model') or 'seedream-5-0-pro'
+            result['capability_model'] = seedream55.capability_model(raw_model, declared=declared)
     deleted_at = profile.get('deleted_at')
     if deleted_at:
         result['deleted'] = True
@@ -403,6 +406,8 @@ def _settings(data, kind, adapter):
     allowed = set(COMMON_SETTINGS)
     if adapter == 'cupsy':
         allowed |= {'source_base_url', 'asset_token_ttl_seconds'}
+    if kind == 'image' and adapter == 'ark':
+        allowed |= {'capability_model'}
     if kind == 'video' and adapter == 'ark':
         allowed |= {'fast_model', 'seedance_2_5_model'}
     if not isinstance(data, dict) or set(data) - allowed:
@@ -414,6 +419,10 @@ def _settings(data, kind, adapter):
             continue
         if key == 'source_base_url':
             result[key] = _url(value, optional=True)
+        elif key == 'capability_model':
+            if not isinstance(value, str) or value.strip() not in ARK_IMAGE_CAPABILITY_MODELS:
+                raise ProfileError('底层能力模型版本无效，仅支持自动识别、Seedream 5.5 或 Seedream 5.0 Pro')
+            result[key] = value.strip()
         elif key in ('model', 'fast_model', 'seedance_2_5_model'):
             if not isinstance(value, str) or len(value) > 240 or value and not re.fullmatch(r'[A-Za-z0-9_.:/-]+', value):
                 raise ProfileError('模型名称或映射无效')
@@ -489,7 +498,12 @@ def save_profile(data, profile_id=None, *, return_synced=False):
         if 'settings' in data:
             if not isinstance(data['settings'], dict):
                 raise ProfileError('接口设置必须为对象')
-            allowed = COMMON_SETTINGS | ({'source_base_url', 'asset_token_ttl_seconds'} if adapter == 'cupsy' else set()) | ({'fast_model', 'seedance_2_5_model'} if kind == 'video' and adapter == 'ark' else set())
+            allowed = (
+                COMMON_SETTINGS
+                | ({'source_base_url', 'asset_token_ttl_seconds'} if adapter == 'cupsy' else set())
+                | ({'capability_model'} if kind == 'image' and adapter == 'ark' else set())
+                | ({'fast_model', 'seedance_2_5_model'} if kind == 'video' and adapter == 'ark' else set())
+            )
             if set(data['settings']) - allowed:
                 raise ProfileError('接口设置包含不支持的字段')
             for setting, value in data['settings'].items():
@@ -791,6 +805,24 @@ def check_profile(profile_id=None, overrides=None):
                 add('model', '模型 / 接入点', 'ok', '已配置 BytePlus Ark 图像推理接入点 ID（已脱敏），格式完整。')
             else:
                 add('model', '模型 / 接入点', 'ok', f'默认图像模型格式完整（{model_val}）。')
+            raw_cap = settings.get('capability_model')
+            if raw_cap is not None and (not isinstance(raw_cap, str) or raw_cap.strip() not in ARK_IMAGE_CAPABILITY_MODELS):
+                add('capability_model', '模型能力与估价', 'error', '底层模型能力版本无效，请选择自动识别、Seedream 5.5 或 Seedream 5.0 Pro。')
+            else:
+                import seedream55
+                declared_cap = (raw_cap or '').strip() if isinstance(raw_cap, str) else ''
+                effective_cap = seedream55.capability_model(model_val or 'seedream-5-0-pro', declared=declared_cap)
+                is_55 = effective_cap.lower() in seedream55.ALIASES
+                if declared_cap == seedream55.MODEL:
+                    add('capability_model', '模型能力与估价', 'ok', '已显式声明为 Seedream 5.5（开放 1.5K 与原生透明背景；按 5.5 费率估算：1K–1.5K 约 $0.020/张、2K 约 $0.035/张）。')
+                elif declared_cap == seedream55.MODEL_50_PRO:
+                    add('capability_model', '模型能力与估价', 'ok', '已显式声明为 Seedream 5.0 Pro（按 5.0 Pro 费率估算：1K 约 $0.045/张、2K 约 $0.090/张）。')
+                elif is_55:
+                    add('capability_model', '模型能力与估价', 'ok', '自动识别为 Seedream 5.5（开放 1.5K 与原生透明背景；按 5.5 费率估算：1K–1.5K 约 $0.020/张、2K 约 $0.035/张）。')
+                elif model_val.lower().startswith('ep-'):
+                    add('capability_model', '模型能力与估价', 'warn', '推理接入点未声明底层模型版本，当前将回退按 Seedream 5.0 Pro 能力与兜底费率估算（1K 约 $0.045/张、2K 约 $0.090/张，且不开放 1.5K）；若实际为 Seedream 5.5，请在「底层模型能力版本」中显式选择 Seedream 5.5。')
+                else:
+                    add('capability_model', '模型能力与估价', 'ok', '自动识别为 Seedream 5.0 Pro（按 5.0 Pro 费率估算：1K 约 $0.045/张、2K 约 $0.090/张）。')
         elif adapter == 'ark' and kind == 'video':
             fast_val = str(settings.get('fast_model') or '').strip()
             v25_val = str(settings.get('seedance_2_5_model') or '').strip()

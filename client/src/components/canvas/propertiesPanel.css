@@ -44,9 +44,27 @@
 .canvas-studio .cv-properties .cv-task-active-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .canvas-studio .cv-properties .cv-task-active-meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
 .canvas-studio .cv-properties .cv-task-active-note { margin: 0; font-size: 12px; color: var(--text-2); }
-.canvas-studio .cv-properties .cv-task-failure { display: flex; flex-direction: column; gap: 4px; }
-.canvas-studio .cv-properties .cv-task-failure p { margin: 0; overflow-wrap: anywhere; }
+.canvas-studio .cv-properties .cv-task-failure { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.canvas-studio .cv-properties .cv-task-failure p { margin: 0; max-height: none; overflow: visible; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; line-height: 1.45; }
+.canvas-studio .cv-properties .cv-task-failure-raw { margin: 0; color: var(--cv-text); font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; max-height: none; overflow: visible; }
+.canvas-studio .cv-properties .cv-task-failure-raw.is-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.canvas-studio .cv-properties .cv-task-failure-raw.is-expanded { display: block; max-height: 260px; overflow-y: auto; padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .08); background: rgba(0, 0, 0, .2); }
+.canvas-studio .cv-properties .cv-task-failure-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }
+.canvas-studio .cv-properties .cv-task-failure-tools button:where(:not(.btn)) { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; min-height: 24px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 6px; background: rgba(255, 255, 255, .04); color: var(--cv-text); cursor: pointer; }
+.canvas-studio .cv-properties .cv-task-failure-tools button:where(:not(.btn)):hover { border-color: rgba(255, 255, 255, .24); background: rgba(255, 255, 255, .08); }
+.canvas-studio .cv-properties .cv-task-failure-tools button:where(:not(.btn)):focus-visible { outline: none; box-shadow: var(--ring-focus); }
+.canvas-studio .cv-properties .cv-provider-error-hint { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid rgba(241, 206, 130, .4); border-radius: 6px; background: rgba(44, 34, 10, .45); color: var(--cv-text); }
+.canvas-studio .cv-properties .cv-provider-error-hint-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--cv-warning); }
+.canvas-studio .cv-properties .cv-provider-error-hint-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--cv-text); }
+.canvas-studio .cv-properties .cv-provider-error-hint-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .canvas-studio .cv-properties .cv-task-failure-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.canvas-studio .cv-properties .cv-video-guardrail { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid rgba(241, 206, 130, .45); border-radius: 8px; background: rgba(44, 34, 10, .4); color: var(--cv-text); font-size: 12px; line-height: 1.45; }
+.canvas-studio .cv-properties .cv-video-guardrail.is-required { border-color: rgba(223, 138, 144, .5); background: var(--danger-soft); }
+.canvas-studio .cv-properties .cv-video-guardrail-head { display: flex; align-items: flex-start; gap: 6px; }
+.canvas-studio .cv-properties .cv-video-guardrail-head svg { flex: 0 0 auto; margin-top: 2px; color: var(--cv-warning); }
+.canvas-studio .cv-properties .cv-video-guardrail.is-required .cv-video-guardrail-head svg { color: var(--cv-danger); }
+.canvas-studio .cv-properties .cv-video-guardrail-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.canvas-studio .cv-properties .cv-video-guardrail .btn { align-self: flex-start; }
 .canvas-studio .cv-properties .cv-task-recovery { display: flex; flex-direction: column; gap: 6px; }
 .canvas-studio .cv-properties .cv-candidates { display: flex; flex-wrap: wrap; gap: 6px; }
 

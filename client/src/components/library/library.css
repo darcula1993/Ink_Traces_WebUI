@@ -163,3 +163,15 @@
 .ul-ref-section h4{margin:0 0 4px;font-size:12px;font-weight:600;color:var(--text-2)}
 .ul-ref-list{margin:0;padding-left:18px;max-height:140px;overflow:auto;font-size:13px}
 .ul-ref-list li{margin:2px 0;overflow-wrap:anywhere}
+/* V24-W3-BUDGET-HISTORY-20261121: read-only filter bar and hover provenance summary for 生成历史. */
+.ul-history-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;border:1px solid var(--border,#c6cac829);border-radius:var(--r-md,8px);background:rgba(255,255,255,.02)}
+.ul-history-filters .ul-history-select{flex:0 1 auto;min-width:150px;max-width:240px}
+.ul-history-finalized{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;min-height:32px;border:1px solid var(--border,#c6cac829);border-radius:var(--r-md,8px);background:rgba(255,255,255,.02);font-size:13px;color:var(--text,#ebedec);cursor:pointer;white-space:nowrap;user-select:none}
+.ul-history-finalized:hover{border-color:var(--border-strong,#c6cac855)}
+.ul-history-finalized input[type=checkbox]{margin:0;width:14px;height:14px;accent-color:var(--accent,#45c088);cursor:pointer}
+.ul-library button:where(:not(.btn)).ul-history-reset{min-height:32px;padding:4px 10px;font-size:12px;white-space:nowrap}
+.ul-provenance{display:flex;flex-direction:column;gap:2px;width:100%;padding:0 10px 8px;min-width:0;text-align:left}
+.ul-provenance-row{display:flex;align-items:center;gap:5px;min-width:0}
+.ul-provenance-finalized{font-style:normal;flex-shrink:0;padding:0 5px;border-radius:4px;background:rgba(69,192,136,.18);border:1px solid rgba(79,196,140,.45);color:#9fe0c0;font-size:11px;line-height:16px}
+.ul-provenance-meta{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:16px;color:var(--text-2,#a8afac)}
+.ul-provenance-prompt{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:15px;color:var(--text-3,#868e8a)}

@@ -21,9 +21,65 @@ export function defaultVideoResolution(model,models=[]) {
  const height=value=>{const m=/^(\d+)/.exec(String(value));return m?Number(m[1]):Infinity}
  return [...list].sort((a,b)=>height(a)-height(b))[0]
 }
+export const VIDEO_EXTEND_PROMPT_PATTERN = /(续写|延长|接着|延展|继续|续镜|续拍|延接|\bextend(?:ed|ing|s)?\b|\bcontinue(?:d|s|ing)?\b)/i
+export const isSeedance25Model = model => [SEEDANCE_25, SEEDANCE_25_MODERATED].includes(model)
+export const isExplicitVideoExtendMode = params => {
+ const taskType = params?.omni_reference_task_type || params?.video_task_type || ''
+ return taskType === 'extend'
+}
 export function videoRatio(model,mode,hasFrames,ratio='16:9') {
- const locked=[SEEDANCE_25,SEEDANCE_25_MODERATED].includes(model)&&mode==='keyframe'&&hasFrames
+ const locked=isSeedance25Model(model)&&mode==='keyframe'&&hasFrames
  return {locked,value:locked?'adaptive':ratio}
+}
+export function videoAdaptiveRatioGuardrail({model,ratio,videoMode,params,referenceVideos,inputAssets,prompt=''} = {}) {
+ const p = params || {}
+ const mode = videoMode ?? p.video_mode ?? 'reference'
+ if (mode === 'keyframe') return null
+ const videos = Array.isArray(referenceVideos)
+  ? referenceVideos
+  : Array.isArray(inputAssets)
+   ? inputAssets.filter(asset => asset?.kind === 'video')
+   : []
+ if (videos.length === 0) return null
+ const effectiveRatio = ratio ?? p.ratio ?? '16:9'
+ if (effectiveRatio === 'adaptive') return null
+ const effectiveModel = model ?? p.model ?? ''
+ const taskType = p.omni_reference_task_type || p.video_task_type || 'auto'
+ const isExtend = taskType === 'extend'
+ const isEdit = taskType === 'edit'
+ const promptExtend = typeof prompt === 'string' && VIDEO_EXTEND_PROMPT_PATTERN.test(prompt)
+ const baseMessage = '检测到视频参考，Seedance 视频延长/续镜要求画幅为“自动匹配 (adaptive)”'
+ if (isExtend) {
+  return {
+   shouldWarn: true,
+   required: true,
+   reason: 'explicit_extend',
+   recommendedRatio: 'adaptive',
+   message: `${baseMessage}；当前已设为视频延长模式，请先切换画幅。`,
+   actionLabel: '一键切换为自动匹配',
+  }
+ }
+ if (promptExtend) {
+  return {
+   shouldWarn: true,
+   required: false,
+   reason: 'prompt_extend',
+   recommendedRatio: 'adaptive',
+   message: `${baseMessage}（提示词含续写/延长意图，建议切换以避免失败）。`,
+   actionLabel: '一键切换为自动匹配',
+  }
+ }
+ if (isEdit || isSeedance25Model(effectiveModel)) {
+  return {
+   shouldWarn: true,
+   required: false,
+   reason: isEdit ? 'video_edit' : 'seedance25_video_ref',
+   recommendedRatio: 'adaptive',
+   message: `${baseMessage}（如用于续镜/延长或视频编辑，建议先切换）。`,
+   actionLabel: '一键切换为自动匹配',
+  }
+ }
+ return null
 }
 export function videoParameterError({model,duration=5,resolution='720p',ratio='16:9'}) {
  const spec=videoCapabilities(model)

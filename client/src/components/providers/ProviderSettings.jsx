@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import Select from '../ui/Select'
 import axios from 'axios'
 import { Plus, Save, X, Server, RefreshCw, Trash2, ShieldCheck, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react'
-import { KINDS, ADAPTERS, adaptersFor, blankForm, profileForm, ADVANCED_NUMBERS, payloadFor } from './providerForm'
+import { KINDS, ADAPTERS, ARK_IMAGE_CAPABILITY_OPTIONS, adaptersFor, blankForm, profileForm, ADVANCED_NUMBERS, payloadFor } from './providerForm'
 import './providers.css'
 
 const endpoint = '/api/provider-profiles'
@@ -15,6 +15,11 @@ const messageOf = error => error?.response?.data?.error || '配置操作失败�
 
 function preflightPayloadFor(form) {
   const settings = { ...form.settings }
+  if (form.kind === 'image' && form.adapter === 'ark') {
+    settings.capability_model = typeof settings.capability_model === 'string' ? settings.capability_model.trim() : ''
+  } else {
+    delete settings.capability_model
+  }
   for (const [key] of [...ADVANCED_NUMBERS, ['asset_token_ttl_seconds']]) {
     if (key in settings) {
       if (settings[key] === '' || settings[key] == null) settings[key] = null
@@ -52,6 +57,8 @@ export default function ProviderSettings({ onClose, onSaved }) {
   const [pending, setPending] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const confirmRef = useRef(null)
+  const formScrollRef = useRef(null)
+  const preflightRef = useRef(null)
   const dialogRef = useRef(null), lock = useRef(false), mounted = useRef(true)
   const loadList = async () => (await axios.get(endpoint)).data.profiles || []
   const install = profile => {
@@ -72,6 +79,16 @@ export default function ProviderSettings({ onClose, onSaved }) {
     return () => { mounted.current = false; previousFocus?.focus?.() }
   }, [])
   useEffect(() => { if (pending || confirmDelete) confirmRef.current?.querySelector('button')?.focus(); else dialogRef.current?.focus() }, [pending, confirmDelete])
+  useEffect(() => {
+    if (!preflight) return
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const behavior = prefersReduced ? 'auto' : 'smooth'
+    if (preflightRef.current?.scrollIntoView) {
+      preflightRef.current.scrollIntoView({ behavior, block: 'start' })
+    } else if (formScrollRef.current?.scrollTo) {
+      formScrollRef.current.scrollTo({ top: 0, behavior })
+    }
+  }, [preflight])
   const change = patch => { setForm(current => ({ ...current, ...patch })); setDirty(true); setNotice(''); setPreflight(null) }
   const setting = (key, value) => change({ settings: { ...form.settings, [key]: value } })
   function navigate(action) {
@@ -194,12 +211,12 @@ export default function ProviderSettings({ onClose, onSaved }) {
           </div>
         </aside>
         <form className="ps-form" onSubmit={save}>
-          <div className="ps-form-scroll">
+          <div className="ps-form-scroll" ref={formScrollRef}>
             <div className="ps-form-head"><h3>{selected ? '编辑接口配置' : '新建接口配置'}</h3></div>
             {error && <div className="ps-error" role="alert">{error}{conflict && <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => (dirty ? setPending(() => reload) : reload())}><RefreshCw size={14} />重新载入服务器版本</button>}</div>}
             {notice && <div className="ps-notice" role="status">{notice}</div>}
             {preflight && (
-              <section className={`ps-preflight is-${preflight.status || 'ok'}`} role="region" aria-label="配置预检结果" data-testid="provider-preflight-result">
+              <section ref={preflightRef} className={`ps-preflight is-${preflight.status || 'ok'}`} role="region" aria-label="配置预检结果" data-testid="provider-preflight-result">
                 <div className="ps-preflight-head">
                   <StatusIcon status={preflight.status} />
                   <strong>{preflight.summary || '预检完成'}</strong>
@@ -225,7 +242,18 @@ export default function ProviderSettings({ onClose, onSaved }) {
               <p className="ps-muted">{selected?.has_api_key ? `当前密钥：${selected.api_key_mask || '••••••••'}。密钥不会从服务器回显。` : '密钥仅发送到本平台后端保存，不写入节点或浏览器存储。'}</p>
               {selected?.has_api_key && <label className="ps-check"><input type="checkbox" checked={form.clear_api_key} onChange={event => change({ clear_api_key: event.target.checked, api_key: '' })} />清除已保存的密钥</label>}
               {canSyncAdapterKey && <><label className="ps-check ps-sync-key"><input type="checkbox" checked={form.sync_adapter_api_key} onChange={event => change({ sync_adapter_api_key: event.target.checked })} />同时同步更新所有 {ADAPTERS[form.adapter] || form.adapter} 配置的 API Key</label><p className="ps-muted">将同步更新另外 {sameAdapterPeers.length} 个 {ADAPTERS[form.adapter] || form.adapter} 配置的密钥，并立即生效。</p></>}
-              <label>{form.kind === 'video' && form.adapter === 'ark' ? 'Seedance 2.0 模型 / 推理接入点 ID' : '默认模型'}<input readOnly={form.adapter === 'cupsy' && form.kind !== 'video'} value={form.settings.model || ''} onChange={event => setting('model', event.target.value)} spellCheck={false} placeholder={form.kind === 'video' && form.adapter === 'ark' ? '例如 ep-…；按服务账号配置' : '模型标识'} /></label>
+              <label>{form.kind === 'video' && form.adapter === 'ark' ? 'Seedance 2.0 模型 / 推理接入点 ID' : '默认模型'}<input readOnly={form.adapter === 'cupsy' && form.kind !== 'video'} value={form.settings.model || ''} onChange={event => setting('model', event.target.value)} spellCheck={false} placeholder={form.kind === 'video' && form.adapter === 'ark' ? '例如 ep-…；按服务账号配置' : '模型标识或 ep-… 推理接入点 ID'} /></label>
+              {form.kind === 'image' && form.adapter === 'ark' && <>
+                <label>底层模型能力版本
+                  <Select
+                    ariaLabel="底层模型能力版本"
+                    value={form.settings.capability_model || ''}
+                    options={ARK_IMAGE_CAPABILITY_OPTIONS}
+                    onChange={value => setting('capability_model', value)}
+                  />
+                </label>
+                <p className="ps-muted">填写自定义推理接入点（ep-…）时可显式声明底层模型版本，用于开放 1.5K / 原生透明背景与准确费用估算（零计费，不发起远端探测）。</p>
+              </>}
               {form.adapter === 'cupsy' && form.kind !== 'video' && <p className="ps-muted">此适配器当前使用固定模型，可配置服务地址和账号。</p>}
               <div className="ps-checks"><label className="ps-check"><input type="checkbox" checked={form.enabled} onChange={event => change({ enabled: event.target.checked, is_default: event.target.checked && form.is_default })} />启用此配置</label><label className="ps-check"><input type="checkbox" checked={form.is_default} disabled={!form.enabled} onChange={event => change({ is_default: event.target.checked })} />默认配置</label><span className="ps-muted">该类型尚无“上次选择”时优先选用此配置；不影响已有节点。</span></div>
               <details className="ps-advanced"><summary>高级参数</summary>

@@ -1,5 +1,5 @@
 import React, {useEffect,useLayoutEffect,useRef,useState} from 'react'
-export default function CanvasContextMenu({position,bounds,onUpload,onCreate,canPaste=false,onPaste,organizeDisabled=false,onOrganize,fitDisabled=false,onFit,onClose,onDismiss}) {
+export default function CanvasContextMenu({position,bounds,onUpload,onCreate,onOpenTemplates,templatesDisabled=false,canPaste=false,onPaste,organizeDisabled=false,onOrganize,fitDisabled=false,onFit,onClose,onDismiss}) {
  const [expanded,setExpanded]=useState(false),ref=useRef(null),[size,setSize]=useState({width:220,height:180})
  useLayoutEffect(()=>{ref.current?.querySelector('button:not(:disabled)')?.focus();const observer=new ResizeObserver(([entry])=>setSize({width:entry.borderBoxSize?.[0]?.inlineSize || 220,height:entry.borderBoxSize?.[0]?.blockSize || 180}));observer.observe(ref.current);return()=>observer.disconnect()},[])
  useLayoutEffect(()=>{const rect=ref.current.getBoundingClientRect();setSize({width:rect.width,height:rect.height})},[expanded])
@@ -9,6 +9,7 @@ export default function CanvasContextMenu({position,bounds,onUpload,onCreate,can
   <button role="menuitem" onClick={onUpload}>上传</button>
   <button role="menuitem" aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>新建节点 <span>›</span></button>
   {expanded && <div role="group" aria-label="生成节点类型">{[['image','图像'],['video','视频'],['audio','音频']].map(([type,label])=><button role="menuitem" key={type} onClick={()=>onCreate(type)}>{label}生成节点</button>)}</div>}
+  {onOpenTemplates&&<button role="menuitem" disabled={templatesDisabled} aria-haspopup="dialog" title="从已保存的节点组结构模板添加到当前位置" onClick={onOpenTemplates}>从模板添加</button>}
   {onPaste&&<button role="menuitem" disabled={!canPaste} title={canPaste?'粘贴已复制的节点到此位置':'剪贴板中没有可粘贴的节点'} onClick={onPaste}>粘贴</button>}
   {(onOrganize||onFit)&&<hr className="cv-context-sep"/>}
   {onOrganize&&<button role="menuitem" disabled={organizeDisabled} title={organizeDisabled?'当前画布没有可整理的节点或正在操作中':'自动整理画布节点布局'} onClick={onOrganize}>整理布局</button>}

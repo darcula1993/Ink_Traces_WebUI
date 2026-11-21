@@ -4,13 +4,16 @@ import math
 import seedream55
 
 
+DEFAULT_MAX_IMAGES = 12
+
+
 def options(data, model):
     modern = seedream55.enabled(model)
     if not modern:
         if any(key in data for key in ('max_images', 'text_recognition')):
             raise ValueError('当前图层模型不支持最大输出数或OCR选项')
         return {}
-    count = data.get('max_images', 30)
+    count = data.get('max_images', DEFAULT_MAX_IMAGES)
     if isinstance(count, str) and count.isdecimal():
         count = int(count)
     if type(count) is not int or not 2 <= count <= 100:

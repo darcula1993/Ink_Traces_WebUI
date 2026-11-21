@@ -49,7 +49,7 @@ def test_hundred_outputs_ocr_survives_save_restore_and_zip(monkeypatch):
 
 def test_options_defaults_old_models_and_boolean_validation(monkeypatch):
     from layer_options import options
-    assert options({},seedream55.MODEL)=={'max_images':30,'text_recognition':False}
+    assert options({},seedream55.MODEL)=={'max_images':12,'text_recognition':False}
     assert options({},'dola-seedream-5-0-pro-260628')=={}
     with pytest.raises(ValueError):options({'text_recognition':True},'dola-seedream-5-0-pro-260628')
     with pytest.raises(ValueError):options({'text_recognition':1},seedream55.MODEL)

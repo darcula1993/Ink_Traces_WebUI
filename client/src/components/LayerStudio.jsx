@@ -19,11 +19,107 @@ import askConfirm from './ui/askConfirm'
 import UnifiedAssetLibrary from './library/UnifiedAssetLibrary'
 import LayerSaveToLibraryDialog from './LayerSaveToLibraryDialog'
 import { CLIENT_IN_FLIGHT_TASK_STATUSES } from '../lib/taskStatus.js'
-import { LAYER_OPEN_SOURCE_EVENT, takePendingLayerSource } from '../lib/canvasBridge.js'
+import {
+  LAYER_OPEN_SOURCE_EVENT,
+  requestCanvasAssetFromLayer,
+  takePendingLayerSource,
+} from '../lib/canvasBridge.js'
 
 // Server in-flight statuses plus the optimistic local "submitting" placeholder.
 const ACTIVE_STATUSES = new Set(CLIENT_IN_FLIGHT_TASK_STATUSES)
+const DEFAULT_MAX_IMAGES = 12
+const LAST_PROJECT_STORAGE_KEY = 'ink-traces.layer-last-project.v1'
+const LAYER_PROVIDER_STORAGE_KEY = 'ink-traces.layer-provider-selection.v1'
+const STALE_PROVIDER_LABEL = '所选接口已停用或已删除'
+const STALE_PROVIDER_REASON = '所选 BytePlus Ark 接口已停用或已删除，请重新选择'
+const EMPTY_PROVIDER_REASON = '暂无可用的 BytePlus Ark 图像接口，请先在「接口管理」中启用并配置 API Key'
 const EMPTY_DOCUMENT = { canvas: { width: 1600, height: 900, background: 'transparent' }, layers: [], selected_layer_id: null }
+
+function readSessionValue(key) {
+  try {
+    return window.sessionStorage.getItem(key) || ''
+  } catch (_) {
+    return ''
+  }
+}
+
+function writeSessionValue(key, value) {
+  try {
+    if (value == null || value === '') window.sessionStorage.removeItem(key)
+    else window.sessionStorage.setItem(key, String(value))
+  } catch (_) {}
+}
+
+function buildLayerProviderOptions(providerData, profilesData) {
+  const ark = providerData?.providers?.ark
+  const rawProfiles = Array.isArray(profilesData?.profiles) ? profilesData.profiles : []
+  const profileOptions = rawProfiles
+    .filter(p => p && p.kind === 'image' && p.adapter === 'ark' && p.enabled && p.has_api_key)
+    .sort((a, b) => Number(Boolean(b.is_default)) - Number(Boolean(a.is_default)) || String(a.name || '').localeCompare(String(b.name || '')))
+    .map(p => {
+      const settings = p.settings || {}
+      const capabilityModel = p.capability_model !== undefined && p.capability_model !== null
+        ? p.capability_model
+        : settings.model && settings.model === ark?.model
+          ? ark.capability_model
+          : (settings.model || 'seedream-5-0-pro')
+      return {
+        id: `profile:${p.id}`,
+        profile_id: p.id,
+        is_default: Boolean(p.is_default),
+        source_key: p.source_key || null,
+        name: `${p.name}${p.is_default ? ' · 默认' : ''}`,
+        model: settings.model || 'seedream-5-0-pro',
+        capability_model: capabilityModel,
+      }
+    })
+  const hasImportedArk = profileOptions.some(p => p.source_key === 'config:image:ark')
+  if (ark?.available && !ark?.managed_by_profiles && !hasImportedArk) {
+    profileOptions.push({
+      id: 'ark',
+      profile_id: null,
+      is_default: false,
+      source_key: null,
+      name: `${ark.name || 'BytePlus Ark'}（原配置）`,
+      model: ark.model || 'seedream-5-0-pro',
+      capability_model: ark.capability_model || ark.model || 'seedream-5-0-pro',
+    })
+  }
+  return profileOptions
+}
+
+function resolveLayerProvider(options, selectedId, ready) {
+  if (!ready) {
+    return { status: 'loading', option: null, selectValue: selectedId || '', reason: '' }
+  }
+  if (selectedId) {
+    const exact = options.find(item => item.id === selectedId)
+    if (exact) return { status: 'ready', option: exact, selectValue: exact.id, reason: '' }
+    if (selectedId === 'ark') {
+      const migrated = options.find(item => item.source_key === 'config:image:ark')
+      if (migrated) return { status: 'ready', option: migrated, selectValue: migrated.id, reason: '' }
+    }
+    return { status: 'unavailable', option: null, selectValue: selectedId, reason: STALE_PROVIDER_REASON }
+  }
+  if (options.length > 0) {
+    return { status: 'ready', option: options[0], selectValue: options[0].id, reason: '' }
+  }
+  return { status: 'empty', option: null, selectValue: '', reason: EMPTY_PROVIDER_REASON }
+}
+
+function projectCanvasContext(project) {
+  const meta = project?.source_metadata
+  if (!meta || typeof meta !== 'object') return null
+  const workflowId = typeof meta.canvas_workflow_id === 'string' ? meta.canvas_workflow_id.trim() : ''
+  if (!workflowId) return null
+  const projectId = typeof meta.canvas_project_id === 'string' ? meta.canvas_project_id.trim() : ''
+  const nodeId = typeof meta.canvas_node_id === 'string' ? meta.canvas_node_id.trim() : ''
+  return {
+    workflowId,
+    ...(projectId ? { projectId } : {}),
+    ...(nodeId ? { nodeId } : {}),
+  }
+}
 
 function useLoadedImage(src) {
   const [image, setImage] = useState(null)
@@ -88,8 +184,61 @@ export default function LayerStudio({ notify }) {
   const [documentState, setDocumentState] = useState(EMPTY_DOCUMENT)
   const [prompt, setPrompt] = useState('')
   const [size, setSize] = useState('auto')
-  const [maxImages,setMaxImages]=useState(30),[recognize,setRecognize]=useState(false),[modern,setModern]=useState(false),[modelKnown,setModelKnown]=useState(false),[exporting,setExporting]=useState(false)
-  useEffect(()=>{let alive=true;axios.get('/api/provider').then(({data})=>{if(alive){setModern(isSeedream55(data.providers?.ark?.capability_model||data.providers?.ark?.model));setModelKnown(true)}}).catch(()=>{});return()=>{alive=false}},[])
+  const [maxImages, setMaxImages] = useState(DEFAULT_MAX_IMAGES)
+  const [recognize, setRecognize] = useState(false)
+  const [providerOptions, setProviderOptions] = useState([])
+  const [selectedProviderId, setSelectedProviderId] = useState(() => readSessionValue(LAYER_PROVIDER_STORAGE_KEY))
+  const [modelKnown, setModelKnown] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const providerLoadSeq = useRef(0)
+
+  const loadLayerProviders = useCallback(async () => {
+    const seq = ++providerLoadSeq.current
+    try {
+      const [providerResp, profilesResp] = await Promise.all([
+        axios.get('/api/provider').catch(() => ({ data: {} })),
+        axios.get('/api/provider-profiles').catch(() => ({ data: { profiles: [] } })),
+      ])
+      if (seq !== providerLoadSeq.current) return
+      const nextOptions = buildLayerProviderOptions(providerResp.data, profilesResp.data)
+      setProviderOptions(nextOptions)
+      // Pin the initially shown option so a later disable/delete never silently switches to another paid account.
+      setSelectedProviderId(current => current || (nextOptions[0]?.id || ''))
+      setModelKnown(true)
+    } catch (_) {
+      if (seq !== providerLoadSeq.current) return
+      setModelKnown(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadLayerProviders()
+    const onFocus = () => { loadLayerProviders() }
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadLayerProviders() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      providerLoadSeq.current += 1
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [loadLayerProviders])
+
+  const resolvedProvider = useMemo(
+    () => resolveLayerProvider(providerOptions, selectedProviderId, modelKnown),
+    [providerOptions, selectedProviderId, modelKnown],
+  )
+  const activeProvider = resolvedProvider.option
+  const providerUnavailable = modelKnown && resolvedProvider.status !== 'ready'
+  const modern = activeProvider ? isSeedream55(activeProvider.capability_model || activeProvider.model) : false
+  const providerSelectOptions = useMemo(() => {
+    const base = providerOptions.map(item => ({ value: item.id, label: item.name }))
+    if (resolvedProvider.status === 'unavailable' && resolvedProvider.selectValue) {
+      return [{ value: resolvedProvider.selectValue, label: STALE_PROVIDER_LABEL, disabled: true }, ...base]
+    }
+    return base
+  }, [providerOptions, resolvedProvider.selectValue, resolvedProvider.status])
+  const incomingSourceRef = useRef(false)
   const [sourceFile, setSourceFile] = useState(null)
   const [sourcePreview, setSourcePreview] = useState('')
   const [busy, setBusy] = useState(false)
@@ -119,19 +268,22 @@ export default function LayerStudio({ notify }) {
 
   const loadProjects = useCallback(async () => {
     const response = await axios.get('/api/layer/projects')
-    setProjects(response.data.projects || [])
+    const list = response.data.projects || []
+    setProjects(list)
+    return list
   }, [])
 
   const openProject = useCallback(async (projectId, silent = false) => {
     const response = await axios.get(`/api/layer/projects/${projectId}`)
     const next = response.data.project
     setProject(next)
+    writeSessionValue(LAST_PROJECT_STORAGE_KEY, next?.id)
     setDocumentState(next.document?.layers ? next.document : EMPTY_DOCUMENT)
     if (!silent) {
       setPrompt(next.current_task?.prompt || '')
       setSize(next.current_task?.params?.size || 'auto')
-      setMaxImages(next.current_task?.params?.layer_decomposition_options?.max_images??30)
-      setRecognize(next.current_task?.params?.layer_decomposition_options?.text_recognition??false)
+      setMaxImages(next.current_task?.params?.layer_decomposition_options?.max_images ?? DEFAULT_MAX_IMAGES)
+      setRecognize(next.current_task?.params?.layer_decomposition_options?.text_recognition ?? false)
       history.current = []
       future.current = []
       setDirty(false)
@@ -139,10 +291,6 @@ export default function LayerStudio({ notify }) {
     }
     return next
   }, [])
-
-  useEffect(() => {
-    loadProjects().catch(() => notify?.('图层工作室项目加载失败', 'error'))
-  }, [loadProjects, notify])
 
   useEffect(() => {
     const element = viewportRef.current
@@ -238,13 +386,18 @@ export default function LayerStudio({ notify }) {
 
   // Loading a source stores it as a project right away (no task, no provider call),
   // so it is listed and shown at once; decomposition is queued only on the button.
-  const loadLibrarySource = useCallback(async (sourceRef, name = '', fromCanvas = false) => {
+  const loadLibrarySource = useCallback(async (sourceRef, name = '', fromCanvas = false, canvasContext = null) => {
     if (!sourceRef) return false
     setBusy(true)
     try {
       const payload = { source_media_id: sourceRef, decompose: false }
       const trimmedName = String(name || '').replace(/\.[^.]+$/, '').trim()
       if (trimmedName) payload.name = trimmedName
+      if (canvasContext && typeof canvasContext === 'object') {
+        if (canvasContext.projectId) payload.canvas_project_id = canvasContext.projectId
+        if (canvasContext.workflowId) payload.canvas_workflow_id = canvasContext.workflowId
+        if (canvasContext.nodeId) payload.canvas_node_id = canvasContext.nodeId
+      }
       const response = await axios.post('/api/layer/projects', payload)
       await openProject(response.data.project_id, true)
       history.current = []
@@ -269,12 +422,33 @@ export default function LayerStudio({ notify }) {
     const consumePending = () => {
       const pending = takePendingLayerSource()
       if (!pending?.ref) return
-      loadLibrarySource(pending.ref, pending.name, true).catch(() => {})
+      incomingSourceRef.current = true
+      loadLibrarySource(pending.ref, pending.name, true, pending.canvasContext || null).catch(() => {})
     }
     consumePending()
     window.addEventListener(LAYER_OPEN_SOURCE_EVENT, consumePending)
     return () => window.removeEventListener(LAYER_OPEN_SOURCE_EVENT, consumePending)
   }, [loadLibrarySource])
+
+  useEffect(() => {
+    let alive = true
+    loadProjects()
+      .then(list => {
+        if (!alive || incomingSourceRef.current) return
+        const lastId = readSessionValue(LAST_PROJECT_STORAGE_KEY)
+        if (!lastId) return
+        const match = list.find(item => String(item.id) === String(lastId))
+        if (!match) {
+          writeSessionValue(LAST_PROJECT_STORAGE_KEY, null)
+          return
+        }
+        openProject(match.id).catch(() => {
+          if (alive) writeSessionValue(LAST_PROJECT_STORAGE_KEY, null)
+        })
+      })
+      .catch(() => notify?.('图层工作室项目加载失败', 'error'))
+    return () => { alive = false }
+  }, [loadProjects, notify, openProject])
 
   const handleApplyLibrarySource = async items => {
     const chosen = items?.[0]
@@ -314,15 +488,23 @@ export default function LayerStudio({ notify }) {
   }
 
   const decomposeAgain = async () => {
-    if (!project?.id || processing) return
+    if (!project?.id || processing || !activeProvider) return
     setBusy(true)
     try {
-      const response = await axios.post(`/api/layer/projects/${project.id}/decompose`, { prompt, size, ...(modern?{max_images:maxImages,text_recognition:recognize}:{}) })
+      const body = {
+        prompt,
+        size,
+        ...(activeProvider.profile_id ? { profile_id: activeProvider.profile_id } : {}),
+        ...(modern ? { max_images: maxImages, text_recognition: recognize } : {}),
+      }
+      const response = await axios.post(`/api/layer/projects/${project.id}/decompose`, body)
       const first = !project.current_task
       await openProject(project.id, true)
       await loadProjects()
       notify?.(first ? `图层任务 #${response.data.task_id} 已创建` : `新的分解版本 #${response.data.task_id} 已创建`)
     } catch (error) {
+      const status = error.response?.status
+      if (status === 400 || status === 409) loadLayerProviders()
       notify?.(error.response?.data?.error || '重新分解失败', 'error')
     } finally {
       setBusy(false)
@@ -341,6 +523,7 @@ export default function LayerStudio({ notify }) {
     if (!confirmed) return
     try {
       await axios.delete(`/api/layer/projects/${project.id}`)
+      writeSessionValue(LAST_PROJECT_STORAGE_KEY, null)
       setProject(null)
       setDocumentState(EMPTY_DOCUMENT)
       await loadProjects()
@@ -349,6 +532,29 @@ export default function LayerStudio({ notify }) {
       notify?.(error.response?.data?.error || '删除项目失败', 'error')
     }
   }
+
+  const currentCanvasContext = useMemo(() => projectCanvasContext(project), [project])
+
+  const handleReturnSavedAssetToCanvas = useCallback(media => {
+    if (!currentCanvasContext?.workflowId || !media) return
+    setSaveToLibraryMode(null)
+    requestCanvasAssetFromLayer({
+      workflowId: currentCanvasContext.workflowId,
+      projectId: currentCanvasContext.projectId,
+      sourceNodeId: currentCanvasContext.nodeId,
+      asset: {
+        id: media.id,
+        name: media.name,
+        kind: media.kind || 'image',
+        url: media.url || `/api/canvas/media/${media.id}`,
+        thumbnail_url: media.thumbnail_url || undefined,
+        mime_type: media.mime_type || 'image/png',
+        size_bytes: media.size_bytes,
+        width: media.width,
+        height: media.height,
+      },
+    })
+  }, [currentCanvasContext])
 
   const exportCanvas = async format => {
     if(exporting)return
@@ -409,7 +615,7 @@ export default function LayerStudio({ notify }) {
           <FolderOpen size={14} />项目
           <span className="layer-heading-actions">
             <button type="button" data-testid="layer-sidebar-pick-library" onClick={() => setShowLibraryPicker(true)} title="从素材库选择源图" aria-label="从素材库选择源图"><Library size={14} /></button>
-            <button type="button" onClick={() => { setProject(null); setSourceFile(null); setSourcePreview(''); setDocumentState(EMPTY_DOCUMENT) }} title="新建项目" aria-label="新建项目"><Plus size={14} /></button>
+            <button type="button" onClick={() => { writeSessionValue(LAST_PROJECT_STORAGE_KEY, null); setProject(null); setSourceFile(null); setSourcePreview(''); setDocumentState(EMPTY_DOCUMENT) }} title="新建项目" aria-label="新建项目"><Plus size={14} /></button>
           </span>
         </div>
         <div className="layer-project-list custom-scrollbar">
@@ -591,17 +797,67 @@ export default function LayerStudio({ notify }) {
         </div>
       </aside>
 
-      <footer className={`layer-prompt-dock liquid-glass-strong ${modern?'layer-prompt-modern':''}`}>
-        <div className="layer-prompt-title"><Sparkles size={14} />分解提示词</div>
+      <footer className={`layer-prompt-dock liquid-glass-strong ${modern ? 'layer-prompt-modern' : ''}`}>
+        <div className="layer-provider-field">
+          <span className="layer-provider-field-label"><Sparkles size={13} />图层接口</span>
+          <Select
+            className={`layer-provider-select ${providerUnavailable ? 'is-invalid' : ''}`}
+            value={resolvedProvider.selectValue}
+            onChange={nextId => {
+              setSelectedProviderId(nextId)
+              writeSessionValue(LAYER_PROVIDER_STORAGE_KEY, nextId)
+            }}
+            ariaLabel="图层分解接口"
+            placeholder={!modelKnown ? '载入接口…' : '暂无可用接口'}
+            disabled={!modelKnown || providerSelectOptions.length === 0}
+            options={providerSelectOptions}
+          />
+        </div>
         <textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述需要如何拆分主体、文字、前景与背景..." aria-label="图层分解提示词" />
-        {modern&&<><label className="layer-dock-field"><span>最大输出数（含底图）</span><input aria-label="最大输出数" type="number" min="2" max="100" step="1" value={maxImages} onChange={e=>setMaxImages(e.target.value===''?'':Number(e.target.value))}/></label><label className="layer-dock-check"><input aria-label="识别文字" type="checkbox" checked={recognize} onChange={e=>setRecognize(e.target.checked)}/><span>识别文字</span></label></>}
+        {modern && (
+          <>
+            <label className="layer-dock-field">
+              <span>最大输出数（含底图）</span>
+              <input
+                aria-label="最大输出数"
+                type="number"
+                min="2"
+                max="100"
+                step="1"
+                value={maxImages}
+                onChange={e => setMaxImages(e.target.value === '' ? '' : Number(e.target.value))}
+              />
+            </label>
+            <label className="layer-dock-check">
+              <input aria-label="识别文字" type="checkbox" checked={recognize} onChange={e => setRecognize(e.target.checked)} />
+              <span>识别文字</span>
+            </label>
+          </>
+        )}
         <Select className="layer-size-select" value={size} onChange={setSize} ariaLabel="图层分解分辨率" options={[{ value: 'auto', label: '自动' }, '1K', '1.5K', '2K']} />
         <div className="layer-decompose-action">
-          <button type="button" className="btn btn-primary btn-lg" disabled={busy || processing || (modern&&(!Number.isInteger(maxImages)||maxImages<2||maxImages>100)) || !project} onClick={decomposeAgain}>
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            disabled={busy || processing || !modelKnown || providerUnavailable || (modern && (!Number.isInteger(maxImages) || maxImages < 2 || maxImages > 100)) || !project}
+            onClick={decomposeAgain}
+          >
             <Sparkles size={14} />{processing ? '分解中' : project?.current_task ? '创建新版本' : '分解图层'}
           </button>
-          <LayerCostEstimate modern={modern} modelKnown={modelKnown} size={size} />
+          <LayerCostEstimate
+            modern={modern}
+            modelKnown={modelKnown}
+            size={size}
+            maxImages={maxImages}
+            providerUnavailable={providerUnavailable}
+            unavailableReason={resolvedProvider.reason}
+          />
         </div>
+        {providerUnavailable && resolvedProvider.reason && (
+          <div className="layer-provider-alert" role="alert" data-testid="layer-provider-alert">
+            {resolvedProvider.reason}
+          </div>
+        )}
       </footer>
 
       {showLibraryPicker && (
@@ -621,6 +877,8 @@ export default function LayerStudio({ notify }) {
           documentState={documentState}
           selectedLayer={selectedLayer}
           initialTarget={saveToLibraryMode}
+          canvasContext={currentCanvasContext}
+          onReturnToCanvas={currentCanvasContext ? handleReturnSavedAssetToCanvas : null}
           onClose={() => setSaveToLibraryMode(null)}
           onLocate={media => {
             setSaveToLibraryMode(null)

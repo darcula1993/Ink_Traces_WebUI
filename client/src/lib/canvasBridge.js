@@ -6,10 +6,13 @@ export const CANVAS_RAIL_STATE_EVENT = 'nb:canvas-rail-state'
 export const CANVAS_APPLY_PNG_INFO_EVENT = 'nb:canvas-apply-png-info'
 export const LAYER_OPEN_SOURCE_EVENT = 'nb:layer-open-source'
 export const CANVAS_LOCATE_NODE_EVENT = 'nb:canvas-locate-node'
+export const CANVAS_ADD_LAYER_ASSET_EVENT = 'ink-traces:canvas-add-layer-asset'
+export const LAYER_RETURN_STORAGE_KEY = 'ink-traces.canvas-layer-return.v1'
 
 let pendingPngInfo = null
 let pendingLayerSource = null
 let pendingLocateNode = null
+let pendingCanvasAssetFromLayer = null
 
 function dispatchBridgeEvent(name, detail) {
   const target = globalThis.window || globalThis
@@ -50,8 +53,27 @@ export function requestCanvasPngInfo(metadata) {
 
 const HEX_MEDIA_ID = /^[0-9a-f]{32}$/
 
+function normalizeCanvasContext(canvasContext) {
+  if (!canvasContext || typeof canvasContext !== 'object') return null
+  const projectId = typeof (canvasContext.projectId ?? canvasContext.project_id) === 'string'
+    ? String(canvasContext.projectId ?? canvasContext.project_id).trim()
+    : ''
+  const workflowId = typeof (canvasContext.workflowId ?? canvasContext.workflow_id) === 'string'
+    ? String(canvasContext.workflowId ?? canvasContext.workflow_id).trim()
+    : ''
+  const nodeId = typeof (canvasContext.nodeId ?? canvasContext.node_id) === 'string'
+    ? String(canvasContext.nodeId ?? canvasContext.node_id).trim()
+    : ''
+  if (!projectId && !workflowId && !nodeId) return null
+  return {
+    ...(projectId ? { projectId } : {}),
+    ...(workflowId ? { workflowId } : {}),
+    ...(nodeId ? { nodeId } : {}),
+  }
+}
+
 // Extract a safe library media id or server-resolvable local URL from a canvas image node asset.
-export function buildLayerSourceRequest(asset, title = '') {
+export function buildLayerSourceRequest(asset, title = '', canvasContext = null) {
   if (!asset || typeof asset !== 'object') return null
   const id = typeof asset.id === 'string' ? asset.id.trim() : ''
   const url = typeof asset.url === 'string' ? asset.url.trim() : ''
@@ -61,12 +83,18 @@ export function buildLayerSourceRequest(asset, title = '') {
   else if (id) ref = id
   if (!ref) return null
   const name = String(asset.name || title || '').trim()
-  return { ref, name }
+  const context = normalizeCanvasContext(canvasContext)
+  return context ? { ref, name, canvasContext: context } : { ref, name }
 }
 
 export function queueLayerSource(payload) {
   if (!payload || typeof payload !== 'object' || !payload.ref) return false
-  pendingLayerSource = { ref: String(payload.ref), name: String(payload.name || '') }
+  const context = normalizeCanvasContext(payload.canvasContext)
+  pendingLayerSource = {
+    ref: String(payload.ref),
+    name: String(payload.name || ''),
+    ...(context ? { canvasContext: context } : {}),
+  }
   return true
 }
 
@@ -80,6 +108,66 @@ export function takePendingLayerSource() {
 export function requestLayerSource(payload) {
   if (!queueLayerSource(payload)) return false
   return dispatchBridgeEvent(LAYER_OPEN_SOURCE_EVENT, { source: pendingLayerSource })
+}
+
+function readLayerReturnStorage() {
+  try {
+    const storage = globalThis.sessionStorage
+    if (!storage) return null
+    const raw = storage.getItem(LAYER_RETURN_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch (_) {
+    return null
+  }
+}
+
+function writeLayerReturnStorage(value) {
+  try {
+    const storage = globalThis.sessionStorage
+    if (!storage) return
+    if (value == null) storage.removeItem(LAYER_RETURN_STORAGE_KEY)
+    else storage.setItem(LAYER_RETURN_STORAGE_KEY, JSON.stringify(value))
+  } catch (_) {}
+}
+
+// Sends a saved layer/composite library asset back to its originating canvas workflow as a new asset node.
+export function requestCanvasAssetFromLayer(payload) {
+  if (!payload || typeof payload !== 'object') return false
+  const workflowId = typeof payload.workflowId === 'string' ? payload.workflowId.trim() : ''
+  const asset = payload.asset && typeof payload.asset === 'object' ? { ...payload.asset } : null
+  if (!workflowId || !asset || (!asset.id && !asset.url)) return false
+  const projectId = typeof payload.projectId === 'string' ? payload.projectId.trim() : ''
+  const sourceNodeId = typeof payload.sourceNodeId === 'string' ? payload.sourceNodeId.trim() : ''
+  const normalized = {
+    workflowId,
+    ...(projectId ? { projectId } : {}),
+    ...(sourceNodeId ? { sourceNodeId } : {}),
+    asset,
+    at: Date.now(),
+  }
+  pendingCanvasAssetFromLayer = normalized
+  writeLayerReturnStorage(normalized)
+  const handled = dispatchBridgeEvent(CANVAS_ADD_LAYER_ASSET_EVENT, normalized)
+  if (!handled) {
+    // Ask App shell to switch back to canvas mode without queueing a conflicting pendingLocateNode.
+    dispatchBridgeEvent(CANVAS_LOCATE_NODE_EVENT, {
+      target: {
+        workflowId,
+        ...(projectId ? { projectId } : {}),
+        ...(sourceNodeId ? { nodeId: sourceNodeId } : {}),
+      },
+    })
+  }
+  return handled
+}
+
+export function takePendingCanvasAssetFromLayer() {
+  const value = pendingCanvasAssetFromLayer || readLayerReturnStorage()
+  pendingCanvasAssetFromLayer = null
+  writeLayerReturnStorage(null)
+  return value || null
 }
 
 export function queueCanvasLocateNode(target) {

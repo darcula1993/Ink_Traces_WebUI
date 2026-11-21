@@ -1,7 +1,47 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import axios from 'axios'
+import {AlertTriangle} from 'lucide-react'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import {previewGroupRun, createGroupRun, listActiveGroupRuns, getGroupRun, cancelGroupRun, confirmGroupRun, groupRunError, isActiveRun, estimateText, totalText, runProgressText, runBadgeText, nodeRunMarks, owningRun, confirmRows, latestRunsByGroup, NODE_STATUS_LABELS, skipReasonText, nodeReasonText} from '../../lib/canvasGroupRun'
+import {evaluateBudgetWarning, PROJECT_BUDGET_EVENT} from '../../lib/projectBudget'
+import {readCanvasUrlRoute} from '../../lib/canvasUrlRoute'
+import {readRememberedLocation} from '../../lib/canvasLastLocation'
 import './groupRun.css'
+import './costLedger.css'
+
+// V24-W3-BUDGET-HISTORY-20261121: shared lightweight hook to fetch the active project's
+// budget threshold and cumulative billable estimate (fails open, never blocks submission).
+export function useProjectBudget({projectId = null, workflowId = null, enabled = true, refreshKey = ''} = {}) {
+  const [snapshot, setSnapshot] = useState(null)
+  const [tick, setTick] = useState(0)
+  const resolvedProjectId = projectId || (!workflowId ? (readCanvasUrlRoute()?.projectId || readRememberedLocation()?.projectId || null) : null)
+
+  useEffect(() => {
+    if (!enabled) return
+    const onBudgetChanged = event => {
+      const detail = event?.detail
+      if (!detail) { setTick(n => n + 1); return }
+      if (!resolvedProjectId || !detail.projectId || String(detail.projectId) === String(resolvedProjectId)) {
+        setSnapshot(current => current ? {...current, budget_usd: detail.budgetUsd ?? null} : current)
+        setTick(n => n + 1)
+      }
+    }
+    window.addEventListener(PROJECT_BUDGET_EVENT, onBudgetChanged)
+    return () => window.removeEventListener(PROJECT_BUDGET_EVENT, onBudgetChanged)
+  }, [enabled, resolvedProjectId])
+
+  useEffect(() => {
+    if (!enabled || (!resolvedProjectId && !workflowId)) { setSnapshot(null); return }
+    const controller = new AbortController()
+    const params = resolvedProjectId ? {project_id: resolvedProjectId} : {workflow_id: workflowId}
+    axios.get('/api/cost-ledger/budget', {params, signal: controller.signal})
+      .then(res => { if (!controller.signal.aborted && res?.data?.success) setSnapshot(res.data) })
+      .catch(() => { /* fail open: soft budget warning never blocks generation */ })
+    return () => controller.abort()
+  }, [enabled, resolvedProjectId, workflowId, refreshKey, tick])
+
+  return snapshot
+}
 
 // GROUP-RUN-20261115 B5: run state lives on the server; this only polls it (3s while a run is active) and
 // shows it. Opening the canvas restores active runs from GET group-runs?active=1 (runs keep going with the page closed).
@@ -91,7 +131,7 @@ export function useGroupRunController({workflowId, save, getRevision, titleOf, g
   const dismiss = run => setRuns(current => { const next = new Map(current); if (next.get(run.group_id)?.id === run.id) next.delete(run.group_id); return next })
 
   const element = <>
-    {dialog && <GroupRunConfirmDialog group={dialog.group} preview={dialog.preview} titleOf={titleOf} onClose={() => setDialog(null)} onConfirm={create}/>}
+    {dialog && <GroupRunConfirmDialog workflowId={workflowId} group={dialog.group} preview={dialog.preview} titleOf={titleOf} onClose={() => setDialog(null)} onConfirm={create}/>}
     {cancelTarget && <ConfirmDialog className="canvas-studio-confirm" title={`取消节点组“${groupTitleOf(cancelTarget.group_id)}”的运行？`} confirmLabel="取消整组" cancelLabel="继续运行" danger onClose={() => setCancelTarget(null)} onConfirm={cancel}>
       <p>只停止<strong>尚未提交</strong>的节点；已提交的任务会继续跑完并照常写回结果（可在单个节点上另行取消）。</p>
     </ConfirmDialog>}
@@ -100,8 +140,13 @@ export function useGroupRunController({workflowId, save, getRevision, titleOf, g
   return {runs: list, runFor: groupId => runs.get(groupId) || null, marks, owningRun: nodeId => owningRun(list, nodeId), start, requestCancel: run => setCancelTarget(run), dismiss, refresh, element}
 }
 
-export function GroupRunConfirmDialog({group, preview, titleOf, onClose, onConfirm}) {
+export function GroupRunConfirmDialog({workflowId, group, preview, titleOf, onClose, onConfirm}) {
   const nodes = preview.nodes || [], skipped = preview.skipped || [], rerun = nodes.filter(node => node.has_result).length
+  const budget = useProjectBudget({workflowId, enabled: true, refreshKey: preview.preview_token || ''})
+  const budgetWarning = useMemo(
+    () => evaluateBudgetWarning({spent: budget?.billable, incoming: preview?.total, budgetUsd: budget?.budget_usd ?? null}),
+    [budget, preview?.total],
+  )
   return <ConfirmDialog className="canvas-studio-confirm cv-group-run-confirm" title={`运行节点组“${group.title}”内全部 ${nodes.length} 个节点？`} confirmLabel={`确认并按顺序提交 ${nodes.length} 个节点`} onClose={onClose} onConfirm={onConfirm}>
     <div data-testid="group-run-preview">
       <p>按上下游顺序运行：同层节点同时提交，下游等上游成功后再用其新结果提交；上游失败或取消时其下游不提交；出现结果未知即停止整组。不会自动重试。</p>
@@ -115,6 +160,7 @@ export function GroupRunConfirmDialog({group, preview, titleOf, onClose, onConfi
       </ol>
       {skipped.length > 0 && <><p className="cv-group-run-sub">跳过 {skipped.length} 个节点：</p><ul className="cv-group-run-list is-skipped" aria-label="跳过的节点">{skipped.map(node => <li key={node.node_id}><span className="cv-group-run-name">{titleOf(node.node_id)}</span><span>{skipReasonText(node.reason)}</span></li>)}</ul></>}
       <p>合计预估：<strong data-testid="group-run-total">{totalText(preview.total)}</strong>（按现有费率估算，非实际扣费）</p>
+      {budgetWarning.exceeds && <div className="cv-budget-soft-warning" role="status" data-testid="group-run-budget-warning"><AlertTriangle size={14} aria-hidden="true"/><span>{budgetWarning.message}</span></div>}
       {rerun > 0 && <p>其中 {rerun} 个节点已有结果，将重新生成并再次计费；旧结果保留为候选。</p>}
       <p className="cv-group-run-sub">下游实际提交前会按真实输入重算费用；超出本次确认值或变为未知时暂停，等你再次确认。</p>
     </div>

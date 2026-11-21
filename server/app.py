@@ -303,8 +303,11 @@ def get_image_provider_config(provider):
     return provider, API_PROVIDERS.get(provider, API_PROVIDERS['ark'])
 
 
-def get_layer_provider_config():
+def get_layer_provider_config(profile=None):
     """Layer decomposition always uses the BytePlus image model (generation.image.byteplus.model)."""
+    active = profile if profile is not None else profile_runtime.current_profile()
+    if active and active.get('adapter') == 'ark':
+        return 'ark', {**(active.get('settings') or {}), 'api_key': active.get('api_key', '')}
     return get_image_provider_config('ark')
 
 
@@ -1035,6 +1038,33 @@ def _save_generated_image(source, output_dir, stem):
             os.remove(temporary)
 
 
+TASK_STAGE_UPLOADING = 'uploading'
+TASK_STAGE_QUEUED = 'queued'
+TASK_STAGE_GENERATING = 'generating'
+TASK_STAGE_DOWNLOADING = task_db.TASK_STAGE_DOWNLOADING
+_PROCESSING_STAGES = frozenset({
+    TASK_STAGE_UPLOADING, TASK_STAGE_QUEUED, TASK_STAGE_GENERATING, TASK_STAGE_DOWNLOADING,
+})
+
+
+def _set_task_processing_stage(task_id, stage):
+    """V24-W3-STAGE-ETA-20261121: mark an in-flight sub-stage while status is 'processing'.
+
+    Never alters status, attempts, leases or billing-boundary state.
+    """
+    if stage is not None and stage not in _PROCESSING_STAGES:
+        raise ValueError(f'unknown task stage: {stage}')
+    if stage == TASK_STAGE_DOWNLOADING:
+        return task_db.set_task_stage(task_id, stage)
+    cursor = task_db.get_db().execute(
+        '''UPDATE tasks SET stage = ?, updated_at = ?
+           WHERE id = ? AND deleted_at IS NULL AND status = 'processing' ''',
+        (stage, task_db.utcnow(), task_id),
+    )
+    task_db.get_db().commit()
+    return cursor.rowcount > 0
+
+
 @profile_runtime.task_context
 def execute_image_task(task_id):
     """Execute one persisted image task and store only lightweight result metadata."""
@@ -1064,6 +1094,8 @@ def execute_image_task(task_id):
 
     parts = []
     local_refs = []
+    if input_assets:
+        _set_task_processing_stage(task_id, TASK_STAGE_UPLOADING)
     for asset in input_assets:
         if provider != 'cupsy':
             with open(asset['path'], 'rb') as handle:
@@ -1076,6 +1108,7 @@ def execute_image_task(task_id):
         if provider == 'cupsy':
             response = _generate_cupsy_image(task)
         else:
+            _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
             response = _generate_ark_image(
                 task.get('prompt') or '',
                 params.get('aspect_ratio', '1:1'),
@@ -1122,6 +1155,7 @@ def execute_image_task(task_id):
 
     local_images = []
     local_thumbnails = []
+    _set_task_processing_stage(task_id, TASK_STAGE_DOWNLOADING)
     for index, image_source in enumerate(response_data.get('images') or []):
         if task_db.cancellation_requested(task_id):
             storage.remove_task_output_files(task_id)
@@ -1187,16 +1221,20 @@ def execute_layer_task(task_id):
         task_db.fail_task(task_id, '图层分解源图片不存在')
         return {'success': False, 'error': '图层分解源图片不存在'}, 400
 
+    _set_task_processing_stage(task_id, TASK_STAGE_UPLOADING)
     with open(assets[0]['path'], 'rb') as handle:
         encoded = base64.b64encode(handle.read()).decode('utf-8')
     parts = [{'inlineData': {'mimeType': assets[0].get('mime_type') or 'image/png', 'data': encoded}}]
-    _provider, provider_config = get_image_provider_config('ark')
-    response = _generate_ark_image(
-        task.get('prompt') or '', 'auto', params.get('size', 'auto'), parts,
-        params.get('output_format', 'png'), False, provider_config,
-        params.get('model'), layer_decomposition=True, defer_download=True,
-        layer_decomposition_options=params.get('layer_decomposition_options'),
-    )
+    selected_profile = profile_runtime.load_selection(params)
+    with profile_runtime.profile_scope(selected_profile):
+        _provider, provider_config = get_layer_provider_config(selected_profile)
+        _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
+        response = _generate_ark_image(
+            task.get('prompt') or '', 'auto', params.get('size', 'auto'), parts,
+            params.get('output_format', 'png'), False, provider_config,
+            params.get('model'), layer_decomposition=True, defer_download=True,
+            layer_decomposition_options=params.get('layer_decomposition_options'),
+        )
     response_data, status_code = _response_payload(response)
     if not response_data.get('success'):
         task_db.fail_task_merging_result(task_id, response_data.get('error', '图层分解失败'), {
@@ -1220,6 +1258,7 @@ def execute_layer_task(task_id):
         task_db.fail_task(task_id, 'OCR元数据总量超过8MB限制')
         return {'success':False,'error':'OCR元数据总量超过8MB限制'}, 502
     saved = []
+    _set_task_processing_stage(task_id, TASK_STAGE_DOWNLOADING)
     provider_items = sorted(provider_items, key=lambda value: int(value.get('z_index') or 0))
     for index, item in enumerate(provider_items):
         image_source = item.get('image_source') or item.get('data_url')
@@ -1361,24 +1400,110 @@ def _sanitize_library_filename(name, default_stem, default_ext='.png'):
     return cleaned[:240]
 
 
-def _queue_layer_task(project, prompt, size, options_data=None):
+_CANVAS_CTX_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,128}$')
+
+
+def _resolve_layer_profile(raw_profile_id):
+    """Validate an explicit BytePlus Ark image profile for layer decomposition.
+
+    Returns None when omitted (preserving legacy default behavior). Never silently falls back
+    to another paid account when an explicit profile_id is invalid, disabled, or deleted.
+    """
+    if raw_profile_id is None or raw_profile_id == '':
+        return None
+    import provider_profiles
+    if not isinstance(raw_profile_id, str) or not re.fullmatch(r'[0-9a-f]{32}', raw_profile_id):
+        raise provider_profiles.ProfileError('图层接口配置标识无效', 400)
+    try:
+        profile = provider_profiles.load_profile(raw_profile_id, kind='image', require_enabled=True)
+    except provider_profiles.ProfileError as error:
+        if error.status == 404:
+            raise provider_profiles.ProfileError('所选接口配置不存在或已删除，请重新选择', 409)
+        raise
+    if profile.get('adapter') != 'ark':
+        raise provider_profiles.ProfileError('图层分解仅支持 BytePlus Ark 图像接口配置', 400)
+    return profile
+
+
+def _extract_canvas_context(fields):
+    """Extract optional canvas attribution ids (project/workflow/node) from layer creation payload."""
+    if not hasattr(fields, 'get'):
+        return {}
+    nested = fields.get('canvas_context')
+    if nested is not None and not isinstance(nested, dict):
+        raise ValueError('画布来源上下文必须为对象')
+    nested = nested or {}
+    raw_values = {
+        'canvas_project_id': fields.get('canvas_project_id') or nested.get('project_id') or nested.get('projectId'),
+        'canvas_workflow_id': fields.get('canvas_workflow_id') or nested.get('workflow_id') or nested.get('workflowId'),
+        'canvas_node_id': fields.get('canvas_node_id') or nested.get('node_id') or nested.get('nodeId'),
+    }
+    cleaned = {}
+    for key, value in raw_values.items():
+        if value is None or value == '':
+            continue
+        if not isinstance(value, str) or not _CANVAS_CTX_ID_RE.fullmatch(value.strip()):
+            raise ValueError(f'{key} 格式无效')
+        cleaned[key] = value.strip()
+    if cleaned.get('canvas_workflow_id') and not cleaned.get('canvas_project_id'):
+        import canvas_store
+        try:
+            wf = canvas_store.workflow(cleaned['canvas_workflow_id'])
+            if wf and wf.get('project_id'):
+                cleaned['canvas_project_id'] = wf['project_id']
+        except canvas_store.CanvasError:
+            pass
+    return cleaned
+
+
+def _preserved_canvas_context(source_metadata):
+    if not isinstance(source_metadata, dict):
+        return {}
+    return {
+        key: source_metadata[key]
+        for key in ('canvas_project_id', 'canvas_workflow_id', 'canvas_node_id')
+        if isinstance(source_metadata.get(key), str) and source_metadata[key]
+    }
+
+
+def _queue_layer_task(project, prompt, size, options_data=None, profile=None):
     normalized_size = 'auto' if str(size).lower() == 'auto' else str(size).upper()
     if normalized_size not in {'auto', '1K', '1.5K', '2K'}:
         raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
-    provider, provider_config = get_layer_provider_config()
-    if not get_provider_key(provider, provider_config):
-        raise ValueError('Ark 未配置 API Key')
-    model = get_provider_default_model(provider, provider_config)
-    options = layer_options.options(options_data or {}, model)
-    task_id = task_db.create_task(
-        'layer', prompt or '', {
+    active_profile = profile if profile is not None else profile_runtime.current_profile()
+    if active_profile is not None and active_profile.get('adapter') != 'ark':
+        active_profile = None
+    with profile_runtime.profile_scope(active_profile):
+        provider, provider_config = get_layer_provider_config(active_profile)
+        if not get_provider_key(provider, provider_config):
+            raise ValueError('Ark 未配置 API Key')
+        model = get_provider_default_model(provider, provider_config)
+        options = layer_options.options(options_data or {}, model)
+        task_params = {
             'project_id': project['id'], 'size': normalized_size,
             'output_format': 'png', 'provider': 'ark',
-            'model': get_provider_default_model(provider, provider_config),
+            'model': model,
             'layer_decomposition': True,
             **({'layer_decomposition_options': options} if options else {}),
-        }, provider='ark', status='preparing',
-    )
+        }
+        if active_profile is not None:
+            task_params['profile_id'] = active_profile['id']
+            task_params['profile_revision'] = active_profile['revision']
+        source_meta = project.get('source_metadata') or {}
+        canvas_workflow_id = source_meta.get('canvas_workflow_id')
+        if isinstance(canvas_workflow_id, str) and canvas_workflow_id:
+            import canvas_store
+            try:
+                canvas_store.workflow(canvas_workflow_id)
+                task_params['canvas_workflow_id'] = canvas_workflow_id
+                canvas_node_id = source_meta.get('canvas_node_id')
+                if isinstance(canvas_node_id, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,80}', canvas_node_id):
+                    task_params['canvas_node_id'] = canvas_node_id
+            except canvas_store.CanvasError:
+                pass
+        task_id = task_db.create_task(
+            'layer', prompt or '', task_params, provider='ark', status='preparing',
+        )
     output_dir = storage.task_output_dir('layer', task_id)
     source_path = os.path.join(output_dir, 'source.png')
     storage.clone_workspace_image(project['source_path'], source_path)
@@ -1777,6 +1902,7 @@ def _generate_cupsy_image(task):
         if failed:
             return {'success': False, 'error': f'参考素材导入失败: {failed.get("error") or failed.get("original_name")}', 'retryable': False}, 400
         if any(asset['status'] != 'active' or not asset.get('asset_uri') for asset in assets):
+            _set_task_processing_stage(task_id, TASK_STAGE_UPLOADING)
             return {'pending': True, 'retry_after': 2}, 202
         body = {
             'model': 'seedream-5.0-pro', 'prompt': task['prompt'],
@@ -1790,6 +1916,7 @@ def _generate_cupsy_image(task):
         params['_cupsy_idempotency_key'] = f'nanobanana-image-{task_id}-{uuid.uuid4().hex}'
         task_db.update_task(task_id, params=params)
     try:
+        _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
         response = HTTP.post(
             f'{endpoint}/v1/images/generations', json=body,
             headers=_cupsy_headers(params['_cupsy_idempotency_key'], settings=settings),
@@ -3256,6 +3383,7 @@ def api_layer_projects():
     if request.method == 'GET':
         return jsonify({'success': True, 'projects': [public_layer_project(item) for item in task_db.list_layer_projects()]})
     import media_library
+    import provider_profiles
     if request.is_json:
         fields = request.get_json(silent=True)
         if not isinstance(fields, dict):
@@ -3272,20 +3400,24 @@ def api_layer_projects():
     raw_decompose = fields.get('decompose', '1')
     decompose = raw_decompose if isinstance(raw_decompose, bool) else str(raw_decompose).strip().lower() not in {'0', 'false', 'no'}
     try:
+        canvas_context = _extract_canvas_context(fields)
         raw_size = str(fields.get('size', 'auto') or 'auto')
         requested_size = 'auto' if raw_size.lower() == 'auto' else raw_size.upper()
         if requested_size not in {'auto', '1K', '1.5K', '2K'}:
             raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
+        selected_profile = None
         if decompose:
-            provider, provider_config = get_layer_provider_config()
-            if not get_provider_key(provider, provider_config):
-                raise ValueError('Ark 未配置 API Key')
-            layer_options.options(fields, get_provider_default_model(provider, provider_config))
+            selected_profile = _resolve_layer_profile(fields.get('profile_id'))
+            with profile_runtime.profile_scope(selected_profile):
+                provider, provider_config = get_layer_provider_config(selected_profile)
+                if not get_provider_key(provider, provider_config):
+                    raise ValueError('Ark 未配置 API Key')
+                layer_options.options(fields, get_provider_default_model(provider, provider_config))
         if source_media_id:
             media_row, src_path, metadata, size_bytes = _resolve_layer_media_source(source_media_id)
             source_name = media_row['name']
             name = (str(fields.get('name') or '').strip() or os.path.splitext(source_name)[0] or '未命名项目')[:120]
-            project_id = task_db.create_layer_project(name, source_name, None, metadata)
+            project_id = task_db.create_layer_project(name, source_name, None, {**metadata, **canvas_context})
             project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
             source_path = os.path.join(project_dir, 'source.png')
             _snapshot_layer_source(str(src_path), source_path)
@@ -3293,6 +3425,7 @@ def api_layer_projects():
             stored_metadata['original_format'] = metadata['format']
             stored_metadata['size_bytes'] = size_bytes
             stored_metadata['source_media_id'] = media_row['id']
+            stored_metadata.update(canvas_context)
             task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
         else:
             upload.stream.seek(0, os.SEEK_END)
@@ -3301,13 +3434,14 @@ def api_layer_projects():
             metadata = storage.inspect_uploaded_image(upload)
             _validate_layer_source(metadata, size_bytes)
             name = (str(fields.get('name') or '').strip() or os.path.splitext(upload.filename)[0] or '未命名项目')[:120]
-            project_id = task_db.create_layer_project(name, upload.filename, None, metadata)
+            project_id = task_db.create_layer_project(name, upload.filename, None, {**metadata, **canvas_context})
             project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
             source_path = os.path.join(project_dir, 'source.png')
             storage.save_uploaded_image(upload, source_path)
             stored_metadata = storage.inspect_image(source_path)
             stored_metadata['original_format'] = metadata['format']
             stored_metadata['size_bytes'] = size_bytes
+            stored_metadata.update(canvas_context)
             task_db.update_layer_project(project_id, source_path=source_path, source_metadata=stored_metadata)
         project = task_db.get_layer_project(project_id)
         if not decompose:
@@ -3315,11 +3449,15 @@ def api_layer_projects():
                 'success': True, 'project_id': project_id, 'task_id': None,
                 'project': public_layer_project(project),
             }), 201
-        task_id = _queue_layer_task(project, normalize_newlines(fields.get('prompt', '')), requested_size, fields)
+        task_id = _queue_layer_task(
+            project, normalize_newlines(fields.get('prompt', '')), requested_size, fields, profile=selected_profile,
+        )
         return jsonify({
             'success': True, 'project_id': project_id, 'task_id': task_id,
             'project': public_layer_project(task_db.get_layer_project(project_id)),
         }), 202
+    except provider_profiles.ProfileError as error:
+        return jsonify({'success': False, 'error': str(error)}), error.status
     except media_library.MediaError as error:
         return _media_error_response(error)
     except (OSError, ValueError, UnidentifiedImageError) as error:
@@ -3409,17 +3547,24 @@ def api_decompose_layer_project(project_id):
     if current.get('status') in task_db.ACTIVE_TASK_STATUSES:
         return jsonify({'success': False, 'error': '当前项目已有分解任务正在执行'}), 409
     import media_library
-    data = request.get_json(silent=True) or {}
+    import provider_profiles
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': '请求体须为 JSON 对象'}), 400
     try:
+        selected_profile = _resolve_layer_profile(data.get('profile_id'))
         if data.get('source_media_id'):
             media_row, src_path, metadata, size_bytes = _resolve_layer_media_source(data.get('source_media_id'))
             normalized_size = 'auto' if str(data.get('size', 'auto')).lower() == 'auto' else str(data.get('size', 'auto')).upper()
             if normalized_size not in {'auto', '1K', '1.5K', '2K'}:
                 raise ValueError('图层分解分辨率仅支持 Auto、1K、1.5K 或 2K')
-            provider, provider_config = get_layer_provider_config()
-            if not get_provider_key(provider, provider_config):
-                raise ValueError('Ark 未配置 API Key')
-            layer_options.options(data, get_provider_default_model(provider, provider_config))
+            with profile_runtime.profile_scope(selected_profile):
+                provider, provider_config = get_layer_provider_config(selected_profile)
+                if not get_provider_key(provider, provider_config):
+                    raise ValueError('Ark 未配置 API Key')
+                layer_options.options(data, get_provider_default_model(provider, provider_config))
             project_dir = os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects', str(project_id))
             source_path = os.path.join(project_dir, 'source.png')
             _snapshot_layer_source(str(src_path), source_path)
@@ -3427,12 +3572,17 @@ def api_decompose_layer_project(project_id):
             stored_metadata['original_format'] = metadata['format']
             stored_metadata['size_bytes'] = size_bytes
             stored_metadata['source_media_id'] = media_row['id']
+            stored_metadata.update(_preserved_canvas_context(project.get('source_metadata')))
             task_db.update_layer_project(
                 project_id, source_name=media_row['name'], source_path=source_path, source_metadata=stored_metadata,
             )
             project = task_db.get_layer_project(project_id)
-        task_id = _queue_layer_task(project, normalize_newlines(data.get('prompt', '')), data.get('size', 'auto'), data)
+        task_id = _queue_layer_task(
+            project, normalize_newlines(data.get('prompt', '')), data.get('size', 'auto'), data, profile=selected_profile,
+        )
         return jsonify({'success': True, 'task_id': task_id, 'project_id': project_id}), 202
+    except provider_profiles.ProfileError as error:
+        return jsonify({'success': False, 'error': str(error)}), error.status
     except media_library.MediaError as error:
         return _media_error_response(error)
     except (OSError, ValueError, UnidentifiedImageError) as error:
@@ -3787,6 +3937,7 @@ def _poll_cupsy_video_task(task):
             task_db.fail_task(task_id, reason)
             return {'state': 'failed', 'error': reason}
         if any(asset['status'] != 'active' or not asset.get('asset_uri') for asset in assets):
+            _set_task_processing_stage(task_id, TASK_STAGE_UPLOADING)
             return {'state': 'preparing', 'progress': 0}
         cupsy_model = str(params.get('model') or settings.get('model') or SEEDANCE_25).strip().lower()
         if cupsy_model not in CUPSY_SEEDANCE_MODELS:
@@ -3803,6 +3954,7 @@ def _poll_cupsy_video_task(task):
         if 'omni_reference_task_type' in params:
             body['omni_reference_task_type'] = params['omni_reference_task_type']
         try:
+            _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
             response = HTTP.post(
                 f'{endpoint}/v1/videos',
                 headers=_cupsy_headers(f'nanobanana-video-{task_id}'),
@@ -3829,6 +3981,7 @@ def _poll_cupsy_video_task(task):
         return {'state': 'pending', 'progress': 0}
 
     try:
+        _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
         response = HTTP.get(
             f'{endpoint}/v1/videos/{external_id}', headers=_cupsy_headers(), timeout=(10, profile_runtime.setting('poll_timeout_seconds', POLL_TIMEOUT))
         )
@@ -3902,6 +4055,7 @@ def _poll_cupsy_audio_task(task):
             task_db.fail_task(task_id, reason)
             return {'state': 'failed', 'error': reason}
         if any(asset['status'] != 'active' or not asset.get('asset_uri') for asset in assets):
+            _set_task_processing_stage(task_id, TASK_STAGE_UPLOADING)
             return {'state': 'preparing', 'progress': 0}
 
         references = []
@@ -3927,6 +4081,7 @@ def _poll_cupsy_audio_task(task):
         if references:
             body['references'] = references
         try:
+            _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
             response = HTTP.post(
                 f'{endpoint}/v1/audio/generations',
                 headers=_cupsy_headers(f'nanobanana-audio-{task_id}', settings=settings),
@@ -3953,6 +4108,7 @@ def _poll_cupsy_audio_task(task):
         return {'state': 'pending', 'progress': 0}
 
     try:
+        _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
         response = HTTP.get(
             f'{endpoint}/v1/audio/generations/{external_id}',
             headers=_cupsy_headers(settings=settings), timeout=(10, profile_runtime.setting('poll_timeout_seconds', POLL_TIMEOUT)),
@@ -4052,6 +4208,7 @@ def poll_video_task_once(task_id):
     endpoint = prov.get('endpoint', '')
 
     try:
+        _set_task_processing_stage(task_id, TASK_STAGE_GENERATING)
         response = HTTP.get(
             f'{endpoint}/api/v3/contents/generations/tasks/{external_task_id}',
             headers={'Authorization': f'Bearer {api_key}'},

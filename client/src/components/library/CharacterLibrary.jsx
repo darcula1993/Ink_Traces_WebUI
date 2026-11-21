@@ -3,7 +3,7 @@ import {createPortal} from 'react-dom'
 import {Plus,Upload,Trash2,AudioLines,ChevronLeft,ChevronRight,Images,Save,Search,X} from 'lucide-react'
 import {CharacterEmptyArt,CharacterCoverPlaceholder} from '../art/CanvasLibraryArt'
 import LibraryDialog from './LibraryDialog'
-import {CharacterKindSelect,CharacterNameInput,CharacterDescriptionInput} from './CharacterFields'
+import {CharacterKindSelect,CharacterNameInput,CharacterInitialImagesField,DESCRIPTION_HINT,PROP_DESCRIPTION_HINT} from './CharacterFields'
 import MediaPreview from '../canvas/MediaPreview'
 import {withPreviewPages} from '../canvas/previewPages'
 import askConfirm from '../ui/askConfirm'
@@ -18,6 +18,15 @@ const sortImages=c=>[...(c?.images||[])].sort((a,b)=>(a.position??0)-(b.position
 const AUDIO_TYPES=/^audio\/(wav|x-wav|wave|vnd\.wave|mpeg|mp3)$/
 const audioAllowed=file=>AUDIO_TYPES.test(file.type)||/\.(wav|mp3)$/i.test(file.name)
 const KIND_FILTERS=[{value:'all',label:'全部'},{value:'character',label:'人物'},{value:'prop',label:'物件'}]
+
+// V24-W1-URL-POLISH-20261121: keep placeholder as a concrete example distinct from the helper hint below
+// so empty description fields never display the exact same sentence twice.
+function CharacterDescriptionField({value,onChange,disabled=false,kind='character'}){
+ const length=descriptionLength(value),over=length>CHARACTER_DESCRIPTION_MAX,isProp=normalizeCharacterKind(kind)==='prop'
+ const hint=isProp?PROP_DESCRIPTION_HINT:DESCRIPTION_HINT
+ const placeholder=isProp?'例如：青铜怀表，表盖雕花，配旧黄铜链条':'例如：黑色短发，深蓝长风衣，左眼下方有小痣'
+ return <div className="cl-field cl-desc-field"><div className="cl-field-head"><label htmlFor="cl-description">文字描述</label><span className={`cl-char-count${over?' is-over':''}`} aria-label={`已输入 ${length} 字，最多 ${CHARACTER_DESCRIPTION_MAX} 字`}>{length}/{CHARACTER_DESCRIPTION_MAX}{over&&'（超出上限）'}</span></div><textarea id="cl-description" disabled={disabled} aria-label="文字描述" aria-describedby="cl-description-hint" aria-invalid={over||undefined} rows={3} value={value} placeholder={placeholder} onChange={e=>onChange(e.target.value)}/><small id="cl-description-hint" className={over?'cl-field-error':'cl-hint'}>{hint}</small></div>
+}
 
 // Global character library: name, text description, up to 8 reference images and one reference audio.
 // openPicker({title,kinds,limit,onApply}) opens the asset library as a nested picker (provided by UnifiedAssetLibrary).
@@ -223,7 +232,7 @@ export default function CharacterLibrary({openPicker,onBusy}){
       <CharacterNameInput value={nameDraft} kind={character.kind} disabled={busy} error={nameError} onChange={v=>{setNameDraft(v);setError('')}} onEnter={()=>{if(canSave)saveChanges()}}/>
       <CharacterKindSelect value={character.kind} disabled={busy} onChange={saveKind}/>
      </div>
-     <CharacterDescriptionInput value={descriptionDraft} kind={character.kind} disabled={busy} onChange={v=>{setDescriptionDraft(v);setError('')}}/>
+     <CharacterDescriptionField value={descriptionDraft} kind={character.kind} disabled={busy} onChange={v=>{setDescriptionDraft(v);setError('')}}/>
     </div>
     <div className="cl-card-panel cl-section">
      <div className="cl-section-head">
@@ -258,17 +267,128 @@ export default function CharacterLibrary({openPicker,onBusy}){
   </section>
   <input ref={imageInput} type="file" accept="image/*" multiple hidden onChange={e=>{const files=[...e.target.files];e.target.value='';if(files.length)uploadImages(files)}}/>
   <input ref={audioInput} type="file" accept=".wav,.mp3,audio/wav,audio/mpeg" hidden onChange={e=>{const file=e.target.files[0];e.target.value='';if(file)uploadAudio(file)}}/>
-  {creating&&<CreateCharacterDialog characters={characters} onClose={()=>setCreating(false)} onCreated={c=>{setCreating(false);setCharacters(list=>[...list,c]);setActiveId(c.id);setNotice(`已新建角色卡“${c.name}”`);setRevision(v=>v+1)}}/>}
+  {creating&&<CreateCharacterDialog characters={characters} openPicker={openPicker} libraryRootRef={rootRef} onClose={partial=>{setCreating(false);if(partial){setCharacters(list=>list.some(c=>c.id===partial.id)?list.map(c=>c.id===partial.id?{...c,...partial}:c):[...list,partial]);setActiveId(partial.id);setNotice(`角色卡“${partial.name}”已创建，可在详情页继续补充参考图`);setRevision(v=>v+1)}}} onCreated={(c,{imageCount=0}={})=>{setCreating(false);setCharacters(list=>list.some(item=>item.id===c.id)?list.map(item=>item.id===c.id?{...item,...c}:item):[...list,c]);setActiveId(c.id);setNotice(imageCount?`已新建角色卡“${c.name}”（已绑定 ${imageCount} 张参考图）`:`已新建角色卡“${c.name}”`);setRevision(v=>v+1)}}/>}
   {confirmDelete&&character&&<DeleteCharacterDialog character={character} onClose={()=>setConfirmDelete(false)} onDeleted={()=>{setConfirmDelete(false);setActiveId(null);setNotice(`已删除角色卡“${character.name}”`);setRevision(v=>v+1)}}/>}
   {preview&&createPortal(<div className="ul-preview-host"><MediaPreview key={preview.id||preview.url} asset={preview} onClose={()=>setPreview(null)}/></div>,document.body)}
  </div>
 }
 
-export function CreateCharacterDialog({characters,onClose,onCreated}){
+export function CreateCharacterDialog({characters,openPicker,libraryRootRef,onClose,onCreated}){
  const [name,setName]=useState(''),[kind,setKind]=useState('character'),[description,setDescription]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[touched,setTouched]=useState(false)
- const nameError=touched||name?characterNameError(name,characters):''
- async function confirm(){setTouched(true);const issue=characterNameError(name,characters)||(descriptionLength(description)>CHARACTER_DESCRIPTION_MAX?`文字描述最多 ${CHARACTER_DESCRIPTION_MAX} 字`:'');if(issue){setError(issue);return}setBusy(true);setError('');try{onCreated(await createCharacter({name:name.trim(),description,kind}))}catch(e){setError(characterErrorMessage(e,'新建角色卡失败'));setBusy(false)}}
- return <LibraryDialog title="新建角色卡" busy={busy} error={error&&error!==nameError?error:''} confirmLabel="创建角色卡" disabled={!!nameError} onClose={onClose} onConfirm={confirm}><CharacterKindSelect value={kind} disabled={busy} onChange={setKind}/><CharacterNameInput autoFocus value={name} kind={kind} error={nameError} onChange={v=>{setName(v);setError('')}} onEnter={confirm}/><CharacterDescriptionInput value={description} kind={kind} onChange={setDescription}/></LibraryDialog>
+ const [picked,setPicked]=useState([]),[picking,setPicking]=useState(false),[preview,setPreview]=useState(null)
+ const [created,setCreated]=useState(null),[boundKeys,setBoundKeys]=useState(()=>new Set()),[failedKey,setFailedKey]=useState(null)
+ const pickButtonRef=useRef(null),wasPickingRef=useRef(false)
+ const peers=created?characters.filter(c=>c.id!==created.id):characters
+ const nameError=touched||name?characterNameError(name,peers):''
+ const descriptionOver=descriptionLength(description)>CHARACTER_DESCRIPTION_MAX
+
+ // When the nested library picker closes (cancel, Escape, or apply), UnifiedAssetLibrary removes `inert`
+ // from the outer `.ul-library`; observe that so this dialog always reappears with its form state intact.
+ useEffect(()=>{
+  if(!picking){
+   if(wasPickingRef.current){wasPickingRef.current=false;requestAnimationFrame(()=>pickButtonRef.current?.focus?.({preventScroll:true}))}
+   return undefined
+  }
+  wasPickingRef.current=true
+  const libraryEl=libraryRootRef?.current?.closest?.('.ul-library')
+  if(!libraryEl)return undefined
+  let sawHidden=libraryEl.hasAttribute('inert')
+  const sync=()=>{
+   const hidden=libraryEl.hasAttribute('inert')
+   if(hidden)sawHidden=true
+   else if(sawHidden)setPicking(false)
+  }
+  const observer=new MutationObserver(sync)
+  observer.observe(libraryEl,{attributes:true,attributeFilter:['inert','aria-hidden']})
+  const raf=requestAnimationFrame(sync)
+  return()=>{cancelAnimationFrame(raf);observer.disconnect()}
+ },[picking,libraryRootRef])
+
+ function pickInitialImages(){
+  if(!openPicker||busy)return
+  const left=CHARACTER_IMAGE_LIMIT-picked.length
+  if(left<=0){setError(`每个角色卡最多 ${CHARACTER_IMAGE_LIMIT} 张图`);return}
+  setError('');setPicking(true)
+  openPicker({
+   title:`为新建${characterKindLabel(kind)}卡选择初始参考图`,
+   applyLabel:'选为初始参考图',
+   kinds:['image'],
+   limit:left,
+   onApply:async items=>{
+    setPicked(current=>{
+     const seen=new Set(current.map(i=>i.key)),next=[...current]
+     for(const item of items){if(!seen.has(item.key)&&next.length<CHARACTER_IMAGE_LIMIT){seen.add(item.key);next.push(item)}}
+     return next
+    })
+    setPicking(false)
+   },
+  })
+ }
+
+ function removePickedImage(key){
+  if(busy||boundKeys.has(key))return
+  setPicked(current=>current.filter(item=>item.key!==key))
+  if(failedKey===key){setFailedKey(null);setError('')}
+ }
+
+ function openPickedPreview(item){
+  const pages=picked.map((entry,idx)=>({id:entry.key,url:entry.asset?.url||entry.thumbnail_url,name:entry.asset?.name||`初始参考图 ${idx+1}`,kind:'image'}))
+  const current=pages.find(p=>p.id===item.key)||pages[0]
+  if(current)setPreview(withPreviewPages(current,pages))
+ }
+
+ async function confirm(){
+  setTouched(true)
+  const trimmedName=name.trim()
+  const issue=characterNameError(trimmedName,peers)||(descriptionOver?`文字描述最多 ${CHARACTER_DESCRIPTION_MAX} 字`:'')
+  if(issue){setError(issue);return}
+  setBusy(true);setError('');setFailedKey(null)
+  let current=created
+  try{
+   if(!current){
+    current=await createCharacter({name:trimmedName,description,kind})
+    setCreated(current)
+   }else{
+    const patch={}
+    if(trimmedName!==current.name)patch.name=trimmedName
+    if(description!==characterDescription(current))patch.description=description
+    if(normalizeCharacterKind(kind)!==normalizeCharacterKind(current.kind))patch.kind=kind
+    if(Object.keys(patch).length){current=await updateCharacter(current.id,patch);setCreated(current)}
+   }
+   const pending=picked.filter(item=>!boundKeys.has(item.key))
+   let latest=current
+   for(let i=0;i<pending.length;i++){
+    const item=pending[i]
+    try{
+     const res=await attachPicked(item,selection=>addLibraryImage(current.id,selection))
+     if(res?.character)latest=res.character
+     setBoundKeys(prev=>{const next=new Set(prev);next.add(item.key);return next})
+     setCreated(latest)
+    }catch(imgErr){
+     setFailedKey(item.key)
+     setError(`角色卡“${current.name}”已创建，但绑定参考图“${item.asset?.name||`第 ${i+1} 张`}”失败：${characterErrorMessage(imgErr,'绑定参考图失败')}。已填信息保留，可移除失败图片后重试。`)
+     setBusy(false)
+     return
+    }
+   }
+   if(picked.length&&(!latest?.images||latest.images.length<picked.length)){
+    try{latest=await getCharacter(current.id)}catch{/* keep latest */}
+   }
+   onCreated(latest,{imageCount:picked.length})
+  }catch(e){
+   setError(characterErrorMessage(e,'新建角色卡失败'))
+   setBusy(false)
+  }
+ }
+ return <>
+  <LibraryDialog title="新建角色卡" className={`cl-create-dialog${picking?' is-picking':''}`} busy={busy} error={error&&error!==nameError?error:''} confirmLabel={created?'重试绑定并保存':'创建角色卡'} disabled={!!nameError||descriptionOver} onClose={()=>onClose(created)} onConfirm={confirm}>
+   <CharacterKindSelect value={kind} disabled={busy} onChange={setKind}/>
+   <CharacterNameInput autoFocus value={name} kind={kind} disabled={busy} error={nameError} onChange={v=>{setName(v);setError('')}} onEnter={confirm}/>
+   <CharacterDescriptionField value={description} kind={kind} disabled={busy} onChange={v=>{setDescription(v);setError('')}}/>
+   <CharacterInitialImagesField images={picked} boundKeys={boundKeys} failedKey={failedKey} disabled={busy} canPick={!!openPicker} onPick={pickInitialImages} onRemove={removePickedImage} onPreview={openPickedPreview} pickButtonRef={pickButtonRef}/>
+  </LibraryDialog>
+  {preview&&createPortal(<div className="ul-preview-host"><MediaPreview key={preview.id||preview.url} asset={preview} onClose={()=>setPreview(null)}/></div>,document.body)}
+ </>
 }
 
 function DeleteCharacterDialog({character,onClose,onDeleted}){

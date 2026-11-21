@@ -4,7 +4,7 @@ const TextToImage = lazyPanel(() => import('./components/TextToImage'))
 const ImageToImage = lazyPanel(() => import('./components/ImageToImage'))
 import ImageOutputControls from './components/image-parameters/ImageOutputControls'
 import useImageDimensionDraft from './components/image-parameters/useImageDimensionDraft'
-import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imageRequestFields,imageSizeSummary as getImageSizeSummary,isSeedream55} from './lib/imageGenerationRules'
+import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imageRequestFields,imageSizeSummary as getImageSizeSummary,isSeedream55,sanitizeImageTabForProvider} from './lib/imageGenerationRules'
 const PromptCollection = lazyPanel(() => import('./components/PromptCollection'))
 const TaskGallery = lazyPanel(() => import('./components/TaskGallery'))
 const GlobalTaskCenter = lazyPanel(() => import('./components/GlobalTaskCenter'))
@@ -22,7 +22,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ReactDOM from 'react-dom'
 import { Play, Settings, Cpu, HardDrive, Grid3X3, Database, X, Maximize2, Save, ImageDown, Film, LogOut, Check, Image as ImageIcon, Images, Library, ListTodo, Plus, SlidersHorizontal, AudioLines, CircleAlert, FileSearch, Layers3 } from 'lucide-react'
 import {videoCapabilities as getVideoCapabilities,videoDurations,videoRatio,VIDEO_RATIOS,VIDEO_AUTO_DURATION} from './lib/videoGenerationRules.js'
-import { estimateBytePlusVideoCost, formatUsdEstimate, formatWanTokens } from './lib/byteplusPricing'
+import { estimateBytePlusVideoCost, estimateImageParamsCost, formatUsdEstimate, formatWanTokens, IMAGE_PRICING } from './lib/byteplusPricing'
 import { persistWorkspaceBlob, useWorkspaceObjectUrls, useWorkspaceState, workspaceImageFields } from './lib/useWorkspaceState'
 import { initialTabMode, writeTabMode } from './lib/canvasLastLocation'
 import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CUPSY_AUDIO_MODEL, AUDIO_SAMPLE_RATES, AUDIO_SPEAKERS, VIDEO_MODEL_CAPABILITIES } from './lib/generationSettings.js'
@@ -646,10 +646,30 @@ function App({ onLogout }) {
     width: image.width, height: image.height, has_alpha: image.hasAlpha,
     size_bytes: image.file?.size || image.size || 0,
   }))
-  const changeImageParams = patch => updateImgTab(activeImgTab.id, imageTabPatch(patch))
+  const [imageSubmitError, setImageSubmitError] = useState('')
+  const imageActionAlertRef = useRef(null)
+  const imageOutputSectionRef = useRef(null)
+  const changeImageParams = patch => { setImageSubmitError(''); updateImgTab(activeImgTab.id, imageTabPatch(patch)) }
   const imageDimensions = useImageDimensionDraft(imageParams, changeImageParams, activeImgTab.id)
   const imageIssues = imageParameterIssues(effectiveImageProvider, imageParams, imageReferences, imageCapabilityModel)
   const imageSizeSummary = getImageSizeSummary(effectiveImageProvider, imageParams)
+  const imageCostEstimate = estimateImageParamsCost({
+    provider: activeImageOption,
+    params: imageParams,
+    references: imageReferences,
+    issue: isSeedream ? imageDimensions.error : '',
+  })
+  const liveImageIssue = imageIssues[0] || (isSeedream && imageDimensions.error) || ''
+  const imageActionError = (capabilitiesReady && imageSelectionState.unavailableReason) || liveImageIssue || imageSubmitError
+  const scrollImageErrorIntoView = useCallback((includeInspector = false) => {
+    const prefersReduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const behavior = prefersReduced ? 'auto' : 'smooth'
+    imageActionAlertRef.current?.scrollIntoView?.({ behavior, block: 'nearest' })
+    if (includeInspector) {
+      const target = imageOutputSectionRef.current?.querySelector('.ip-errors, [role="alert"]') || imageOutputSectionRef.current
+      target?.scrollIntoView?.({ behavior, block: 'nearest' })
+    }
+  }, [])
 
   const handleApplyPngInfo = metadata => {
     const params = metadata?.params || {}
@@ -755,13 +775,27 @@ function App({ onLogout }) {
     const option = optionById(toolCapabilities, 'image', optionId)
     if (!option) return
     const selection = selectionFromOption(option)
-    updateImgTab(activeImgTab.id, { providerSelection: selection })
+    const nextCapabilityModel = option.capability_model || option.model || ''
+    const sanitized = sanitizeImageTabForProvider(option.provider, activeImgTab, nextCapabilityModel, imageReferences)
+    imageDimensions.sync(sanitized.params)
+    setImageSubmitError('')
+    updateImgTab(activeImgTab.id, { providerSelection: selection, ...sanitized.patch })
     setApiProvider(option.provider)
     // Keep legacy session provider in sync on a best-effort basis without blocking custom profiles.
     if (!option.profile_id || option.source_key === `config:image:${option.provider}`) {
       axios.post('/api/provider', { provider: option.provider }).catch(() => {})
     }
   }
+
+  useEffect(() => {
+    if (!providerRevision || !capabilitiesReady || !activeImageOption) return
+    const nextCapabilityModel = activeImageOption.capability_model || activeImageOption.model || ''
+    const sanitized = sanitizeImageTabForProvider(activeImageOption.provider, activeImgTab, nextCapabilityModel, imageReferences)
+    if (!sanitized.changed) return
+    imageDimensions.sync(sanitized.params)
+    setImageSubmitError('')
+    updateImgTab(activeImgTab.id, sanitized.patch)
+  }, [providerRevision, capabilitiesReady, activeImageOption?.id, activeImageOption?.capability_model])
   
   const handleSavePrompt = async () => {
     const p = appMode === 'video' ? activeTab.prompt : appMode === 'audio' ? audioForm.prompt : activeImgTab.prompt
@@ -776,18 +810,28 @@ function App({ onLogout }) {
   const handleGenerate = async () => {
     const tab = activeImgTab
     if (!activeImageOption) {
-      notify(imageSelectionState.unavailableReason || '所选接口不可用，请重新选择', 'error')
+      const reason = imageSelectionState.unavailableReason || '所选接口不可用，请重新选择'
+      setImageSubmitError(reason)
+      notify(reason, 'error')
+      requestAnimationFrame(() => scrollImageErrorIntoView(false))
       return
     }
     if (!tab.prompt.trim()) {
-      notify('请先填写图片描述', 'error')
+      const reason = '请先填写图片描述'
+      setImageSubmitError(reason)
+      notify(reason, 'error')
+      requestAnimationFrame(() => scrollImageErrorIntoView(false))
       return
     }
     const issues = imageParameterIssues(effectiveImageProvider, imageTabParams(effectiveImageProvider, tab), imageReferences, imageCapabilityModel)
     if (issues.length || (isSeedream && imageDimensions.error)) {
-      notify(issues[0] || imageDimensions.error, 'error')
+      const reason = issues[0] || imageDimensions.error
+      setImageSubmitError(reason)
+      notify(reason, 'error')
+      requestAnimationFrame(() => scrollImageErrorIntoView(true))
       return
     }
+    setImageSubmitError('')
     const imageOptions = imageRequestFields(effectiveImageProvider, imageTabParams(effectiveImageProvider, tab))
     const submitProfile = toolSubmitProfileFields(activeImageOption)
     const revealTimer = window.setTimeout(
@@ -824,10 +868,14 @@ function App({ onLogout }) {
       }
 
       const taskId = response.data.task_id
+      setImageSubmitError('')
       notify(taskId ? `图片任务 #${taskId} 已创建` : '图片任务已创建')
     } catch (err) {
       const errorData = err.response?.data || {}
-      notify(errorData.error || err.message || '图片任务创建失败', 'error')
+      const reason = errorData.error || err.message || '图片任务创建失败'
+      setImageSubmitError(reason)
+      notify(reason, 'error')
+      requestAnimationFrame(() => scrollImageErrorIntoView(false))
     } finally {
       window.clearTimeout(revealTimer)
       setTaskGalleryRevision(revision => revision + 1)
@@ -1258,7 +1306,11 @@ function App({ onLogout }) {
     setShowPromptCollection(value => !value)
   }
   const imageModelValue = isSeedream
-    ? (activeImageOption?.model || (isCupsyImage ? 'seedream-5.0-pro' : imageProviders.ark?.model || 'seedream-5-0-pro'))
+    ? (isCupsyImage
+      ? 'seedream-5.0-pro'
+      : isSeedream55(imageCapabilityModel)
+        ? 'dola-seedream-5-5-261028'
+        : 'seedream-5-0-pro')
     : ''
   const currentEditorPrompt = appMode === 'video'
     ? activeTab.prompt
@@ -1332,7 +1384,7 @@ function App({ onLogout }) {
           {/* 编辑器主体 */}
           <div className="flex-grow flex flex-col min-h-0 relative z-10">
             <TextToImage 
-              prompt={activeImgTab.prompt} setPrompt={v => updateImgTab(activeImgTab.id, { prompt: v })}
+              prompt={activeImgTab.prompt} setPrompt={v => { setImageSubmitError(''); updateImgTab(activeImgTab.id, { prompt: v }) }}
               mentionItems={promptMentionItems}
               isGenerating={false}
               onSavePrompt={handleSavePrompt}
@@ -1341,15 +1393,31 @@ function App({ onLogout }) {
 
           {/* 执行按钮区 */}
           <div className="prompt-actions p-3 border-t border-nexus-border z-10">
-            {capabilitiesReady && imageSelectionState.unavailableReason && (
-              <div role="alert" data-testid="image-provider-action-alert" className="mb-2 text-xs text-nexus-red leading-5">
-                {imageSelectionState.unavailableReason}
+            {imageActionError && (
+              <div
+                ref={imageActionAlertRef}
+                role="alert"
+                data-testid={capabilitiesReady && imageSelectionState.unavailableReason ? 'image-provider-action-alert' : 'image-generate-error'}
+                className="mb-2 flex items-start gap-2 rounded-md border border-nexus-red/40 bg-[#241316] px-2.5 py-2 text-xs text-nexus-red leading-5"
+              >
+                <CircleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 break-words">{imageActionError}</span>
               </div>
             )}
+            <div className="mb-2 flex items-center justify-between text-xs text-nexus-muted">
+              <span>本次预估（估算，非实际扣费）</span>
+              <span
+                data-testid="image-action-cost"
+                className={`font-mono ${imageCostEstimate.known ? 'text-nexus-green' : 'text-nexus-amber'}`}
+                title={imageCostEstimate.known ? '' : (imageCostEstimate.reason || '当前参数暂无法估算')}
+              >
+                {imageCostEstimate.known ? `${formatUsdEstimate(imageCostEstimate.estimate)} USD` : '费用待估'}
+              </span>
+            </div>
             <button
               onClick={handleGenerate}
               disabled={!capabilitiesReady || !activeImageOption}
-              title={imageSelectionState.unavailableReason || ''}
+              title={imageActionError || ''}
               className="btn btn-primary btn-lg btn-block"
             >
               <Play size={14} fill="currentColor" /> <span>生成图片</span>
@@ -1443,9 +1511,9 @@ function App({ onLogout }) {
               </div>
             </div>
             
-            <div className="inspector-section">
+            <div className="inspector-section" ref={imageOutputSectionRef}>
               <div className="inspector-title"><Settings size={14}/> 输出设置</div>
-              <ImageOutputControls model={imageCapabilityModel} provider={effectiveImageProvider} params={imageParams} onChange={changeImageParams}
+              <ImageOutputControls hideModel model={imageCapabilityModel} provider={effectiveImageProvider} params={imageParams} onChange={changeImageParams}
                 references={imageReferences} dimensions={imageDimensions} issues={imageIssues}>
               </ImageOutputControls>
             </div>
@@ -1461,13 +1529,48 @@ function App({ onLogout }) {
                    uploadedImages={activeImgTab.uploadedImages}
                    createPreviewUrl={createReferencePreview}
                    onPreview={setReferenceMedia}
-                   setUploadedImages={value => updateImgTab(activeImgTab.id, tab => ({
-                     uploadedImages: typeof value === 'function'
-                       ? value(Array.isArray(tab.uploadedImages) ? tab.uploadedImages : [])
-                       : value,
-                   }))}
+                   setUploadedImages={value => {
+                     setImageSubmitError('')
+                     updateImgTab(activeImgTab.id, tab => ({
+                       uploadedImages: typeof value === 'function'
+                         ? value(Array.isArray(tab.uploadedImages) ? tab.uploadedImages : [])
+                         : value,
+                     }))
+                   }}
                    maxImages={isSeedream ? 10 : 14}
                  />
+              </div>
+            </div>
+
+            {/* PRICE ESTIMATE */}
+            <div className="inspector-section">
+              <div className="inspector-title">
+                <Database size={14} className="text-nexus-amber" /> 费用估算 (USD)
+              </div>
+              <div className="flex flex-col justify-between flex-grow gap-2">
+                {imageCostEstimate.known ? (() => {
+                  const est = imageCostEstimate.estimate
+                  const pricing = IMAGE_PRICING[est.model]
+                  const billedRefs = Math.max(0, est.referenceCount - pricing.freeInputImages)
+                  const refLine = est.referenceCount
+                    ? `参考图 ${est.referenceCount} 张${pricing.freeInputImages ? `（首张免费，计 ${billedRefs} 张）` : ''}`
+                    : '无参考图'
+                  return (<>
+                    <div data-testid="image-cost-estimate" className="text-2xl font-mono text-nexus-green">{formatUsdEstimate(est)}</div>
+                    <div className="text-xs font-mono text-nexus-text leading-5 opacity-80">
+                      <div>{pricing.label} · {isCupsyImage ? 'Cupsy 费率' : 'BytePlus Ark'}</div>
+                      <div>{est.width}×{est.height} · {(est.pixels / 1_000_000).toFixed(2)}M 像素</div>
+                      <div>{refLine}</div>
+                      <div className="mt-1 opacity-60">{est.sizeAssumed ? 'Auto 按同分辨率 1:1 估算 · ' : ''}估算，非实际扣费</div>
+                    </div>
+                  </>)
+                })() : (<>
+                  <div data-testid="image-cost-estimate" className="text-xl font-mono text-nexus-amber">费用待估</div>
+                  <div className="text-xs text-nexus-muted leading-5">
+                    <div>{imageCostEstimate.reason || '当前参数暂无法估算'}</div>
+                    <div className="mt-1 opacity-70">未知费用不计作 $0</div>
+                  </div>
+                </>)}
               </div>
             </div>
 

@@ -134,6 +134,8 @@ export const NODE_TOOLBAR_ACTIONS = Object.freeze([
 ])
 export const VIDEO_TOOLBAR_ACTIONS = Object.freeze([
   {id: 'history', label: '历史版本', title: '历史版本', handler: 'onHistory'},
+  {id: 'extendVideo', label: '延长此视频', title: '创建已连线的下游视频延长节点（不自动生成）', handler: 'onExtendVideo'},
+  {id: 'editVideo', label: '编辑此视频', title: '创建已连线的下游视频编辑节点（不自动生成）', handler: 'onEditVideo'},
   {id: 'captureCurrent', label: '截取当前帧', title: '截取播放器当前帧，存为右侧的图片素材节点', handler: 'onCaptureCurrent'},
   {id: 'captureTail', label: '截取尾帧', title: '截取视频最后一帧，存为右侧的图片素材节点', handler: 'onCaptureTail'},
   {id: 'preview', label: '预览', title: '预览', handler: 'onPreview'},

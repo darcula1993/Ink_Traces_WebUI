@@ -1,5 +1,5 @@
 import React,{useEffect,useLayoutEffect,useRef,useState} from 'react'
-import {Music} from 'lucide-react'
+import {Check,CheckCircle2,Columns2,Music} from 'lucide-react'
 
 // NODE-TOOLBAR-VERSIONS-20261118 (user 11-18): the one place to switch a node's kept versions (asset, image, video and
 // audio generation nodes; the properties panel no longer lists them). Opened from the node toolbar's 历史版本 button
@@ -25,10 +25,13 @@ export function versionPopoverPlacement(rect,surface,size,{gap=12,margin=8}={}){
  return {left:Math.round(left),top:Math.round(top)}
 }
 
-export default function CanvasVersionPopover({node,rect,surface,busy=false,isGone=()=>false,onChoose,onClose}){
+export default function CanvasVersionPopover({node,rect,surface,busy=false,isGone=()=>false,onChoose,onCompare,onToggleFinalized,onClose}){
  const ref=useRef(null),[size,setSize]=useState(null)
  const kind=node.asset?.kind||(node.type==='asset'?'image':node.type),label=`${KIND_LABEL[kind]||''}历史版本`
  const candidates=node.candidates||[],currentId=node.asset?.id??node.selectedCandidateId
+ const liveCount=candidates.filter(asset=>asset?.id&&!isGone(asset)).length
+ const canCompare=Boolean(onCompare)&&liveCount>=2
+ const finalized=node.finalized===true
  useLayoutEffect(()=>{const el=ref.current;if(el){const next={width:el.offsetWidth,height:el.offsetHeight};if(!size||size.width!==next.width||size.height!==next.height)setSize(next)}})
  // Focus once the popover is measured and visible (a visibility:hidden element cannot take focus).
  const measured=!!size
@@ -46,13 +49,22 @@ export default function CanvasVersionPopover({node,rect,surface,busy=false,isGon
   }
  }
  return <div ref={ref} className="cv-history-popover cv-version-popover" role="dialog" aria-label={label} data-testid="version-popover" style={{left:place.left,top:place.top,right:'auto',visibility:size?undefined:'hidden'}} onKeyDown={onKeyDown} onPointerDown={e=>e.stopPropagation()} onWheel={e=>e.stopPropagation()}>
-  <header><span>历史版本（{candidates.length}）</span><button type="button" className="btn btn-ghost btn-sm" aria-label="关闭历史版本" onClick={onClose}>关闭</button></header>
+  <header>
+   <span>历史版本（{candidates.length}）</span>
+   <span className="cv-version-header-actions">
+    {canCompare&&<button type="button" className="btn btn-secondary btn-sm cv-version-compare-btn" disabled={busy} data-testid="version-popover-compare" title="并排对比 2–4 个候选版本" onClick={()=>onCompare(node.id)}><Columns2 size={13} aria-hidden="true"/>并排对比</button>}
+    <button type="button" className="btn btn-ghost btn-sm" aria-label="关闭历史版本" onClick={onClose}>关闭</button>
+   </span>
+  </header>
+  {onToggleFinalized&&<div className="cv-version-final-bar">
+   <button type="button" className={`btn btn-sm cv-version-final-toggle ${finalized?'is-finalized':'btn-ghost'}`} disabled={busy} aria-pressed={finalized} data-testid="version-popover-finalize" title={finalized?'取消此节点的定稿标记（可撤销）':'将当前采用版本标为定稿（可撤销）'} onClick={()=>onToggleFinalized(node.id,!finalized)}><CheckCircle2 size={13} aria-hidden="true"/>{finalized?'已定稿 · 取消定稿':'标为定稿'}</button>
+  </div>}
   <div className="cv-version-list" role="group" aria-label="保留的版本">
    {candidates.map((asset,index)=>{const gone=isGone(asset),time=versionTime(asset),current=asset.id===currentId,itemKind=asset.kind||kind
     const reason=gone?'该版本已在素材库中删除':busy?'请等待当前操作完成':undefined
-    return <button type="button" key={asset.id} className="cv-version-item" data-version-id={asset.id} disabled={busy||gone} title={reason||(current?'当前版本':`切换到版本 ${index+1}`)} aria-label={`版本 ${index+1}`} aria-description={[current?'当前版本':'',time,gone?'已删除':''].filter(Boolean).join('，')||undefined} aria-pressed={current} onClick={()=>onChoose(asset)}>
+    return <button type="button" key={asset.id} className="cv-version-item" data-version-id={asset.id} disabled={busy||gone} title={reason||(current?'当前版本':`切换到版本 ${index+1}`)} aria-label={`版本 ${index+1}`} aria-description={[current?'当前版本':'',current&&finalized?'已定稿':'',time,gone?'已删除':''].filter(Boolean).join('，')||undefined} aria-pressed={current} onClick={()=>onChoose(asset)}>
      <span className="cv-version-thumb">{gone?<span className="cv-history-deleted">已删除</span>:itemKind==='video'?<video src={asset.url} muted preload="metadata" playsInline aria-hidden="true"/>:itemKind==='audio'?<Music size={18} aria-hidden="true"/>:<img src={asset.url} alt="" loading="lazy" draggable={false}/>}</span>
-     <span className="cv-version-meta"><b>版本 {index+1}</b>{current&&<small className="cv-version-current">当前</small>}{time&&<small>{time}</small>}{gone&&<small>（已删除）</small>}</span>
+     <span className="cv-version-meta"><b>版本 {index+1}</b>{current&&<small className="cv-version-current">当前</small>}{current&&finalized&&<small className="cv-version-final"><Check size={10} aria-hidden="true"/>定稿</small>}{time&&<small>{time}</small>}{gone&&<small>（已删除）</small>}</span>
     </button>})}
   </div>
  </div>

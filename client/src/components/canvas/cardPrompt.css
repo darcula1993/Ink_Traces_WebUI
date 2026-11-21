@@ -27,12 +27,47 @@
 .canvas-studio .cv-node.cv-node-sized > .cv-node-prompt.is-card {
   position: absolute; left: 0; right: 0; bottom: 0; height: var(--cv-prompt-h); padding: 0; display: flex; flex-direction: column;
   border-top: 1px solid var(--cv-border); border-radius: 0 0 7px 7px; overflow: hidden; box-sizing: border-box;
+  container-type: inline-size; container-name: cv-card-prompt;
 }
 .canvas-studio .cv-node.cv-node-sized > .cv-node-prompt.is-card:focus-within { border-top-color: var(--border-focus); }
 .canvas-studio .cv-node.cv-node-sized > .cv-node-prompt.is-card.has-issue { border-top-color: var(--danger); }
 .canvas-studio .cv-node.cv-node-sized:has(> .cv-node-prompt.is-card) .cv-node-footer { bottom: calc(var(--cv-prompt-h) + 3px); }
 .canvas-studio .cv-node-prompt.is-card .cv-node-prompt-text { position: relative; flex: 1 1 auto; min-height: 0; }
 .canvas-studio .cv-node-prompt.is-card.is-editable .cv-prompt-mention { inset: 0; height: 100%; min-height: 0; z-index: 3; } /* inline position: relative */
+/* V24-W2-CHAR-CARD-20261121: compact 1-line character card badge bar above the card prompt editor. */
+.canvas-studio .cv-char-block-bar {
+  flex: 0 0 auto; display: flex; align-items: center; min-width: 0; padding: 4px 8px 0; box-sizing: border-box;
+}
+.canvas-studio .cv-char-block-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; height: 22px; min-height: 0;
+  padding: 0 6px 0 4px; border: 1px solid rgba(69, 192, 136, .3); border-radius: 6px;
+  background: rgba(69, 192, 136, .1); color: var(--cv-text); font-size: 11.5px; line-height: 1; cursor: pointer;
+  transition: background-color var(--dur-fast, .12s) ease-out, border-color var(--dur-fast, .12s) ease-out;
+}
+.canvas-studio .cv-char-block-bar.is-expanded .cv-char-block-toggle {
+  background: rgba(69, 192, 136, .18); border-color: rgba(69, 192, 136, .48);
+}
+.canvas-studio .cv-char-block-toggle:hover {
+  background: rgba(69, 192, 136, .18); border-color: rgba(69, 192, 136, .52);
+}
+.canvas-studio .cv-char-block-toggle:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: var(--ring-focus); }
+.canvas-studio .cv-char-block-pill {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto;
+  color: var(--btn-active-text, #9fe0c0); font-weight: 500;
+}
+.canvas-studio .cv-char-block-pill svg { flex: 0 0 auto; color: var(--accent, #45c088); }
+.canvas-studio .cv-char-block-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-studio .cv-char-block-action {
+  display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
+  font-size: 11px; color: var(--text-2); white-space: nowrap;
+}
+.canvas-studio .cv-char-block-toggle:hover .cv-char-block-action { color: var(--cv-text); }
+.canvas-studio .cv-node-prompt.is-card.has-char-block :is(.cv-card-prompt, .cv-node-prompt-preview) {
+  border-top-width: 2px;
+}
+@container cv-card-prompt (max-width: 240px) {
+  .canvas-studio .cv-char-block-action > span { display: none; }
+}
 /* CARD-PROMPT-READABLE-20261118 (user 11-18: the text was hard to read, the buttons too small). The text sits in an
  * inset field one lightness step above the card (--surface-raised, no added border): the transparent 6px/8px/2px
  * border is the gap to the card edge, so the field box still fills .cv-node-prompt-text (geometry unchanged in
@@ -62,11 +97,13 @@
 .canvas-studio .cv-node-prompt.is-card .cv-node-prompt-preview:focus-visible,
 .canvas-studio .cv-node-prompt.is-card .cv-card-prompt:focus { outline: none; border-color: transparent; box-shadow: inset 0 0 0 2px var(--border-focus); }
 .canvas-studio .cv-node-prompt.is-card.has-issue :is(.cv-card-prompt, .cv-node-prompt-preview) { border-color: transparent; box-shadow: inset 0 0 0 1px var(--danger); }
-/* Tool row (36px): 28px buttons, 16px icons, 13px labels; every hit area is at least 28×28. */
+/* Tool row (36px): 28px buttons, 16px icons, 13px labels; every hit area is at least 28×28.
+ * V24-W1-URL-POLISH-20261121: compact spacing and iconified @角色卡 on narrow cards (e.g. 1:1 258px)
+ * so cost estimates like "$0.035 USD" remain completely visible without ellipsis truncation. */
 .canvas-studio .cv-node-prompt-tools {
-  flex: 0 0 36px; display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; padding: 0 16px 0 8px;
+  flex: 0 0 36px; display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; padding: 0 14px 0 6px;
 }
-.canvas-studio .cv-node-prompt-tools-start, .canvas-studio .cv-node-prompt-tools-end { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.canvas-studio .cv-node-prompt-tools-start, .canvas-studio .cv-node-prompt-tools-end { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .canvas-studio .cv-node-prompt-tools-start { flex: 0 0 auto; }
 .canvas-studio .cv-node-prompt-tools-end { flex: 1 1 auto; justify-content: flex-end; margin-left: auto; }
 .canvas-studio .cv-node-prompt-tools .cv-prompt-library.is-compact { position: static; display: block; }
@@ -75,7 +112,7 @@
   background: var(--surface-1); color: var(--cv-secondary); cursor: pointer;
 }
 .canvas-studio .cv-card-tool {
-  display: inline-flex; align-items: center; gap: 3px; height: 28px; min-height: 0; padding: 0 9px 0 6px; border: 1px solid var(--cv-border); border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 3px; height: 28px; min-height: 0; padding: 0 8px 0 6px; border: 1px solid var(--cv-border); border-radius: 999px;
   background: var(--surface-1); color: var(--cv-secondary); font-size: 13px; line-height: 1; white-space: nowrap; cursor: pointer;
 }
 .canvas-studio .cv-card-prompt-expand {
@@ -85,7 +122,15 @@
 .canvas-studio :is(.cv-card-prompt-library, .cv-card-tool, .cv-card-prompt-expand):hover:not(:disabled) { color: var(--cv-text); border-color: var(--cv-border-strong); background: var(--surface-raised); }
 .canvas-studio :is(.cv-card-prompt-library, .cv-card-tool, .cv-card-prompt-expand):focus-visible { outline: none; color: var(--cv-text); border-color: var(--border-focus); box-shadow: var(--ring-focus); }
 .canvas-studio .cv-card-tool:disabled { opacity: .55; cursor: not-allowed; }
-.canvas-studio .cv-card-cost { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 28px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.canvas-studio .cv-card-cost { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 28px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+@container cv-card-prompt (max-width: 270px) {
+  .canvas-studio .cv-node-prompt-tools .cv-card-mention { width: 28px; padding: 0; justify-content: center; gap: 0; }
+  .canvas-studio .cv-node-prompt-tools .cv-card-mention > span { display: none; }
+}
+@container cv-card-prompt (max-width: 220px) {
+  .canvas-studio .cv-node-prompt-tools { padding: 0 12px 0 4px; gap: 2px; }
+  .canvas-studio .cv-node-prompt-tools-start, .canvas-studio .cv-node-prompt-tools-end { gap: 2px; }
+}
 .canvas-studio .cv-node-prompt-tools .cv-card-generate { position: static; flex: 0 0 auto; width: 28px; height: 28px; }
 .canvas-studio .cv-node-prompt-tools .cv-card-generate:hover:not(:disabled) { filter: none; background: var(--accent-hover); box-shadow: 0 0 0 3px var(--accent-soft); }
 .canvas-studio .cv-node-prompt-tools .cv-card-generate:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; box-shadow: none; }
