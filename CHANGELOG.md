@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.1 - 2026-11-21
+
+Storage garbage collection and completed deletion compaction (`STORAGE-GC-COMPACT-20261121`).
+
+- **Completed Deletion Compaction**: Added idempotent `compact_completed_deletions()` (run on deletion completion and in Worker maintenance) to compact `completed=1` `canvas_workflows.document` records into minimal node provenance stubs (`id`/`type`/`title`/`task.id`) and strip bloated fields from `canvas_deletions.manifest` while preserving Cost Ledger attribution, Generation History provenance, `removed_library_ids`, and `cleanup_assets=False` retention obligations; never touches `completed=0` pending deletions.
+- **Deleted Layer Project Compaction**: Added `compact_deleted_layer_projects()` to clear orphaned `layer_projects.document` and unreferenced `layer_revisions` after deletion while strictly preserving `layer_revisions` referenced by any surviving task.
+- **Orphan & Workspace Disk GC**: Extended `cleanup_orphans()` and `cleanup_workspace_assets_all()` to reclaim orphaned `output/layer/<task_id>/` directories, soft-deleted/unreferenced `workspace_assets/layer_projects/<id>/` directories, unreferenced `workspace_assets/cupsy_assets/` files and emptied subdirectories, orphaned `workspace_assets/<state_key>/` directories without active `workspace_state` rows, and emptied legacy `canvas_assets/` subdirectories while strictly protecting `canvas_assets/media/`, active references, grace windows, and symlink boundaries.
+
 ## 2.4.0 - 2026-11-21
 
 End-to-end reliability fixes, short-drama canvas productivity upgrades, scene asset export packaging, read-only sequence playback preview, and cost/history observability.

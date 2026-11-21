@@ -332,9 +332,13 @@ def persist_workspace_value(key, value):
     return persist(value)
 
 
+RESERVED_WORKSPACE_ASSET_DIRS = frozenset({'layer_projects', 'cupsy_assets'})
+RESERVED_CANVAS_ASSET_DIRS = frozenset({'media', 'library', 'local_uploads'})
+
+
 def cleanup_workspace_assets(key, value):
     directory = os.path.join(WORKSPACE_ASSET_DIR, key)
-    if not os.path.isdir(directory):
+    if os.path.islink(directory) or not os.path.isdir(directory):
         return 0
     prefix = f'/api/workspace/assets/{key}/'
     referenced = set()
@@ -354,21 +358,50 @@ def cleanup_workspace_assets(key, value):
     now = time.time()
     for filename in os.listdir(directory):
         path = os.path.join(directory, filename)
+        if os.path.islink(path):
+            continue
         if filename.endswith('.thumb.webp') and filename[:-11] in referenced:
             continue
-        if filename not in referenced and os.path.isfile(path) and now - os.path.getmtime(path) >= 300:
-            os.remove(path)
-            removed += 1
+        if filename not in referenced and os.path.isfile(path):
+            try:
+                if now - os.path.getmtime(path) >= 300:
+                    os.remove(path)
+                    removed += 1
+            except OSError:
+                continue
     return removed
 
 
 def cleanup_workspace_assets_all():
     """Run from maintenance, not on every prompt autosave request."""
     removed = 0
+    known_keys = set()
     for row in task_db.get_db().execute('SELECT key FROM workspace_state').fetchall():
-        state = task_db.get_workspace_state(row['key'])
+        key = row['key']
+        known_keys.add(key)
+        state = task_db.get_workspace_state(key)
         if state is not None:
-            removed += cleanup_workspace_assets(row['key'], state['value'])
+            removed += cleanup_workspace_assets(key, state['value'])
+
+    if os.path.isdir(WORKSPACE_ASSET_DIR) and not os.path.islink(WORKSPACE_ASSET_DIR):
+        now = time.time()
+        for entry in os.scandir(WORKSPACE_ASSET_DIR):
+            name = entry.name
+            if name in RESERVED_WORKSPACE_ASSET_DIRS or name in known_keys:
+                continue
+            if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                dir_mtime = os.path.getmtime(entry.path)
+            except OSError:
+                continue
+            dir_removed = cleanup_workspace_assets(name, None)
+            removed += dir_removed
+            try:
+                if not os.listdir(entry.path) and (dir_removed > 0 or now - dir_mtime >= 300):
+                    os.rmdir(entry.path)
+            except OSError:
+                pass
     return removed
 
 
@@ -508,34 +541,222 @@ def cleanup_expired_assets(now=None):
     return removed
 
 
+def _contains_symlink(directory):
+    if os.path.islink(directory):
+        return True
+    for root, dirs, files in os.walk(directory, followlinks=False):
+        for name in dirs:
+            if os.path.islink(os.path.join(root, name)):
+                return True
+        for name in files:
+            if os.path.islink(os.path.join(root, name)):
+                return True
+    return False
+
+
+def _canvas_asset_root():
+    raw = os.environ.get('NANOBANANA_CANVAS_ASSET_DIR')
+    if raw:
+        return os.path.abspath(raw)
+    return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(task_db.DB_PATH)), 'canvas_assets'))
+
+
 def cleanup_orphans(grace_seconds=24 * 60 * 60):
     """Remove old files that are not represented by a task or asset row."""
     ensure_storage_dirs()
     cutoff = time.time() - grace_seconds
+    db = task_db.get_db()
     known_assets = {os.path.abspath(asset['path']) for asset in task_db.list_assets()}
     known_task_ids = set(task_db.list_task_ids(deleted=None))
     removed_files = 0
     removed_dirs = 0
 
-    for root, _, files in os.walk(UPLOAD_VIDEO_DIR):
-        for name in files:
-            path = os.path.abspath(os.path.join(root, name))
-            if path not in known_assets and os.path.getmtime(path) < cutoff:
-                os.remove(path)
-                removed_files += 1
+    if os.path.isdir(UPLOAD_VIDEO_DIR) and not os.path.islink(UPLOAD_VIDEO_DIR):
+        for root, _, files in os.walk(UPLOAD_VIDEO_DIR, followlinks=False):
+            if os.path.islink(root):
+                continue
+            for name in files:
+                raw_path = os.path.join(root, name)
+                if os.path.islink(raw_path):
+                    continue
+                path = os.path.abspath(raw_path)
+                try:
+                    if path not in known_assets and os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                        removed_files += 1
+                except OSError:
+                    continue
 
-    for task_type in ('image', 'video', 'audio'):
+    for task_type in ('image', 'video', 'audio', 'layer'):
         root = os.path.join(OUTPUT_DIR, task_type)
-        if not os.path.isdir(root):
+        if os.path.islink(root) or not os.path.isdir(root):
             continue
+        root_real = os.path.realpath(root)
         for name in os.listdir(root):
             path = os.path.join(root, name)
-            if not os.path.isdir(path) or not name.isdigit():
+            if os.path.islink(path) or not os.path.isdir(path) or not (name.isascii() and name.isdigit()):
                 continue
-            if int(name) not in known_task_ids and os.path.getmtime(path) < cutoff:
-                removed_files += sum(len(files) for _, _, files in os.walk(path))
+            if _contains_symlink(path):
+                continue
+            if os.path.commonpath((root_real, os.path.realpath(path))) != root_real:
+                continue
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue
+            if int(name) not in known_task_ids and mtime < cutoff:
+                removed_files += sum(len(files) for _, _, files in os.walk(path, followlinks=False))
                 shutil.rmtree(path, ignore_errors=True)
                 removed_dirs += 1
+
+    layer_root = os.path.join(WORKSPACE_ASSET_DIR, 'layer_projects')
+    if os.path.isdir(layer_root) and not os.path.islink(layer_root):
+        active_layer_projects = set()
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='layer_projects'").fetchone():
+            active_layer_projects = {
+                int(row['id'])
+                for row in db.execute('SELECT id FROM layer_projects WHERE deleted_at IS NULL').fetchall()
+            }
+        layer_root_real = os.path.realpath(layer_root)
+        for name in os.listdir(layer_root):
+            path = os.path.join(layer_root, name)
+            if not (name.isascii() and name.isdigit()) or os.path.islink(path) or not os.path.isdir(path):
+                continue
+            if int(name) in active_layer_projects:
+                continue
+            if _contains_symlink(path):
+                continue
+            if os.path.commonpath((layer_root_real, os.path.realpath(path))) != layer_root_real:
+                continue
+            abs_dir = os.path.abspath(path)
+            file_paths = [
+                os.path.abspath(os.path.join(walk_root, fname))
+                for walk_root, _, walk_files in os.walk(path, followlinks=False)
+                for fname in walk_files
+            ]
+            if abs_dir in known_assets or any(fp in known_assets for fp in file_paths):
+                continue
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                continue
+            if mtime < cutoff:
+                removed_files += len(file_paths)
+                shutil.rmtree(path, ignore_errors=True)
+                removed_dirs += 1
+
+    cupsy_root = os.path.join(WORKSPACE_ASSET_DIR, 'cupsy_assets')
+    if os.path.isdir(cupsy_root) and not os.path.islink(cupsy_root):
+        protected_cupsy = set(known_assets)
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_assets'").fetchone():
+            has_tpa = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_provider_assets'"
+            ).fetchone() is not None
+            if has_tpa:
+                rows = db.execute(
+                    '''SELECT local_path FROM provider_assets
+                       WHERE deleted_at IS NULL
+                          OR id IN (SELECT DISTINCT provider_asset_id FROM task_provider_assets)'''
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    'SELECT local_path FROM provider_assets WHERE deleted_at IS NULL'
+                ).fetchall()
+            for row in rows:
+                if row['local_path']:
+                    protected_cupsy.add(os.path.abspath(row['local_path']))
+        cupsy_root_abs = os.path.abspath(cupsy_root)
+        cupsy_root_real = os.path.realpath(cupsy_root)
+        pruned_children = set()
+        for root, _, files in os.walk(cupsy_root, topdown=False, followlinks=False):
+            if os.path.islink(root):
+                continue
+            if os.path.commonpath((cupsy_root_real, os.path.realpath(root))) != cupsy_root_real:
+                continue
+            root_abs = os.path.abspath(root)
+            try:
+                dir_mtime = os.path.getmtime(root)
+            except OSError:
+                continue
+            dir_had_removal = root_abs in pruned_children
+            for name in files:
+                path = os.path.join(root, name)
+                if os.path.islink(path) or not os.path.isfile(path):
+                    continue
+                abs_path = os.path.abspath(path)
+                if abs_path in protected_cupsy:
+                    continue
+                if abs_path.endswith('.thumb.webp') and abs_path[:-11] in protected_cupsy:
+                    continue
+                try:
+                    mtime = os.path.getmtime(path)
+                except OSError:
+                    continue
+                if mtime >= cutoff:
+                    continue
+                try:
+                    os.remove(path)
+                    removed_files += 1
+                    dir_had_removal = True
+                except OSError:
+                    continue
+                if not abs_path.endswith('.thumb.webp'):
+                    thumb_path = path + '.thumb.webp'
+                    thumb_abs = abs_path + '.thumb.webp'
+                    if (
+                        not os.path.islink(thumb_path)
+                        and os.path.isfile(thumb_path)
+                        and thumb_abs not in protected_cupsy
+                    ):
+                        try:
+                            os.remove(thumb_path)
+                            removed_files += 1
+                            dir_had_removal = True
+                        except OSError:
+                            pass
+            if root_abs != cupsy_root_abs and not os.path.islink(root):
+                try:
+                    if not os.listdir(root) and (dir_had_removal or dir_mtime < cutoff):
+                        os.rmdir(root)
+                        removed_dirs += 1
+                        pruned_children.add(os.path.dirname(root_abs))
+                except OSError:
+                    pass
+
+    canvas_root = _canvas_asset_root()
+    if os.path.isdir(canvas_root) and not os.path.islink(canvas_root) and os.path.realpath(canvas_root) == canvas_root:
+        for name in os.listdir(canvas_root):
+            if name in RESERVED_CANVAS_ASSET_DIRS:
+                continue
+            path = os.path.join(canvas_root, name)
+            if os.path.islink(path) or not os.path.isdir(path):
+                continue
+            if os.path.realpath(path) != os.path.abspath(path):
+                continue
+            try:
+                if not os.listdir(path) and os.path.getmtime(path) < cutoff:
+                    os.rmdir(path)
+                    removed_dirs += 1
+            except OSError:
+                continue
+        library_root = os.path.join(canvas_root, 'library')
+        if (
+            os.path.isdir(library_root)
+            and not os.path.islink(library_root)
+            and os.path.realpath(library_root) == os.path.abspath(library_root)
+        ):
+            for name in os.listdir(library_root):
+                path = os.path.join(library_root, name)
+                if os.path.islink(path) or not os.path.isdir(path):
+                    continue
+                if os.path.realpath(path) != os.path.abspath(path):
+                    continue
+                try:
+                    if not os.listdir(path) and os.path.getmtime(path) < cutoff:
+                        os.rmdir(path)
+                        removed_dirs += 1
+                except OSError:
+                    continue
 
     return {'files': removed_files, 'directories': removed_dirs}
 

@@ -3488,6 +3488,8 @@ def api_layer_project(project_id):
         expected_root = os.path.abspath(os.path.join(storage.WORKSPACE_ASSET_DIR, 'layer_projects'))
         if source_dir and os.path.commonpath([expected_root, os.path.abspath(source_dir)]) == expected_root:
             shutil.rmtree(source_dir, ignore_errors=True)
+        import canvas_cleanup
+        canvas_cleanup.compact_deleted_layer_projects(project_id=project_id)
         return jsonify({'success': True})
     data = request.get_json(silent=True) or {}
     document = data.get('document')

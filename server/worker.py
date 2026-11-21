@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 
 import app as application
+import canvas_cleanup
 import media_library
 from logging_config import configure_logging
 import storage
@@ -397,12 +398,13 @@ class Worker:
     def _cleanup(self):
         try:
             media_library.recover_staged_deletes()
+            compacted = canvas_cleanup.compact_completed_deletions()
             storage.cleanup_workspace_assets_all()
             expired = storage.cleanup_expired_assets()
             orphaned = storage.cleanup_orphans(self.orphan_grace_seconds)
             task_db.checkpoint()
-            if expired or orphaned['files'] or orphaned['directories']:
-                LOG.info('storage_cleanup expired=%s orphaned=%s', expired, orphaned)
+            if expired or orphaned['files'] or orphaned['directories'] or any(compacted.values()):
+                LOG.info('storage_cleanup expired=%s orphaned=%s compacted=%s', expired, orphaned, compacted)
         except Exception:
             LOG.exception('storage_cleanup_failed')
         finally:
