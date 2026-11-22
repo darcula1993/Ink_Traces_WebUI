@@ -115,6 +115,8 @@ def public_task(task):
     if not task:
         return task
     data = copy.copy(task)
+    if isinstance(data.get('params'), dict) and 'canvas_node_snapshot' in data['params']:
+        data['params'] = {k: v for k, v in data['params'].items() if k != 'canvas_node_snapshot'}
     if 'stage' in data:
         data['stage'] = public_stage(data)
     if isinstance(data.get('result'), (dict, list)):
@@ -128,21 +130,127 @@ def public_tasks(tasks):
     return [public_task(task) for task in tasks]
 
 
+# VERSION-SNAPSHOT-20261123: secret/credential patterns rejected in versionSnapshots on write
+# and scrubbed on snapshot capture / read. Kept distinct from normal creative prompts.
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r'-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----'),
+    re.compile(r'(?i)\bBearer\s+[A-Za-z0-9._~+/=\-]{8,}'),
+    re.compile(
+        r'(?i)\b(?:X-Amz-Signature|X-Tos-Signature|X-Tos-Credential|X-Goog-Signature|X-Signature|'
+        r'AWSAccessKeyId|OSSAccessKeyId|X-Amz-Credential)\s*=\s*[^\s\'"<>;&]+'
+    ),
+    re.compile(
+        r'(?i)https?://[^\s"\'<>()]*?[?&](?:Signature|sig|token|api_key|apikey|'
+        r'X-Amz-Credential|X-Amz-Signature|X-Tos-Signature|X-Tos-Credential|'
+        r'X-Goog-Signature|X-Signature|Expires)=[^\s"\'<>()]*'
+    ),
+    re.compile(r'(?i)\bdata:(?:image|video|audio)/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+'),
+    re.compile(
+        r'\b(?:sk-[A-Za-z0-9_\-]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{20,}|'
+        r'gh[pousr]_[A-Za-z0-9]{20,}|xoxb-[0-9A-Za-z\-]{10,})'
+    ),
+)
+
+
+def has_sensitive_snapshot_value(value):
+    """True when ``value`` contains a raw Ark endpoint ID, signed query, or secret token."""
+    if not isinstance(value, str) or not value:
+        return False
+    if mask_endpoint_ids(value) != value:
+        return True
+    if _SIGNED_QUERY.search(value):
+        return True
+    return any(pattern.search(value) for pattern in _SECRET_VALUE_PATTERNS)
+
+
+def is_invalid_snapshot_model(value):
+    """True when a version snapshot ``params.model`` contains an ep- ID, URL, or secret."""
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if stripped.lower().startswith('ep-'):
+        return True
+    if mask_endpoint_ids(stripped) != stripped:
+        return True
+    if _URL_IN_TEXT.search(stripped) or mask_text(stripped) != stripped:
+        return True
+    return has_sensitive_snapshot_value(stripped)
+
+
+def sanitize_snapshot_text(value):
+    """Mask signed URLs, Ark endpoint IDs, and secret tokens inside snapshot text."""
+    if not isinstance(value, str) or not value:
+        return value
+    cleaned = mask_text(value)
+    for pattern in _SECRET_VALUE_PATTERNS:
+        cleaned = pattern.sub('***', cleaned)
+    return cleaned
+
+
+def mask_version_snapshots(snaps):
+    """Defense-in-depth read masking for ``node.versionSnapshots`` without mutating input."""
+    if not isinstance(snaps, dict):
+        return snaps
+    changed = False
+    out = {}
+    for key, snap in snaps.items():
+        if not isinstance(snap, dict):
+            out[key] = snap
+            continue
+        snap_changed = False
+        next_snap = snap
+        text = snap.get('text')
+        if isinstance(text, str) and text:
+            masked_text = sanitize_snapshot_text(text)
+            if masked_text != text:
+                next_snap = {**next_snap, 'text': masked_text}
+                snap_changed = True
+        params = snap.get('params')
+        if isinstance(params, dict):
+            params_changed = False
+            next_params = {}
+            for pkey, pval in params.items():
+                if pkey == 'model' and isinstance(pval, str) and is_invalid_snapshot_model(pval):
+                    params_changed = True
+                    continue
+                if isinstance(pval, str) and pval:
+                    masked_val = sanitize_snapshot_text(pval)
+                    if masked_val != pval:
+                        next_params[pkey] = masked_val
+                        params_changed = True
+                        continue
+                next_params[pkey] = pval
+            if params_changed:
+                next_snap = {**next_snap, 'params': next_params}
+                snap_changed = True
+        if snap_changed:
+            changed = True
+        out[key] = next_snap
+    return out if changed else snaps
+
+
 def public_document(document):
-    """Canvas document copy whose node ``task.error`` texts carry no signed URLs.
+    """Canvas document copy whose node ``task.error`` and ``versionSnapshots`` carry no signed URLs or secrets.
 
     FIX-B1 D1: older write-backs stored the raw task error in the canvas
     document; responses mask it without rewriting the stored history.
+    VERSION-SNAPSHOT-20261123 D1: defense-in-depth masking of ``versionSnapshots`` on read.
     """
     if not isinstance(document, dict) or not isinstance(document.get('nodes'), list):
         return document
     nodes = []
     for node in document['nodes']:
-        task = node.get('task') if isinstance(node, dict) else None
-        if isinstance(task, dict) and isinstance(task.get('error'), str) and task['error']:
-            masked = mask_text(task['error'])
-            if masked != task['error']:
-                node = {**node, 'task': {**task, 'error': masked}}
+        if isinstance(node, dict):
+            task = node.get('task')
+            if isinstance(task, dict) and isinstance(task.get('error'), str) and task['error']:
+                masked = mask_text(task['error'])
+                if masked != task['error']:
+                    node = {**node, 'task': {**task, 'error': masked}}
+            snaps = node.get('versionSnapshots')
+            if isinstance(snaps, dict):
+                masked_snaps = mask_version_snapshots(snaps)
+                if masked_snaps is not snaps:
+                    node = {**node, 'versionSnapshots': masked_snaps}
         nodes.append(node)
     return {**document, 'nodes': nodes}
 

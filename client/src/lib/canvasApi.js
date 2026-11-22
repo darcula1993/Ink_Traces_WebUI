@@ -57,6 +57,19 @@ export async function syncCanvasTasks(workflowId, taskIds) {
   }
   return { revision, nodes }
 }
+// VERSION-SNAPSHOT-20261123: legacy fallback lookup for historical versions without an inline node snapshot.
+export const VERSION_SNAPSHOT_BATCH = 100
+export async function fetchVersionSnapshots(workflowId, mediaIds) {
+  if (!workflowId || !Array.isArray(mediaIds)) return {}
+  const ids = [...new Set(mediaIds.filter(id => typeof id === 'string' && /^[0-9a-f]{32}$/.test(id)))]
+  if (!ids.length) return {}
+  const snapshots = {}
+  for (let index = 0; index < ids.length; index += VERSION_SNAPSHOT_BATCH) {
+    const result = await data(axios.post(`${workflowUrl(workflowId)}/version-snapshots`, { media_ids: ids.slice(index, index + VERSION_SNAPSHOT_BATCH) }))
+    if (result?.snapshots && typeof result.snapshots === 'object' && !Array.isArray(result.snapshots)) Object.assign(snapshots, result.snapshots)
+  }
+  return snapshots
+}
 
 export {selectedProvider,nodeProvider,defaultProviderSelection} from './canvasProviderSelection.js'
 // Last interface chosen per node type; server workspace state keeps it consistent across devices.

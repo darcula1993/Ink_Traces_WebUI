@@ -144,6 +144,13 @@ def sync_task_results(workflow_id):
     return jsonify(success=True, **sync_tasks(workflow_id, body().get('task_ids')))
 
 
+@canvas_api.route(PREFIX + '/<workflow_id>/version-snapshots', methods=['POST'])
+def workflow_version_snapshots(workflow_id):
+    # VERSION-SNAPSHOT-20261123: fallback lookup for historical candidates without inline snapshots.
+    from canvas_writeback import lookup_version_snapshots
+    return jsonify(success=True, snapshots=lookup_version_snapshots(workflow_id, body().get('media_ids')))
+
+
 from canvas_library import register_library_routes
 register_library_routes(canvas_api, body)
 

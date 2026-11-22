@@ -492,7 +492,29 @@ def create_task(task_type, prompt, params, provider=None, external_task_id=None,
         import canvas_store
         if not db.in_transaction:
             db.execute('BEGIN IMMEDIATE')
-        canvas_store.workflow(params['canvas_workflow_id'])
+        wf = canvas_store.workflow(params['canvas_workflow_id'])
+        if (
+            task_type in ('image', 'video', 'audio')
+            and params.get('canvas_node_id')
+            and 'canvas_node_snapshot' not in params
+        ):
+            try:
+                node_id = params['canvas_node_id']
+                node = next(
+                    (
+                        item
+                        for item in (wf.get('document') or {}).get('nodes', [])
+                        if isinstance(item, dict) and item.get('id') == node_id and item.get('type') == task_type
+                    ),
+                    None,
+                )
+                if node is not None:
+                    from canvas_writeback import extract_node_snapshot
+                    snap = extract_node_snapshot(node)
+                    if snap is not None:
+                        params['canvas_node_snapshot'] = snap
+            except Exception:
+                pass
     cur = db.execute(
         '''INSERT INTO tasks
            (type, status, prompt, params, provider, external_task_id, created_at, updated_at, next_run_at, retry_of)

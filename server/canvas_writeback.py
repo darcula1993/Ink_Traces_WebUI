@@ -18,6 +18,7 @@ mirrors the client rules in client/src/lib/canvasTaskPolling.js
 
 Write-back never calls a provider, never retries and never changes a task row.
 """
+import copy
 import json
 import logging
 import sqlite3
@@ -26,7 +27,13 @@ from pathlib import Path
 import canvas_store as store
 import storage
 import tasks as task_db
-from task_public import mask_text, public_document
+from task_public import (
+    is_invalid_snapshot_model,
+    mask_endpoint_ids,
+    mask_text,
+    public_document,
+    sanitize_snapshot_text,
+)
 
 LOG = logging.getLogger('nanobanana.canvas_writeback')
 
@@ -94,6 +101,329 @@ def _matching(node, task_id):
     return isinstance(task, dict) and task.get('id') == task_id
 
 
+GENERATION_TYPES = ('image', 'video', 'audio')
+# client canConnect (canvasReferences.js): target type -> accepted source media kinds; text feeds all.
+ACCEPTS = {'image': ('image',), 'video': ('image', 'video', 'audio'), 'audio': ('image', 'audio')}
+
+
+def _is_endpoint_id(value):
+    return is_invalid_snapshot_model(value)
+
+
+def _allowed_snapshot_param_keys(node_type):
+    from canvas_image_params import IMAGE_FIELDS
+    if node_type == 'image':
+        return IMAGE_FIELDS | {'model', 'ratio', 'resolution'}
+    if node_type == 'video':
+        return {'model', 'ratio', 'resolution', 'duration', 'video_mode', 'omni_reference_task_type', 'generate_audio'}
+    if node_type == 'audio':
+        return store.AUDIO_FIELDS | {'model'}
+    return frozenset()
+
+
+def _sanitize_params(node_type, raw_params):
+    """Return a clean generation-param dict validated for ``node_type`` (no legacy keys, URLs, secrets or ep- IDs)."""
+    if node_type not in GENERATION_TYPES or not isinstance(raw_params, dict):
+        return {}
+    allowed = _allowed_snapshot_param_keys(node_type)
+    cleaned = {}
+    for key, value in raw_params.items():
+        if key not in allowed:
+            continue
+        if key == 'model':
+            if not isinstance(value, str) or not value.strip() or _is_endpoint_id(value):
+                continue
+            value = value.strip()
+        elif key == 'speaker' and node_type == 'audio' and value is None:
+            value = ''
+        elif value is None:
+            continue
+        if isinstance(value, str):
+            value = sanitize_snapshot_text(value)
+        try:
+            store._validate_node_params(node_type, {key: value}, allow_legacy=False)
+        except store.CanvasError:
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
+def _sanitize_provider_selection(node_type, raw_selection):
+    """Return validated ``{'provider': ..., 'profile_id': ...}`` or None."""
+    if node_type not in GENERATION_TYPES or raw_selection is None:
+        return None
+    from canvas_project_settings import validate_node_selection
+    try:
+        return validate_node_selection(node_type, raw_selection)
+    except store.CanvasError:
+        return None
+
+
+def extract_node_snapshot(node):
+    """VERSION-SNAPSHOT-20261123: capture clean {text, params, providerSelection?} from a generation node."""
+    if not isinstance(node, dict):
+        return None
+    node_type = node.get('type')
+    if node_type not in GENERATION_TYPES:
+        return None
+    raw_text = node.get('text')
+    text = sanitize_snapshot_text(raw_text)[:50000] if isinstance(raw_text, str) else ''
+    snap = {
+        'text': text,
+        'params': _sanitize_params(node_type, node.get('params')),
+    }
+    selection = _sanitize_provider_selection(node_type, node.get('providerSelection'))
+    if selection is not None:
+        snap['providerSelection'] = selection
+    return snap
+
+
+def _coerce_bool(value):
+    if type(value) is bool:
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == 'true':
+            return True
+        if lowered == 'false':
+            return False
+    return None
+
+
+def _coerce_positive_int(value):
+    if type(value) is int and value >= 1:
+        return value
+    if isinstance(value, str) and value.strip().isdecimal():
+        parsed = int(value.strip())
+        if parsed >= 1:
+            return parsed
+    return None
+
+
+def _coerce_duration(value):
+    if type(value) is bool or value in (None, ''):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return int(stripped)
+        except ValueError:
+            return stripped if len(stripped) <= 16 else None
+    return None
+
+
+def _reconstruct_legacy_params(task_type, task_params):
+    """Reconstruct clean canvas node ``params`` from a legacy task row's ``params``."""
+    if task_type not in GENERATION_TYPES or not isinstance(task_params, dict):
+        return {}
+    raw = {}
+    model = task_params.get('model')
+    if isinstance(model, str) and model.strip() and not _is_endpoint_id(model):
+        raw['model'] = model.strip()
+    if task_type == 'image':
+        ratio = task_params.get('aspect_ratio') or task_params.get('ratio')
+        if isinstance(ratio, str) and ratio.strip():
+            raw['ratio'] = ratio.strip().lower()
+        resolution = task_params.get('resolution')
+        if isinstance(resolution, str) and resolution.strip() and raw.get('ratio') != 'custom':
+            raw['resolution'] = resolution.strip().upper()
+        for dim_key in ('custom_width', 'custom_height'):
+            parsed = _coerce_positive_int(task_params.get(dim_key))
+            if parsed is not None:
+                raw[dim_key] = parsed
+        output_format = task_params.get('output_format')
+        if isinstance(output_format, str) and output_format.strip():
+            raw['output_format'] = output_format.strip().lower()
+        background = task_params.get('background')
+        if isinstance(background, str) and background.strip():
+            raw['background'] = background.strip().lower()
+        for bool_key in ('watermark', 'lock_aspect_ratio'):
+            if bool_key in task_params:
+                coerced = _coerce_bool(task_params.get(bool_key))
+                if coerced is not None:
+                    raw[bool_key] = coerced
+    elif task_type == 'video':
+        ratio = task_params.get('ratio') or task_params.get('aspect_ratio')
+        if isinstance(ratio, str) and ratio.strip():
+            raw['ratio'] = ratio.strip().lower()
+        resolution = task_params.get('resolution')
+        if isinstance(resolution, str) and resolution.strip():
+            raw['resolution'] = resolution.strip().lower()
+        duration = _coerce_duration(task_params.get('duration'))
+        if duration is not None:
+            raw['duration'] = duration
+        video_mode = task_params.get('video_mode')
+        if isinstance(video_mode, str) and video_mode in ('reference', 'keyframe'):
+            raw['video_mode'] = video_mode
+        omni_type = task_params.get('omni_reference_task_type')
+        if isinstance(omni_type, str) and omni_type in ('auto', 'reference', 'edit', 'extend'):
+            raw['omni_reference_task_type'] = omni_type
+        if 'generate_audio' in task_params:
+            coerced = _coerce_bool(task_params.get('generate_audio'))
+            if coerced is not None:
+                raw['generate_audio'] = coerced
+    elif task_type == 'audio':
+        if 'speaker' in task_params:
+            speaker = task_params.get('speaker')
+            raw['speaker'] = '' if speaker is None else speaker
+        output_format = task_params.get('output_format')
+        if isinstance(output_format, str) and output_format.strip():
+            raw['output_format'] = output_format.strip().lower()
+        sample_rate = _coerce_positive_int(task_params.get('sample_rate'))
+        if sample_rate is not None:
+            raw['sample_rate'] = sample_rate
+        if 'enable_subtitle' in task_params:
+            coerced = _coerce_bool(task_params.get('enable_subtitle'))
+            if coerced is not None:
+                raw['enable_subtitle'] = coerced
+    return _sanitize_params(task_type, raw)
+
+
+def _reconstruct_legacy_selection(task_type, task):
+    """Reconstruct validated ``providerSelection`` from a task row."""
+    from canvas_project_settings import ADAPTERS
+    if task_type not in ADAPTERS:
+        return None
+    task_params = task.get('params') if isinstance(task.get('params'), dict) else {}
+    provider = task.get('provider') or task_params.get('provider')
+    if not isinstance(provider, str) or provider not in ADAPTERS[task_type]:
+        return None
+    profile_id = task_params.get('profile_id')
+    if not (isinstance(profile_id, str) and store.HEX32.fullmatch(profile_id)):
+        profile_id = None
+    return _sanitize_provider_selection(task_type, {'provider': provider, 'profile_id': profile_id})
+
+
+def snapshot_from_task(task, fallback_node=None):
+    """Build a sanitized version snapshot from a task row.
+
+    Prefers ``task['params']['canvas_node_snapshot']`` (captured at submission time, immune
+    to edits made while generating). Falls back to reconstructing from the task's prompt and
+    params for pre-upgrade / legacy tasks; ``fallback_node`` is only used during live
+    write-back of an in-flight task that has no submission snapshot.
+    """
+    if not isinstance(task, dict):
+        return None
+    task_type = task.get('type')
+    if task_type not in GENERATION_TYPES:
+        return None
+    task_params = task.get('params') if isinstance(task.get('params'), dict) else {}
+    stored = task_params.get('canvas_node_snapshot')
+    if isinstance(stored, dict):
+        raw_text = stored.get('text')
+        text = sanitize_snapshot_text(raw_text)[:50000] if isinstance(raw_text, str) else ''
+        params = _sanitize_params(task_type, stored.get('params'))
+        selection = _sanitize_provider_selection(task_type, stored.get('providerSelection'))
+        if selection is None and 'providerSelection' not in stored:
+            selection = _reconstruct_legacy_selection(task_type, task)
+    else:
+        fallback_text = fallback_node.get('text') if isinstance(fallback_node, dict) and isinstance(fallback_node.get('text'), str) else ''
+        raw_text = (fallback_text or task.get('prompt') or '') if fallback_node is not None else (task.get('prompt') or '')
+        text = sanitize_snapshot_text(raw_text)[:50000] if isinstance(raw_text, str) else ''
+        params = _reconstruct_legacy_params(task_type, task_params)
+        if not params and isinstance(fallback_node, dict):
+            params = _sanitize_params(task_type, fallback_node.get('params'))
+        selection = _reconstruct_legacy_selection(task_type, task)
+        if selection is None and isinstance(fallback_node, dict):
+            selection = _sanitize_provider_selection(task_type, fallback_node.get('providerSelection'))
+    snap = {'text': text, 'params': params}
+    if selection is not None:
+        snap['providerSelection'] = selection
+    task_id = task.get('id')
+    if type(task_id) is int and task_id >= 1:
+        snap['taskId'] = task_id
+    created_at = task.get('created_at')
+    if isinstance(created_at, str) and 1 <= len(created_at) <= 40:
+        snap['createdAt'] = created_at
+    return snap
+
+
+def _merge_version_snapshots(existing, new_entries, candidates):
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    for asset_id, snap in new_entries.items():
+        merged[asset_id] = copy.deepcopy(snap)
+    if len(merged) > store.MAX_VERSION_SNAPSHOTS:
+        cand_ids = {c.get('id') for c in (candidates or []) if isinstance(c, dict)}
+        for key in list(merged):
+            if len(merged) <= store.MAX_VERSION_SNAPSHOTS:
+                break
+            if key not in cand_ids:
+                merged.pop(key, None)
+        while len(merged) > store.MAX_VERSION_SNAPSHOTS:
+            merged.pop(next(iter(merged)))
+    return merged
+
+
+def _media_source_task_id(db, media_id):
+    row = db.execute('SELECT source_task_id FROM media WHERE id=?', (media_id,)).fetchone()
+    if row and row['source_task_id']:
+        return row['source_task_id']
+    row = db.execute('SELECT source_task_id FROM media_tombstones WHERE id=?', (media_id,)).fetchone()
+    if row and row['source_task_id']:
+        return row['source_task_id']
+    row = db.execute(
+        'SELECT task_id FROM task_assets WHERE media_id=? AND task_id IS NOT NULL ORDER BY id DESC LIMIT 1',
+        (media_id,),
+    ).fetchone()
+    return row['task_id'] if row and row['task_id'] else None
+
+
+def lookup_version_snapshots(workflow_id, media_ids):
+    """VERSION-SNAPSHOT-20261123: fallback snapshot lookup for historical candidates."""
+    wf = store.workflow(workflow_id)
+    if not isinstance(media_ids, list) or not 1 <= len(media_ids) <= 100:
+        raise store.CanvasError('media_ids 须为1至100个素材编号')
+    if any(not isinstance(item, str) or not store.HEX32.fullmatch(item) for item in media_ids):
+        raise store.CanvasError('media_ids 包含无效素材编号')
+    unique_ids = list(dict.fromkeys(media_ids))
+    inline_by_id = {}
+    for node in (wf.get('document') or {}).get('nodes', []):
+        if isinstance(node, dict) and node.get('type') in GENERATION_TYPES and isinstance(node.get('versionSnapshots'), dict):
+            for key, value in node['versionSnapshots'].items():
+                if key not in inline_by_id and isinstance(value, dict):
+                    inline_by_id[key] = (node['type'], value)
+    db = task_db.get_db()
+    snapshots = {}
+    task_cache = {}
+    for mid in unique_ids:
+        task_id = _media_source_task_id(db, mid)
+        if task_id is None:
+            alias_row = db.execute(
+                "SELECT media_id FROM media_aliases WHERE scope='workflow' AND old_id=?",
+                (mid,),
+            ).fetchone()
+            if alias_row and alias_row['media_id']:
+                task_id = _media_source_task_id(db, alias_row['media_id'])
+        snap = None
+        if task_id is not None:
+            if task_id not in task_cache:
+                task_cache[task_id] = task_db.get_task(task_id)
+            task = task_cache[task_id]
+            if task and task.get('type') in GENERATION_TYPES:
+                snap = snapshot_from_task(task)
+        if snap is None and mid in inline_by_id:
+            node_type, stored = inline_by_id[mid]
+            sanitized = {
+                'text': sanitize_snapshot_text(stored.get('text'))[:50000] if isinstance(stored.get('text'), str) else '',
+                'params': _sanitize_params(node_type, stored.get('params')),
+            }
+            selection = _sanitize_provider_selection(node_type, stored.get('providerSelection'))
+            if selection is not None:
+                sanitized['providerSelection'] = selection
+            if type(stored.get('taskId')) is int and stored['taskId'] >= 1:
+                sanitized['taskId'] = stored['taskId']
+            if isinstance(stored.get('createdAt'), str) and 1 <= len(stored['createdAt']) <= 40:
+                sanitized['createdAt'] = stored['createdAt']
+            snap = sanitized
+        if snap is not None:
+            snapshots[mid] = snap
+    return snapshots
+
+
 def _updated_node(node, task, assets):
     """applyTaskUpdates for one node; None when nothing would change."""
     current = node.get('task') or {}
@@ -112,12 +442,14 @@ def _updated_node(node, task, assets):
         updated.pop('upstreamStale', None)
         updated['asset'] = additions[0]
         updated['selectedCandidateId'] = additions[0]['id']
+        snap = snapshot_from_task(task, fallback_node=node)
+        if snap is not None:
+            updated['versionSnapshots'] = _merge_version_snapshots(
+                node.get('versionSnapshots'),
+                {asset['id']: snap for asset in additions},
+                updated['candidates'],
+            )
     return updated
-
-
-GENERATION_TYPES = ('image', 'video', 'audio')
-# client canConnect (canvasReferences.js): target type -> accepted source media kinds; text feeds all.
-ACCEPTS = {'image': ('image',), 'video': ('image', 'video', 'audio'), 'audio': ('image', 'audio')}
 
 
 def _asset_id(node):
@@ -176,10 +508,11 @@ def derive_downstream(before_nodes, after_nodes, edges, changed_ids):
 
 
 def node_fields(node):
-    """Server write-back fields of a node; absent fields are null / [] / false."""
+    """Server write-back fields of a node; absent fields are null / [] / false / {}."""
     return {'task': node.get('task'), 'candidates': node.get('candidates') or [],
             'asset': node.get('asset'), 'selectedCandidateId': node.get('selectedCandidateId'),
-            'upstreamStale': node.get('upstreamStale') is True}
+            'upstreamStale': node.get('upstreamStale') is True,
+            'versionSnapshots': node.get('versionSnapshots') or {}}
 
 
 def _apply_to_workflow(workflow_id, task):
@@ -358,6 +691,19 @@ def merge_stale_save(db, workflow_id, base_revision, current_revision, document)
             merged['asset'] = source['asset']
             merged['selectedCandidateId'] = source.get('selectedCandidateId')
             merged.pop('upstreamStale', None)
+            src_snaps = source.get('versionSnapshots')
+            if isinstance(src_snaps, dict):
+                added_snaps = {
+                    candidate['id']: src_snaps[candidate['id']]
+                    for candidate in added
+                    if isinstance(candidate, dict) and candidate.get('id') in src_snaps
+                }
+                if added_snaps:
+                    merged['versionSnapshots'] = _merge_version_snapshots(
+                        node.get('versionSnapshots'),
+                        added_snaps,
+                        merged['candidates'],
+                    )
         nodes.append(merged)
     edges = document.get('edges') if isinstance(document.get('edges'), list) else []
     nodes, _ = derive_downstream(document['nodes'], nodes, edges, results)

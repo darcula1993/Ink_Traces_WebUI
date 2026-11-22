@@ -171,19 +171,26 @@ def default_document():
 
 
 def _mask_document_endpoint_errors(document):
-    """Mask Ark endpoint IDs in node.task.error without altering other fields."""
+    """Mask Ark endpoint IDs in node.task.error and sanitize versionSnapshots without altering other fields."""
     if not isinstance(document, dict) or not isinstance(document.get('nodes'), list):
         return document
-    from task_public import mask_endpoint_ids
+    from task_public import mask_endpoint_ids, mask_version_snapshots
     changed = False
     nodes = []
     for node in document['nodes']:
-        task = node.get('task') if isinstance(node, dict) else None
-        if isinstance(task, dict) and isinstance(task.get('error'), str) and task['error']:
-            masked = mask_endpoint_ids(task['error'])
-            if masked != task['error']:
-                node = {**node, 'task': {**task, 'error': masked}}
-                changed = True
+        if isinstance(node, dict):
+            task = node.get('task')
+            if isinstance(task, dict) and isinstance(task.get('error'), str) and task['error']:
+                masked = mask_endpoint_ids(task['error'])
+                if masked != task['error']:
+                    node = {**node, 'task': {**task, 'error': masked}}
+                    changed = True
+            snaps = node.get('versionSnapshots')
+            if isinstance(snaps, dict):
+                masked_snaps = mask_version_snapshots(snaps)
+                if masked_snaps is not snaps:
+                    node = {**node, 'versionSnapshots': masked_snaps}
+                    changed = True
         nodes.append(node)
     return {**document, 'nodes': nodes} if changed else document
 
@@ -243,6 +250,94 @@ def _validate_audio_field(key, value):
 
 
 HEX32 = re.compile(r'[0-9a-f]{32}')
+COMMON_PARAM_KEYS = frozenset({
+    'model', 'ratio', 'resolution', 'duration',
+    'video_mode', 'omni_reference_task_type', 'generate_audio',
+})
+LEGACY_PARAM_KEYS = frozenset({
+    'provider', 'profile_id', 'profile_revision', 'first_frame', 'last_frame',
+})
+SNAPSHOT_KEYS = frozenset({'text', 'params', 'providerSelection', 'taskId', 'createdAt'})
+MAX_VERSION_SNAPSHOTS = 100
+
+
+def _validate_node_params(node_type, params, *, allow_legacy=True):
+    """Validate generation node ``params`` (or a clean version snapshot's ``params``)."""
+    from canvas_image_params import IMAGE_FIELDS, validate_field
+    allowed = IMAGE_FIELDS | AUDIO_FIELDS | COMMON_PARAM_KEYS
+    if allow_legacy:
+        allowed = allowed | LEGACY_PARAM_KEYS
+    if not isinstance(params, dict) or set(params) - allowed:
+        raise CanvasError('节点参数无效')
+    for key, value in params.items():
+        if node_type == 'audio' and key in AUDIO_FIELDS:
+            _validate_audio_field(key, value)
+        elif key in AUDIO_FIELDS - IMAGE_FIELDS:
+            raise CanvasError('此参数仅适用于音频生成节点')
+        elif key in IMAGE_FIELDS:
+            validate_field(node_type, key, value)
+        elif key == 'generate_audio':
+            if type(value) is not bool:
+                raise CanvasError('输出音频开关必须为布尔值')
+        elif key == 'video_mode':
+            if value not in ('reference', 'keyframe'):
+                raise CanvasError('视频模式无效')
+        elif key == 'omni_reference_task_type':
+            if value not in ('auto', 'reference', 'edit', 'extend'):
+                raise CanvasError('任务类型无效')
+        elif key == 'profile_id':
+            if value not in (None, '') and (not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)):
+                raise CanvasError('接口配置ID无效')
+        elif key == 'profile_revision':
+            if value is not None and (type(value) is not int or value < 1):
+                raise CanvasError('接口配置版本无效')
+        elif key == 'duration':
+            auto_video = node_type == 'video' and _number(value, -1, -1)
+            if value not in (None, '') and not (auto_video or _number(value, 0, 3600) or isinstance(value, str) and len(value) <= 16):
+                raise CanvasError('时长参数无效')
+        elif value is not None and (not isinstance(value, str) or len(value) > 240):
+            raise CanvasError('节点参数无效')
+
+
+def _validate_version_snapshots(node):
+    """VERSION-SNAPSHOT-20261123: per-candidate prompt/params/providerSelection snapshots on generation nodes."""
+    if 'versionSnapshots' not in node:
+        return
+    if node.get('type') not in ('image', 'video', 'audio'):
+        raise CanvasError('仅图像、视频、音频生成节点可保存版本快照')
+    snaps = node['versionSnapshots']
+    if not isinstance(snaps, dict) or len(snaps) > MAX_VERSION_SNAPSHOTS:
+        raise CanvasError(f'版本快照须为最多{MAX_VERSION_SNAPSHOTS}项的对象')
+    from canvas_project_settings import validate_node_selection
+    from task_public import has_sensitive_snapshot_value, is_invalid_snapshot_model
+    for asset_id, snap in snaps.items():
+        if not isinstance(asset_id, str) or not 1 <= len(asset_id) <= 64 or not (HEX32.fullmatch(asset_id) or ID.fullmatch(asset_id)):
+            raise CanvasError('版本快照素材编号无效')
+        if not isinstance(snap, dict) or set(snap) - SNAPSHOT_KEYS:
+            raise CanvasError('版本快照字段无效')
+        if 'text' in snap:
+            if not isinstance(snap['text'], str) or len(snap['text']) > 50000:
+                raise CanvasError('版本快照提示词无效')
+            if has_sensitive_snapshot_value(snap['text']):
+                raise CanvasError('版本快照不允许包含签名地址、凭据或接入点编号')
+        if 'params' in snap:
+            _validate_node_params(node['type'], snap['params'], allow_legacy=False)
+            model_val = snap['params'].get('model')
+            if isinstance(model_val, str) and is_invalid_snapshot_model(model_val):
+                raise CanvasError('版本快照模型参数无效')
+            for param_val in snap['params'].values():
+                if isinstance(param_val, str) and has_sensitive_snapshot_value(param_val):
+                    raise CanvasError('版本快照参数不允许包含签名地址、凭据或接入点编号')
+        if 'providerSelection' in snap:
+            validate_node_selection(node['type'], snap['providerSelection'])
+        if 'taskId' in snap:
+            task_id = snap['taskId']
+            if task_id is not None and (type(task_id) is not int or task_id < 1):
+                raise CanvasError('版本快照任务ID必须为正整数')
+        if 'createdAt' in snap:
+            created_at = snap['createdAt']
+            if created_at is not None and (not isinstance(created_at, str) or not 1 <= len(created_at) <= 40):
+                raise CanvasError('版本快照时间无效')
 
 
 def _validate_character_refs(node):
@@ -330,7 +425,12 @@ def _normalize_media_refs(document, db):
         return False
     from media_migrate import document_ids
     try:
-        ids = sorted(i for i in document_ids(document) if HEX32.fullmatch(i))
+        raw_ids = set(document_ids(document))
+        for node in nodes:
+            snaps = node.get('versionSnapshots')
+            if isinstance(snaps, dict):
+                raw_ids.update(k for k in snaps if isinstance(k, str))
+        ids = sorted(i for i in raw_ids if HEX32.fullmatch(i))
     except (TypeError, AttributeError):
         return False
     if not ids:
@@ -384,6 +484,13 @@ def _normalize_media_refs(document, db):
                 node['characterRefs'] = {k: {**v, 'assetIds': unique([mapped(i) for i in v['assetIds']])}
                                          if isinstance(v, dict) and isinstance(v.get('assetIds'), list) else v
                                          for k, v in node['characterRefs'].items()}
+            if isinstance(node.get('versionSnapshots'), dict):
+                rekeyed = {}
+                for k, v in node['versionSnapshots'].items():
+                    new_k = mapped(k)
+                    if new_k not in rekeyed or k == new_k:
+                        rekeyed[new_k] = v
+                node['versionSnapshots'] = rekeyed
         if dead:
             from media_library import strip_document
             nodes = strip_document({'nodes': nodes}, set(dead))[0]['nodes']
@@ -452,7 +559,7 @@ def validate_document(document, workflow_id):
         if not isinstance(node, dict) or not isinstance(node.get('id'), str) or not ID.fullmatch(node['id']) or node['id'] in seen:
             raise CanvasError('节点ID无效或重复')
         seen.add(node['id'])
-        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs', 'size', 'finalized'}:
+        if set(node) - {'id', 'type', 'title', 'x', 'y', 'text', 'params', 'asset', 'candidates', 'selectedCandidateId', 'task', 'referenceAssets', 'referenceGroups', 'rating', 'referenceOrder', 'providerSelection', 'referenceMentions', 'upstreamStale', 'characterRefs', 'size', 'finalized', 'versionSnapshots'}:
             raise CanvasError('未知节点字段')
         if type(node.get('rating', 0)) is not int or not 0 <= node.get('rating', 0) <= 5:
             raise CanvasError('节点评级必须为0至5的整数')
@@ -489,6 +596,7 @@ def validate_document(document, workflow_id):
         if node['type'] == 'asset' and order:
             raise CanvasError('素材节点不能包含参考素材排序')
         _validate_character_refs(node)
+        _validate_version_snapshots(node)
         from canvas_project_settings import validate_node_selection
         validate_node_selection(node['type'], node.get('providerSelection'))
         if not all(_number(node.get(k)) for k in ('x', 'y')):
@@ -497,35 +605,7 @@ def validate_document(document, workflow_id):
             if not isinstance(node.get(key, ''), str) or len(node.get(key, '')) > maximum:
                 raise CanvasError('节点标题或文本无效')
         params = node.get('params', {})
-        from canvas_image_params import IMAGE_FIELDS, validate_field
-        if not isinstance(params, dict) or set(params) - IMAGE_FIELDS - AUDIO_FIELDS - {'provider', 'model', 'ratio', 'resolution', 'duration', 'profile_id', 'profile_revision', 'video_mode', 'first_frame', 'last_frame', 'omni_reference_task_type', 'generate_audio'}:
-            raise CanvasError('节点参数无效')
-        for key, value in params.items():
-            if node['type'] == 'audio' and key in AUDIO_FIELDS:
-                _validate_audio_field(key, value)
-            elif key in AUDIO_FIELDS - IMAGE_FIELDS:
-                raise CanvasError('此参数仅适用于音频生成节点')
-            elif key in IMAGE_FIELDS:
-                validate_field(node['type'], key, value)
-            elif key == 'generate_audio':
-                if type(value) is not bool:
-                    raise CanvasError('输出音频开关必须为布尔值')
-            elif key == 'video_mode':
-                if value not in ('reference', 'keyframe'): raise CanvasError('视频模式无效')
-            elif key == 'omni_reference_task_type':
-                if value not in ('auto', 'reference', 'edit', 'extend'): raise CanvasError('任务类型无效')
-            elif key == 'profile_id':
-                if value not in (None, '') and (not isinstance(value, str) or not re.fullmatch(r'[0-9a-f]{32}', value)):
-                    raise CanvasError('接口配置ID无效')
-            elif key == 'profile_revision':
-                if value is not None and (type(value) is not int or value < 1):
-                    raise CanvasError('接口配置版本无效')
-            elif key == 'duration':
-                auto_video = node['type'] == 'video' and _number(value, -1, -1)
-                if value not in (None, '') and not (auto_video or _number(value, 0, 3600) or isinstance(value, str) and len(value) <= 16):
-                    raise CanvasError('时长参数无效')
-            elif value is not None and (not isinstance(value, str) or len(value) > 240):
-                raise CanvasError('节点参数无效')
+        _validate_node_params(node['type'], params, allow_legacy=True)
         if node.get('asset') is not None:
             validate_asset(node['asset'], placeholder=True)
             if node['type'] not in ('text', 'asset') and node['asset']['kind'] != node['type']:
@@ -684,6 +764,7 @@ def strip_workflow_runtime(document):
                 node['candidates'] = []
                 node['selectedCandidateId'] = None
                 node.pop('finalized', None)
+                node.pop('versionSnapshots', None)
     return cloned
 
 

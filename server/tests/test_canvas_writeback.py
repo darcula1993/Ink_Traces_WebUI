@@ -171,7 +171,7 @@ def test_two_windows_receive_result_without_conflict(env):
     assert first.json == second.json
     assert first.json['revision'] == saved['revision'] + 1 and first.json['failed'] == []
     fields = first.json['nodes']['n1']
-    assert set(fields) == {'task', 'candidates', 'asset', 'selectedCandidateId', 'upstreamStale'}
+    assert set(fields) == {'task', 'candidates', 'asset', 'selectedCandidateId', 'upstreamStale', 'versionSnapshots'}
     assert fields['task']['status'] == 'succeeded' and len(fields['candidates']) == 2
     # both windows adopt the server revision and keep saving normally
     doc = a.get(f"/api/canvas/workflows/{wf['id']}").json['workflow']

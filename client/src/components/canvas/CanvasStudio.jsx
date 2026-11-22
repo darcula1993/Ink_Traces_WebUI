@@ -66,7 +66,8 @@ import useNodeGeneration,{quickGenerationBlock} from './useNodeGeneration'
 import {useCanvasEstimate} from './CanvasVideoEstimate'
 import CanvasLibrary from './CanvasLibrary'
 import {resolveLibraryItems} from '../../lib/libraryApi'
-import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, duplicateCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, getCanvasCapabilities, submitCanvasGeneration, cancelCanvasTask, getCanvasTask, getTaskDetail, syncCanvasTasks, getTaskStatuses, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject, bulkDeleteProjects } from '../../lib/canvasApi'
+import { listCanvasProjects, createCanvasProject, renameCanvasProject, listCanvasWorkflows, createCanvasWorkflow, duplicateCanvasWorkflow, getCanvasWorkflow, saveCanvasWorkflow, saveCanvasWorkflowKeepalive, keepaliveBodyFits, getCanvasCapabilities, submitCanvasGeneration, cancelCanvasTask, getCanvasTask, getTaskDetail, syncCanvasTasks, fetchVersionSnapshots, getTaskStatuses, getCanvasProviderPreferences, saveCanvasProviderPreferences, selectedProvider, defaultProviderSelection, nodeProvider, deleteCanvasObject, bulkDeleteProjects } from '../../lib/canvasApi'
+import { GENERATION_TYPES, applyVersionSnapshot, missingSnapshotIds } from '../../lib/canvasVersionSnapshots'
 import { applyBatchParamPatch, BATCH_FIELD_LABELS, homogeneousGenerationType } from '../../lib/canvasBatchParams'
 import { toSelection } from '../../lib/canvasProviderSelection'
 import './canvas.css'
@@ -172,6 +173,9 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const [contextMenu,setContextMenu] = useState(null)
   const [pendingDeletions,setPendingDeletions]=useState(false)
   const [nodeMenu,setNodeMenu]=useState(null),[preview,setPreview]=useState(null),[historyNode,setHistoryNode]=useState(null),[compareNodeId,setCompareNodeId]=useState(null),[annotation,setAnnotation]=useState(null),[deletion,setDeletion]=useState(null),[assetRefresh,setAssetRefresh]=useState(0),[mediaRefresh,setMediaRefresh]=useState(0)
+  // VERSION-SNAPSHOT-20261123: runtime cache of legacy version snapshots fetched on demand (media_id -> snapshot | null).
+  const [fetchedVersionSnapshots, setFetchedVersionSnapshots] = useState({})
+  const fetchedSnapshotsRef = useRef({}), snapshotInflightRef = useRef(new Map())
   const [ledgerOpen,setLedgerOpen]=useState(false),[sequencePreviewOpen,setSequencePreviewOpen]=useState(false),[exportPackOpen,setExportPackOpen]=useState(false)
   const [saveTemplateState,setSaveTemplateState]=useState(null),[saveTemplateBusy,setSaveTemplateBusy]=useState(false),[saveTemplateError,setSaveTemplateError]=useState('')
   const [applyTemplateAnchor,setApplyTemplateAnchor]=useState(undefined),[templatesList,setTemplatesList]=useState([]),[templatesLoading,setTemplatesLoading]=useState(false),[templateBusyId,setTemplateBusyId]=useState(null),[templateError,setTemplateError]=useState(''),[templateWarning,setTemplateWarning]=useState(null)
@@ -646,7 +650,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     writeLastLocation({ projectId: nextProjectId, workflowId: value.id })
     syncCanvasUrlRoute({ projectId: nextProjectId, workflowId: value.id })
     version.current = hadSubmitting ? 1 : 0; savedVersion.current = 0; contentVersion.current = version.current; savedContentVersion.current = 0; conflictRef.current = false
-    setOverlapCount(countOverlappingUnits(normalized)); setWorkflow(value); setDoc(normalized); setTitle(value.title); setSelected(null); setSelectedEdge(null); setConnection(null); setContextMenu(null); setNodeMenu(null);setHistoryNode(null);setCompareNodeId(null);setPreview(null);setSequencePreviewOpen(false);setSaveTemplateState(null);setApplyTemplateAnchor(undefined);setTemplateWarning(null); setConflict(false); setSaveState(hadSubmitting ? '提交待核查' : '已保存')
+    setOverlapCount(countOverlappingUnits(normalized)); setWorkflow(value); setDoc(normalized); setTitle(value.title); setSelected(null); setSelectedEdge(null); setConnection(null); setContextMenu(null); setNodeMenu(null);setHistoryNode(null);setCompareNodeId(null);fetchedSnapshotsRef.current={};snapshotInflightRef.current.clear();setFetchedVersionSnapshots({});setPreview(null);setSequencePreviewOpen(false);setSaveTemplateState(null);setApplyTemplateAnchor(undefined);setTemplateWarning(null); setConflict(false); setSaveState(hadSubmitting ? '提交待核查' : '已保存')
     lastSaveFailed.current = false; setDraftOffer(null); checkDraftRef.current?.(value, 0)
   }, [])
   // FIX-B2 rework: compare a local draft with the opened version. Contained → cleared silently. Same revision as
@@ -1738,16 +1742,77 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
       const result=switchAssetVersion(docRef.current,owner.nodeId,asset,true);edit(()=>result.document,{description:owner.description});await save();setReplaceOwner(null);if(result.warnings.length)showError(result.warnings.join('；'))
     }finally{ioRef.current--;setIoCount(ioRef.current)}
   }
-  // Asset nodes keep switchAssetVersion (title follows the file, downstream bindings); generation nodes use the same
-  // asset + selectedCandidateId patch the panel's 版本 buttons used. Both save right away.
-  function chooseVersion(id,asset){
-    if(ioRef.current)return
+  const ensureVersionSnapshots = useCallback(async (workflowId, mediaIds) => {
+    if (!workflowId || !Array.isArray(mediaIds) || !mediaIds.length) return fetchedSnapshotsRef.current
+    const toFetch = [], pending = []
+    for (const id of mediaIds) {
+      if (Object.hasOwn(fetchedSnapshotsRef.current, id)) continue
+      const inflight = snapshotInflightRef.current.get(id)
+      if (inflight) { pending.push(inflight); continue }
+      toFetch.push(id)
+    }
+    if (toFetch.length) {
+      const promise = fetchVersionSnapshots(workflowId, toFetch)
+        .then(found => {
+          if (!mounted.current || workflowRef.current?.id !== workflowId) return {}
+          const next = { ...fetchedSnapshotsRef.current }
+          for (const id of toFetch) {
+            const snap = found?.[id]
+            next[id] = snap && typeof snap === 'object' && !Array.isArray(snap) ? snap : null
+          }
+          fetchedSnapshotsRef.current = next
+          setFetchedVersionSnapshots(next)
+          return found || {}
+        })
+        .catch(() => ({}))
+        .finally(() => {
+          for (const id of toFetch) {
+            if (snapshotInflightRef.current.get(id) === promise) snapshotInflightRef.current.delete(id)
+          }
+        })
+      for (const id of toFetch) snapshotInflightRef.current.set(id, promise)
+      pending.push(promise)
+    }
+    if (pending.length) await Promise.all(pending)
+    return fetchedSnapshotsRef.current
+  }, [])
+  // Asset nodes keep switchAssetVersion (title follows the file, downstream bindings); generation nodes switch
+  // asset + selectedCandidateId AND restore the version's prompt + generation params + providerSelection in ONE
+  // undoable step (VERSION-SNAPSHOT-20261123). Both save right away.
+  async function chooseVersion(id,asset){
+    if(ioRef.current||conflictRef.current)return
     try{
+      const ownerWorkflowId=workflowRef.current?.id
+      const initialNode=docRef.current.nodes.find(item=>item.id===id)
+      if(!initialNode)throw new Error('节点不存在')
+      if(initialNode.type==='asset'){
+        const result=switchAssetVersion(docRef.current,id,asset)
+        edit(()=>result.document)
+        if(result.warnings.length)showError(result.warnings.join('；'))
+        closeHistory();save().catch(showError)
+        return
+      }
+      if(!initialNode.candidates?.some(item=>item.id===asset.id))throw new Error('历史版本不存在')
+      if(initialNode.asset?.id===asset.id){closeHistory();return}
+      let snapshot=initialNode.versionSnapshots?.[asset.id]||fetchedSnapshotsRef.current[asset.id]||null
+      if(!snapshot&&!Object.hasOwn(fetchedSnapshotsRef.current,asset.id)&&ownerWorkflowId&&/^[0-9a-f]{32}$/.test(asset.id)){
+        await ensureVersionSnapshots(ownerWorkflowId,[asset.id])
+        if(!mounted.current||workflowRef.current?.id!==ownerWorkflowId)return
+        snapshot=fetchedSnapshotsRef.current[asset.id]||null
+      }
       const node=docRef.current.nodes.find(item=>item.id===id)
-      if(!node)throw new Error('节点不存在')
-      if(node.type==='asset'){const result=switchAssetVersion(docRef.current,id,asset);edit(()=>result.document);if(result.warnings.length)showError(result.warnings.join('；'))}
-      else{if(!node.candidates?.some(item=>item.id===asset.id))throw new Error('历史版本不存在');if(node.asset?.id!==asset.id)patchNode(id,{asset,selectedCandidateId:asset.id})}
+      if(!node||!node.candidates?.some(item=>item.id===asset.id))return
+      const effectiveSnapshot=node.versionSnapshots?.[asset.id]||snapshot
+      const idx=(node.candidates||[]).findIndex(item=>item.id===asset.id)
+      const versionLabel=idx>=0?`版本 ${idx+1}`:(asset.name||'所选版本')
+      const applied=applyVersionSnapshot(node,asset,effectiveSnapshot,{capabilities})
+      const syncSuffix=applied.restoredAny?'（已同步提示词与参数）':''
+      edit(current=>({...current,nodes:current.nodes.map(item=>item.id===id?applied.node:item)}),{description:`切换到节点“${node.title}”的${versionLabel}${syncSuffix}`})
       closeHistory();save().catch(showError)
+      if(applied.restoredAny){
+        const detail=applied.restoredPrompt&&applied.restoredParams?'提示词与生成参数':applied.restoredPrompt?'提示词':applied.restoredParams?'生成参数':'生成接口'
+        notify?.(`已切换到${versionLabel}，已同步${detail}（${canvasModifier()}+Z 可撤销）`,'success')
+      }
     }catch(e){showError(e)}
   }
   // V24-W2-COMPARE-FINAL-20261121: finalized toggle (undoable) and side-by-side compare modal adoption.
@@ -1781,28 +1846,53 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     setCompareNodeId(null)
     requestAnimationFrame(()=>{if(target==='toolbar'&&toolbarRef.current){toolbarRef.current.focusAction('history');return}focusSelection()})
   }
-  function adoptComparedVersion(id,asset,{finalize=false}={}){
+  async function adoptComparedVersion(id,asset,{finalize=false}={}){
     if(ioRef.current||conflictRef.current)return
     try{
-      const node=docRef.current.nodes.find(item=>item.id===id)
-      if(!node)throw new Error('节点不存在')
-      const switching=node.asset?.id!==asset.id
-      const markingFinal=finalize&&node.finalized!==true
+      const ownerWorkflowId=workflowRef.current?.id
+      const initialNode=docRef.current.nodes.find(item=>item.id===id)
+      if(!initialNode)throw new Error('节点不存在')
+      const switching=initialNode.asset?.id!==asset.id
+      const markingFinal=finalize&&initialNode.finalized!==true
       if(!switching&&!markingFinal)return
-      const idx=(node.candidates||[]).findIndex(item=>item.id===asset.id)
+      const idx=(initialNode.candidates||[]).findIndex(item=>item.id===asset.id)
       const versionLabel=idx>=0?`版本 ${idx+1}`:(asset.name||'所选版本')
-      if(node.type==='asset'){
+      if(initialNode.type==='asset'){
         const base=switching?switchAssetVersion(docRef.current,id,asset):{document:docRef.current,warnings:[]}
         const nextDoc=markingFinal?{...base.document,nodes:base.document.nodes.map(item=>item.id===id?{...item,finalized:true}:item)}:base.document
-        edit(()=>nextDoc,{description:finalize?`采用节点“${node.title}”的${versionLabel}并标为定稿`:`将节点“${node.title}”设为${versionLabel}`})
+        edit(()=>nextDoc,{description:finalize?`采用节点“${initialNode.title}”的${versionLabel}并标为定稿`:`将节点“${initialNode.title}”设为${versionLabel}`})
         if(base.warnings.length)showError(base.warnings.join('；'))
-      }else{
-        if(!node.candidates?.some(item=>item.id===asset.id))throw new Error('历史版本不存在')
-        const patch={...(switching?{asset,selectedCandidateId:asset.id}:{}),...(markingFinal?{finalized:true}:{})}
-        edit(current=>({...current,nodes:current.nodes.map(item=>item.id===id?{...item,...patch}:item)}),{description:finalize?`采用节点“${node.title}”的${versionLabel}并标为定稿`:`将节点“${node.title}”设为${versionLabel}`})
+        save().catch(showError)
+        notify?.(finalize?`已采用${versionLabel}并标为定稿`:`已将${versionLabel}设为当前采用版`,'success')
+        return
       }
+      if(!initialNode.candidates?.some(item=>item.id===asset.id))throw new Error('历史版本不存在')
+      let snapshot=switching?(initialNode.versionSnapshots?.[asset.id]||fetchedSnapshotsRef.current[asset.id]||null):null
+      if(switching&&!snapshot&&!Object.hasOwn(fetchedSnapshotsRef.current,asset.id)&&ownerWorkflowId&&/^[0-9a-f]{32}$/.test(asset.id)){
+        await ensureVersionSnapshots(ownerWorkflowId,[asset.id])
+        if(!mounted.current||workflowRef.current?.id!==ownerWorkflowId)return
+        snapshot=fetchedSnapshotsRef.current[asset.id]||null
+      }
+      const node=docRef.current.nodes.find(item=>item.id===id)
+      if(!node||!node.candidates?.some(item=>item.id===asset.id))return
+      const nowSwitching=node.asset?.id!==asset.id
+      const nowFinalizing=finalize&&node.finalized!==true
+      if(!nowSwitching&&!nowFinalizing)return
+      let nextNode=node,restoredAny=false
+      if(nowSwitching){
+        const effectiveSnapshot=node.versionSnapshots?.[asset.id]||snapshot
+        const applied=applyVersionSnapshot(node,asset,effectiveSnapshot,{capabilities})
+        nextNode=applied.node;restoredAny=applied.restoredAny
+      }
+      if(nowFinalizing)nextNode={...nextNode,finalized:true}
+      const syncSuffix=restoredAny?'（已同步提示词与参数）':''
+      edit(current=>({...current,nodes:current.nodes.map(item=>item.id===id?nextNode:item)}),{description:finalize?`采用节点“${node.title}”的${versionLabel}并标为定稿${syncSuffix}`:`将节点“${node.title}”设为${versionLabel}${syncSuffix}`})
       save().catch(showError)
-      notify?.(finalize?`已采用${versionLabel}并标为定稿`:`已将${versionLabel}设为当前采用版`,'success')
+      if(restoredAny){
+        notify?.(finalize?`已采用${versionLabel}并标为定稿（已同步提示词与生成参数，${canvasModifier()}+Z 可撤销）`:`已采用${versionLabel}（已同步提示词与生成参数，${canvasModifier()}+Z 可撤销）`,'success')
+      }else{
+        notify?.(finalize?`已采用${versionLabel}并标为定稿`:`已将${versionLabel}设为当前采用版`,'success')
+      }
     }catch(e){showError(e)}
   }
   // Local material deletion rewrites affected canvases on the server (revision+1).
@@ -1835,14 +1925,24 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     if(!node)return
     if(node.type==='asset'){deleteNode(id);return}
     const candidates=(node.candidates||[]).filter(candidate=>!(isMediaAsset(candidate)&&isDeletedMedia(candidate.id)&&!isTrashedMedia(candidate.id))),asset=candidates.at(-1)||null
-    edit(current=>({...current,nodes:current.nodes.map(item=>item.id===id?{...item,candidates,asset,selectedCandidateId:asset?.id||null}:item)}),{description:`移除已删除的结果：节点“${node.title}”`})
+    const keepIds=new Set(candidates.map(candidate=>candidate.id))
+    const filteredSnapshots=node.versionSnapshots&&typeof node.versionSnapshots==='object'&&!Array.isArray(node.versionSnapshots)?Object.fromEntries(Object.entries(node.versionSnapshots).filter(([key])=>keepIds.has(key))):null
+    edit(current=>({...current,nodes:current.nodes.map(item=>{
+      if(item.id!==id)return item
+      const next={...item,candidates,asset,selectedCandidateId:asset?.id||null}
+      if(filteredSnapshots){
+        if(Object.keys(filteredSnapshots).length)next.versionSnapshots=filteredSnapshots
+        else delete next.versionSnapshots
+      }
+      return next
+    })}),{description:`移除已删除的结果：节点“${node.title}”`})
   }
   async function revealInLibrary(asset){
     setNodeMenu(null)
     try{const media=isMediaAsset(asset)?{id:asset.id}:await resolveAssetMediaId(asset);if(!media)throw new Error('该结果尚未进入素材库（等待迁移）');railRef.current?.open('assets',{focus:false});setRevealMedia({id:media.id,nonce:Date.now()})}catch(e){showError(e)}
   }
   async function resolveAssetMediaId(asset){const item=(await lookupMedia([asset.url])).get(asset.url);return item?.status==='ok'?{id:item.media_id}:null}
-  function clearWorkflow(){editHistory.current.clear();pasteCount.current=0;refreshHistory();workflowRef.current=null;docRef.current=fresh();version.current=0;savedVersion.current=0;contentVersion.current=0;savedContentVersion.current=0;setWorkflow(null);setDoc(docRef.current);setSelected(null);setHistoryNode(null);setCompareNodeId(null);setSequencePreviewOpen(false);setSaveTemplateState(null);setApplyTemplateAnchor(undefined);setTemplateWarning(null);setTitle('');titleRef.current='';setSaveState('尚未创建');setConflict(false);conflictRef.current=false}
+  function clearWorkflow(){editHistory.current.clear();pasteCount.current=0;refreshHistory();workflowRef.current=null;docRef.current=fresh();version.current=0;savedVersion.current=0;contentVersion.current=0;savedContentVersion.current=0;setWorkflow(null);setDoc(docRef.current);setSelected(null);setHistoryNode(null);setCompareNodeId(null);fetchedSnapshotsRef.current={};snapshotInflightRef.current.clear();setFetchedVersionSnapshots({});setSequencePreviewOpen(false);setSaveTemplateState(null);setApplyTemplateAnchor(undefined);setTemplateWarning(null);setTitle('');titleRef.current='';setSaveState('尚未创建');setConflict(false);conflictRef.current=false}
   async function refreshNavigation() {
     const remaining=await listCanvasProjects();setProjects(remaining)
     const next=remaining.find(item=>item.id===projectIdRef.current) || remaining[0]
@@ -1950,6 +2050,32 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
   const contextNode=doc.nodes.find(node=>node.id===nodeMenu?.id),contextDeleted=isMediaAsset(contextNode?.asset)&&isDeletedMedia(contextNode.asset.id),contextLiveVersions=(contextNode?.candidates||[]).filter(asset=>asset?.id&&!(isMediaAsset(asset)&&isDeletedMedia(asset.id)))
   const historyNodeData=historyNode?doc.nodes.find(node=>node.id===historyNode)||null:null
   const compareNodeData=compareNodeId?doc.nodes.find(node=>node.id===compareNodeId)||null:null
+  const snapshotTargetNode=historyNodeData||compareNodeData
+  const snapshotMissingKey=useMemo(()=>{
+    if(!snapshotTargetNode)return ''
+    return missingSnapshotIds(snapshotTargetNode).filter(id=>!Object.hasOwn(fetchedVersionSnapshots,id)).join(',')
+  },[snapshotTargetNode,fetchedVersionSnapshots])
+  useEffect(()=>{
+    const wfId=workflow?.id
+    if(!wfId||!snapshotMissingKey)return
+    ensureVersionSnapshots(wfId,snapshotMissingKey.split(','))
+  },[workflow?.id,snapshotMissingKey,ensureVersionSnapshots])
+  const mergedNodeSnapshots=useCallback(node=>{
+    if(!node||!GENERATION_TYPES.has(node.type))return {}
+    const merged={}
+    for(const candidate of node.candidates||[]){
+      const id=candidate?.id
+      if(!id)continue
+      const fetched=fetchedVersionSnapshots[id]
+      if(fetched&&typeof fetched==='object')merged[id]=fetched
+    }
+    if(node.versionSnapshots&&typeof node.versionSnapshots==='object'&&!Array.isArray(node.versionSnapshots)){
+      for(const [id,snap] of Object.entries(node.versionSnapshots)){
+        if(snap&&typeof snap==='object')merged[id]=snap
+      }
+    }
+    return merged
+  },[fetchedVersionSnapshots])
   const contextDeleteBlocked=generationLocks.current.has(nodeMenu?.id)||isBusyTaskStatus(contextNode?.task?.status)
   const undoDescription=editHistory.current.past.at(-1)?.description,redoDescription=editHistory.current.future.at(-1)?.description
   // CANVAS-LAYOUT-1-20261117: editing state of the single selected node, shared by its card prompt and the panel.
@@ -2186,7 +2312,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
         ?<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="音频操作" historyOpen={historyNode===selectedNode.id} onPreview={()=>openPreview(selectedNode.id)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} {...((selectedNode.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(selectedNode.id)}:{})} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>
         :<CanvasNodeToolbar ref={toolbarRef} node={selectedNode} rect={nodeScreenRect(selectedNode,view)} surface={surfaceSize} avoid={toolbarAvoidRects} busy={ioCount>0} label="图片操作" historyOpen={historyNode===selectedNode.id} onEdit={()=>editNodeImage(selectedNode.id)} onRotate={()=>rotateNode(selectedNode.id)} onAnnotate={()=>annotateNode(selectedNode.id)} onDecomposeLayer={()=>openNodeInLayerStudio(selectedNode)} onDownload={()=>downloadAsset(selectedNode.asset).catch(showError)} onPreview={()=>openPreview(selectedNode.id)} onHistory={()=>openNodeHistory(selectedNode.id)} onMore={event=>openNodeMenu(selectedNode.id,event)} onEscape={focusSelection}/>)}
       {nodeMenu && <CanvasNodeMenu onPreview={contextNode?.asset?.url&&!contextDeleted&&['image','video','audio'].includes(mediaKind(contextNode))?()=>{const id=nodeMenu.id;setNodeMenu(null);openPreview(id)}:null} previewReason={contextNode?.type==='text'?'文本节点没有媒体内容':contextDeleted?'素材已在素材库中删除':'节点还没有生成或选择结果，暂无可预览内容'} isAsset={contextNode?.type==='asset'} deleteDisabled={contextDeleteBlocked} position={nodeMenu} bounds={surfaceSize} busy={ioCount>0} onClose={()=>setNodeMenu(null)} onCopyToClipboard={()=>{const ids=interaction.selectedIds.includes(nodeMenu.id)?interaction.selectedIds:[nodeMenu.id];copySelection(ids);setNodeMenu(null)}} onCopy={()=>{const node=docRef.current.nodes.find(n=>n.id===nodeMenu.id);if(node)copyNode(node);setNodeMenu(null)}} onDelete={()=>{deleteNode(nodeMenu.id);setNodeMenu(null)}} onReplace={()=>replaceNodeAsset(nodeMenu.id)} onReplaceFromLibrary={()=>replaceNodeFromLibrary(nodeMenu.id)} {...(contextNode?.type==='asset'&&contextNode.asset?.kind==='video'&&contextNode.asset?.url&&contextNode.asset?.id&&!contextDeleted?{onSplitVideo:()=>openVideoSplit(contextNode.id)}:{})} {...(canFollowUpVideoNode(contextNode)?{onExtendVideo:()=>createVideoFollowUp(contextNode.id,'extend'),onEditVideo:()=>createVideoFollowUp(contextNode.id,'edit')}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='image'?{onDecomposeLayer:()=>openNodeInLayerStudio(contextNode)}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&contextNode.asset.id&&mediaKind(contextNode)==='image'&&workflow?.id?{onAddToCharacter:()=>{setCharacterTarget({workflowId:workflow.id,asset:contextNode.asset});setNodeMenu(null)}}:{})} {...(contextNode?.asset?.id&&['image','video','audio'].includes(mediaKind(contextNode))&&!(isMediaAsset(contextNode.asset)&&isDeletedMedia(contextNode.asset.id))?{onRevealInLibrary:()=>revealInLibrary(contextNode.asset),onMoveToFolder:()=>{openMovingAssets([contextNode.asset],{nodeId:contextNode.id});setNodeMenu(null)}}:{})} {...((contextNode?.candidates?.length||0)>1?{onHistory:()=>openNodeHistory(nodeMenu.id,'node'),versionCount:contextNode.candidates.length}:{})} {...(contextLiveVersions.length>1?{onMoveAllVersions:()=>{openMovingAssets(contextLiveVersions,{nodeId:contextNode.id});setNodeMenu(null)},liveVersionCount:contextLiveVersions.length}:{})} {...(contextNode?.asset?.url&&!contextDeleted&&mediaKind(contextNode)==='video'?{onCaptureTail:()=>captureFrame(nodeMenu.id,true),onCaptureCurrent:()=>captureFrame(nodeMenu.id,false),captureCurrentNote:currentFrameNote(nodeMenu.id)}:{})}/>}
-      {historyNodeData && <CanvasVersionPopover node={historyNodeData} rect={nodeScreenRect(historyNodeData,view)} surface={surfaceSize} busy={ioCount>0} isGone={asset=>isMediaAsset(asset)&&isDeletedMedia(asset.id)} onChoose={asset=>chooseVersion(historyNodeData.id,asset)} onCompare={openCompareModal} onToggleFinalized={toggleNodeFinalized} onClose={closeHistory}/>}
+      {historyNodeData && <CanvasVersionPopover node={historyNodeData} snapshots={mergedNodeSnapshots(historyNodeData)} rect={nodeScreenRect(historyNodeData,view)} surface={surfaceSize} busy={ioCount>0} isGone={asset=>isMediaAsset(asset)&&isDeletedMedia(asset.id)} onChoose={asset=>chooseVersion(historyNodeData.id,asset)} onCompare={openCompareModal} onToggleFinalized={toggleNodeFinalized} onClose={closeHistory}/>}
       {imageEditing && createPortal(<React.Suspense fallback={<div className="cv-studio-overlay" role="status"><div>正在加载编辑器…</div></div>}><ImageAssetEditor asset={imageEditing.asset} onSave={file=>saveImageResult(imageEditing.owner,file)} onClose={closeImageEditor}/></React.Suspense>,document.body)}
       {videoSplitting && createPortal(<CanvasVideoSplitDialog asset={videoSplitting.asset} title={videoSplitting.title} onConfirm={payload=>confirmVideoSplit(videoSplitting,payload)} onClose={closeVideoSplit}/>,document.body)}
       {annotation && <React.Suspense fallback={<div className="cv-studio-overlay" role="status">正在加载标注工具…</div>}><CanvasImageAnnotator key={annotation.asset.id} asset={annotation.asset} style={{zIndex:50}} onSave={file=>saveImageResult(annotation.owner,file)} onClose={closeAnnotation}/></React.Suspense>}
@@ -2254,7 +2380,7 @@ export default function CanvasStudio({ notify, providerRevision = 0,  beforeLeav
     {saveTemplateState && <SaveGroupTemplateDialog open defaultName={saveTemplateState.defaultName} nodeCount={saveTemplateState.nodeCount} edgeCount={saveTemplateState.edgeCount} skippedAssetCount={saveTemplateState.skippedAssetCount} busy={saveTemplateBusy} error={saveTemplateError} onSubmit={submitSaveTemplate} onClose={()=>{if(!saveTemplateBusy){setSaveTemplateState(null);setSaveTemplateError('')}}}/>}
     {applyTemplateAnchor !== undefined && <ApplyGroupTemplateDialog open templates={templatesList} loading={templatesLoading} busyId={templateBusyId} error={templateError} onApply={applyGroupTemplate} onDelete={handleDeleteTemplate} onClose={()=>{if(!templateBusyId)setApplyTemplateAnchor(undefined)}}/>}
     {templateWarning && createPortal(<div className="cv-studio-overlay" style={{zIndex:3200}} onPointerDown={e=>{e.stopPropagation();if(e.target===e.currentTarget)setTemplateWarning(null)}}><div className="cv-template-warning-dialog" role="alertdialog" aria-modal="true" aria-labelledby="cv-tpl-warn-title" data-testid="template-unavailable-dialog" tabIndex={-1} onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();setTemplateWarning(null)}}}><h3 id="cv-tpl-warn-title">部分模板节点接口不可用</h3><p>结构模板“{templateWarning.templateName}”已套用到画布，但以下节点原绑定的接口已停用或已删除。系统已保留原绑定，<strong>不会自动切换其他账号</strong>，请点击对应节点重新选择接口：</p><ul>{templateWarning.items.map(item=><li key={item.nodeId}><strong>{item.nodeTitle}</strong>（原接口：{item.providerSelection?.provider||'未知'}）</li>)}</ul><div className="cv-template-warning-actions"><button type="button" className="btn btn-primary" autoFocus onClick={()=>setTemplateWarning(null)}>我知道了</button></div></div></div>,document.body)}
-    {compareNodeData && <CanvasVersionCompareModal key={compareNodeData.id} node={compareNodeData} busy={ioCount>0} isGone={asset=>isMediaAsset(asset)&&isDeletedMedia(asset.id)} onChoose={(asset,options)=>adoptComparedVersion(compareNodeData.id,asset,options)} onToggleFinalized={next=>toggleNodeFinalized(compareNodeData.id,next)} onClose={closeCompareModal}/>}
+    {compareNodeData && <CanvasVersionCompareModal key={compareNodeData.id} node={compareNodeData} snapshots={mergedNodeSnapshots(compareNodeData)} busy={ioCount>0} isGone={asset=>isMediaAsset(asset)&&isDeletedMedia(asset.id)} onChoose={(asset,options)=>adoptComparedVersion(compareNodeData.id,asset,options)} onToggleFinalized={next=>toggleNodeFinalized(compareNodeData.id,next)} onClose={closeCompareModal}/>}
     {pendingDeletions && <PendingDeletions onClose={()=>setPendingDeletions(false)} onChanged={refreshNavigation}/>}
     {deletion && <DeleteCanvasDialog target={deletion} onClose={()=>setDeletion(null)} onConfirm={confirmDeletion}/>}
     {groupDraft && <SidebarNameDialog kind="节点组" draft={groupDraft} onChange={setGroupDraft} onClose={()=>setGroupDraft(null)} onSave={()=>{const title=groupDraft.title.trim().slice(0,100);if(title)edit(current=>({...current,groups:current.groups.map(group=>group.id===groupDraft.id?{...group,title}:group)}),{description:'重命名节点组'});setGroupDraft(null)}}/>}

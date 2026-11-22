@@ -3,6 +3,7 @@
 // arrives after the user switched canvases never writes into another graph.
 import {ACTIVE_TASK_STATUSES,isActiveTaskStatus,isServerTaskStatus,isTerminalTaskStatus,sanitizeDocumentTasks} from './taskStatus.js'
 import {serializableDocument} from './canvasStaleness.js'
+import {mergeVersionSnapshots} from './canvasVersionSnapshots.js'
 export {ACTIVE_TASK_STATUSES}
 export const isActiveTask = isActiveTaskStatus
 
@@ -97,7 +98,25 @@ export function taskSyncPatches({ document, serverNodes, terminal, known = null 
     // The written-back node task never carries failure: it comes from the status poll (terminal map).
     const next = { id: Number(task.id), status: task.status, error: task.error || null, resultUnknown: task.status === 'failed' && Boolean(status.resultUnknown), failure: task.status === 'failed' ? taskFailureField(status) : null }
     const selected = additions.find(asset => asset.id === remote.selectedCandidateId)
-    if (!sameTaskState(local.task, next) || additions.length) patches.set(nodeId, { task: next, additions, ...(selected ? { selected } : {}) })
+    const localSnapshots = local.versionSnapshots && typeof local.versionSnapshots === 'object' && !Array.isArray(local.versionSnapshots) ? local.versionSnapshots : {}
+    const remoteSnapshots = remote.versionSnapshots && typeof remote.versionSnapshots === 'object' && !Array.isArray(remote.versionSnapshots) ? remote.versionSnapshots : null
+    const candidateIds = new Set([...(local.candidates || []), ...additions].map(asset => asset?.id).filter(Boolean))
+    const snapshotAdditions = {}
+    if (remoteSnapshots) {
+      for (const [assetId, snap] of Object.entries(remoteSnapshots)) {
+        if (!candidateIds.has(assetId) || !snap || typeof snap !== 'object' || Array.isArray(snap)) continue
+        if (localSnapshots[assetId] === undefined) snapshotAdditions[assetId] = snap
+      }
+    }
+    const hasSnapshots = Object.keys(snapshotAdditions).length > 0
+    if (!sameTaskState(local.task, next) || additions.length || hasSnapshots) {
+      patches.set(nodeId, {
+        task: next,
+        additions,
+        ...(selected ? { selected } : {}),
+        ...(hasSnapshots ? { versionSnapshots: snapshotAdditions } : {}),
+      })
+    }
   }
   return { patches, missing }
 }
@@ -111,10 +130,15 @@ export function applyTaskUpdates(document, patches) {
       // resultUnknown is runtime-only (the server document schema keeps task to id/status/error).
       const task = { id: patch.task.id, status: patch.task.status, error: patch.task.error || null, ...(patch.task.progress != null ? { progress: patch.task.progress } : {}), ...(taskStageField(patch.task) ? { stage: patch.task.stage } : {}), ...(taskFailureField(patch.task) ? { failure: patch.task.failure } : {}) }
       const { upstreamStale, ...rest } = item
+      const patchSnapshots = patch.versionSnapshots && typeof patch.versionSnapshots === 'object' && !Array.isArray(patch.versionSnapshots) && Object.keys(patch.versionSnapshots).length
+        ? patch.versionSnapshots
+        : null
+      const nextCandidates = [...(item.candidates || []), ...patch.additions]
       // A successful regeneration clears the "上游已更新" marker.
       return {
-        ...(patch.additions.length ? rest : item), task, candidates: [...(item.candidates || []), ...patch.additions],
+        ...(patch.additions.length ? rest : item), task, candidates: nextCandidates,
         ...(patch.additions.length ? { asset: patch.selected || patch.additions[0], selectedCandidateId: (patch.selected || patch.additions[0]).id } : {}),
+        ...(patchSnapshots ? { versionSnapshots: mergeVersionSnapshots(item.versionSnapshots, patchSnapshots, nextCandidates) } : {}),
       }
     }),
   }
@@ -159,6 +183,18 @@ export function mergeSavedDocument({ sent, returned, local }) {
         const ids = new Set([...(was.candidates || []), ...(mine.candidates || [])].map(asset => asset.id))
         const additions = server.candidates.filter(asset => !ids.has(asset.id))
         if (additions.length) next = { ...next, candidates: [...(next.candidates || []), ...additions] }
+      } else if (key === 'versionSnapshots' && server.versionSnapshots && typeof server.versionSnapshots === 'object' && !Array.isArray(server.versionSnapshots)) {
+        const wasMap = was.versionSnapshots && typeof was.versionSnapshots === 'object' && !Array.isArray(was.versionSnapshots) ? was.versionSnapshots : {}
+        const localMap = next.versionSnapshots && typeof next.versionSnapshots === 'object' && !Array.isArray(next.versionSnapshots) ? next.versionSnapshots : {}
+        const additions = {}
+        for (const [assetId, snap] of Object.entries(server.versionSnapshots)) {
+          if (!snap || typeof snap !== 'object' || Array.isArray(snap)) continue
+          if (assetId in localMap || assetId in wasMap) continue
+          additions[assetId] = snap
+        }
+        if (!Object.keys(additions).length) continue
+        const candidatePool = [...(next.candidates || []), ...(Array.isArray(server.candidates) ? server.candidates : [])]
+        next = { ...next, versionSnapshots: mergeVersionSnapshots(localMap, additions, candidatePool) }
       } else continue
       changed = true
     }

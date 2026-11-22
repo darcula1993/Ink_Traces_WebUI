@@ -477,6 +477,58 @@
   white-space: nowrap;
 }
 
+/* Per-version prompt & generation parameter strip (VERSION-SNAPSHOT-20261123) */
+.cv-compare-snapshot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--cv-border, rgba(255, 255, 255, .08));
+  background: rgba(14, 14, 19, .78);
+  min-width: 0;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.cv-compare-snapshot-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cv-compare-param-pill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(var(--accent-rgb, 245, 158, 11), .26);
+  background: rgba(var(--accent-rgb, 245, 158, 11), .11);
+  color: #fde68a;
+  font-size: 10px;
+  line-height: 15px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-compare-snapshot-prompt {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--cv-secondary, #b8b8c2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Column actions footer */
 .cv-compare-col-actions {
   flex: 0 0 auto;
@@ -540,6 +592,7 @@
   .cv-compare-header,
   .cv-compare-controls,
   .cv-compare-col,
+  .cv-compare-snapshot,
   .cv-compare-col-actions {
     background: var(--surface-1, #0b0b0e);
   }

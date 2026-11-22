@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.5.2 - 2026-11-23
+
+Automatic prompt, generation-parameter, and interface-binding restoration when switching historical versions on canvas generation nodes, with legacy task fallback and snapshot security hardening.
+
+- **Automatic Version Snapshot Capture & Persistence**:
+  - Captured each generation node's submission-time snapshot (`canvas_node_snapshot`: original canvas prompt including `@ImageN` and collapsible `@Character` mentions, node generation parameters, and `providerSelection`) inside task creation without forwarding it to external providers.
+  - Persisted per-version snapshots under a sibling `node.versionSnapshots[assetId]` map across writeback, `task-sync`, and stale-save merges while keeping `node.asset` and `node.candidates` strictly pure media metadata, ensuring snapshots remain available even after task trash is emptied.
+  - Added `POST /api/canvas/workflows/<workflow_id>/version-snapshots` to reconstruct sanitized snapshots from `media.source_task_id → tasks` for pre-existing historical versions created prior to `v2.5.2`.
+- **One-Step Atomic Version Switch, Undo & Previews**:
+  - Switching versions in either the **Version History** popover (`CanvasVersionPopover`) or the **Side-by-Side Compare** modal (`CanvasVersionCompareModal`) automatically restores that version's prompt, generation parameters, and interface selection in a single undoable step (`Ctrl/Cmd+Z` restores the previous version, prompt/draft, and parameters together).
+  - Preserved original `providerSelection` when a historical version's profile was disabled or deleted so existing validation prompts the user instead of silently switching accounts.
+  - Added compact parameter chips and 2-line prompt previews to both the Version History popover and the Side-by-Side Compare modal.
+- **Validation, Sanitization & Isolation Guardrails**:
+  - Rejected signed URLs, secret tokens, and raw provider endpoint identifiers inside `versionSnapshots` on write (`HTTP 400`), with defense-in-depth read/writeback/fallback masking.
+  - Enforced the 100-snapshot per-node cap and `createdAt` length bound on both server and client, and stripped `versionSnapshots` when exporting templates, cleaning deleted assets, duplicating nodes, or pasting across workflows.
+
 ## 2.5.1 - 2026-11-22
 
 Managed character-card library subfolders (`角色卡/<name>`), automatic placement & startup migration, and two-mode character deletion with impact preview.

@@ -132,6 +132,8 @@ def strip_document(document, removed):
         candidates = [c for c in node.get('candidates', []) if c.get('id') not in removed]
         if 'candidates' in node:
             node['candidates'] = candidates
+        if isinstance(node.get('versionSnapshots'), dict):
+            node['versionSnapshots'] = {k: v for k, v in node['versionSnapshots'].items() if k not in removed}
         if node.get('asset') and node['asset'].get('id') in removed:
             replacement = candidates[-1] if candidates else None
             if node['type'] == 'asset' and (replacement is None or replacement['kind'] != node['asset']['kind'] or node['asset']['kind'] != 'image'):

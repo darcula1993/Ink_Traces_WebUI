@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, CheckCircle2, Minus, Music, Pause, Play, RotateCcw, Volume2, VolumeX, X, Plus } from 'lucide-react'
 import { versionTime } from './CanvasVersionPopover'
+import { GENERATION_TYPES, formatVersionParamChips, formatVersionPromptPreview } from '../../lib/canvasVersionSnapshots'
 import './canvasVersionCompare.css'
 
 const IMAGE_ZOOM_PRESETS = ['fit', 100, 150, 200]
@@ -170,6 +171,7 @@ function CompareVideoPane({ entry, registerMedia, muted, onToggleMute, onPlaySta
 
 export default function CanvasVersionCompareModal({
   node,
+  snapshots = {},
   isGone = () => false,
   busy = false,
   onChoose,
@@ -178,6 +180,7 @@ export default function CanvasVersionCompareModal({
 }) {
   const dialogRef = useRef(null)
   const fallbackKind = node.asset?.kind || (node.type === 'asset' ? 'image' : node.type)
+  const isGeneration = GENERATION_TYPES.has(node.type)
   const currentId = node.asset?.id ?? node.selectedCandidateId
   const finalized = node.finalized === true
 
@@ -569,6 +572,11 @@ export default function CanvasVersionCompareModal({
               const zoom = zoomOf(entry.asset.id)
               const nat = naturalSizes[entry.asset.id]
               const isMuted = mutedMap[entry.asset.id] !== false
+              const snapshot = isGeneration ? (snapshots?.[entry.asset.id] || node.versionSnapshots?.[entry.asset.id] || null) : null
+              const paramChips = snapshot ? formatVersionParamChips(snapshot, node.type) : []
+              const promptPreview = snapshot ? formatVersionPromptPreview(snapshot, 140) : ''
+              const fullPrompt = typeof snapshot?.text === 'string' ? snapshot.text.trim() : ''
+              const hasSnapshot = Boolean(snapshot && (fullPrompt || paramChips.length || snapshot.providerSelection))
 
               return (
                 <article
@@ -668,13 +676,44 @@ export default function CanvasVersionCompareModal({
                     )}
                   </div>
 
+                  {hasSnapshot && (paramChips.length > 0 || promptPreview) && (
+                    <div
+                      className="cv-compare-snapshot"
+                      data-testid={`compare-snapshot-${entry.asset.id}`}
+                      aria-label={`版本 ${entry.versionNumber} 提示词与参数`}
+                    >
+                      {paramChips.length > 0 && (
+                        <div className="cv-compare-snapshot-params" data-testid={`compare-params-${entry.asset.id}`}>
+                          {paramChips.map(chip => (
+                            <span key={chip} className="cv-compare-param-pill">{chip}</span>
+                          ))}
+                        </div>
+                      )}
+                      {promptPreview && (
+                        <p
+                          className="cv-compare-snapshot-prompt"
+                          data-testid={`compare-prompt-${entry.asset.id}`}
+                          title={fullPrompt || promptPreview}
+                        >
+                          {promptPreview}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   <footer className="cv-compare-col-actions">
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
                       data-testid={`compare-adopt-${entry.asset.id}`}
                       disabled={busy || isCurrent}
-                      title={isCurrent ? '已是当前采用版' : `将版本 ${entry.versionNumber} 设为当前采用版（可撤销）`}
+                      title={
+                        isCurrent
+                          ? '已是当前采用版'
+                          : hasSnapshot
+                            ? `将版本 ${entry.versionNumber} 设为当前采用版并同步提示词与生成参数（可撤销）`
+                            : `将版本 ${entry.versionNumber} 设为当前采用版（可撤销）`
+                      }
                       onClick={() => onChoose(entry.asset, { finalize: false })}
                     >
                       设为当前采用版
@@ -684,7 +723,13 @@ export default function CanvasVersionCompareModal({
                       className="btn btn-primary btn-sm"
                       data-testid={`compare-adopt-final-${entry.asset.id}`}
                       disabled={busy || isCurrentFinal}
-                      title={isCurrentFinal ? '已采用并标为定稿' : `采用版本 ${entry.versionNumber} 并将节点标为定稿（可撤销）`}
+                      title={
+                        isCurrentFinal
+                          ? '已采用并标为定稿'
+                          : hasSnapshot
+                            ? `采用版本 ${entry.versionNumber}（同步提示词与生成参数）并将节点标为定稿（可撤销）`
+                            : `采用版本 ${entry.versionNumber} 并将节点标为定稿（可撤销）`
+                      }
                       onClick={() => onChoose(entry.asset, { finalize: true })}
                     >
                       <Check size={13} aria-hidden="true" />

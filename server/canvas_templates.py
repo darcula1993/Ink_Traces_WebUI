@@ -44,7 +44,7 @@ FORBIDDEN_KEY_NAMES = {
     'api_key', 'apikey', 'secret', 'secret_key', 'token', 'access_token', 'refresh_token',
     'password', 'passwd', 'authorization', 'cookie', 'credential', 'credentials',
     'private_key', 'access_key', 'signed_url', 'signedurl', 'signature',
-    'task', 'asset', 'candidates', 'selectedcandidateid', 'referenceassets',
+    'task', 'asset', 'candidates', 'selectedcandidateid', 'versionsnapshots', 'referenceassets',
     'referencegroups', 'referenceorder', 'referencementions', 'characterrefs',
     'upstreamstale', 'file', 'files', 'base64', 'data_url', 'first_frame', 'last_frame',
 }

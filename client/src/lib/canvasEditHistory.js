@@ -99,7 +99,7 @@ export function pasteCanvasSelection(document,clipboard,workflowId,uid,offset=40
   const nodes=clone(clipboard.nodes).map(({upstreamStale,...n})=>{
     const title=crossWorkflow?String(n.title||'').slice(0,240):`${String(n.title||'').slice(0,237)} 副本`
     let next={...n,id:ids.get(n.id),x:n.x+dx,y:n.y+dy,title,task:null}
-    if(crossWorkflow&&GENERATION_TYPES.has(n.type))next={...next,asset:null,candidates:[],selectedCandidateId:null}
+    if(crossWorkflow&&GENERATION_TYPES.has(n.type)){const {versionSnapshots:_vs,...rest}=next;next={...rest,asset:null,candidates:[],selectedCandidateId:null}}
     return withProviderSelection(next,selectionFor)
   })
   const edges=clone(clipboard.edges).map(e=>({...e,id:uid(),source:ids.get(e.source),target:ids.get(e.target)}))
@@ -118,7 +118,7 @@ export function duplicateCanvasNode(document,nodeId,uid,position=null,selectionF
   const {upstreamStale,...rest}=clone(source),id=uid()
   const point=position||{x:source.x+40,y:source.y+40}
   let node={...rest,id,x:point.x,y:point.y,title:`${source.title.slice(0,237)} 副本`,task:null}
-  if(GENERATION_TYPES.has(source.type))node={...node,asset:null,candidates:[],selectedCandidateId:null}
+  if(GENERATION_TYPES.has(source.type)){const {versionSnapshots:_vs,...cleanNode}=node;node={...cleanNode,asset:null,candidates:[],selectedCandidateId:null}}
   node=withProviderSelection(node,selectionFor)
   const edges=incoming.map(e=>({...clone(e),id:uid(),target:id}))
   return {document:{...document,nodes:[...document.nodes,node],edges:[...document.edges,...edges]},ids:[id]}

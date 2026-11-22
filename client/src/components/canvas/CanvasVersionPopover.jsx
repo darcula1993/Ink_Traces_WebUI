@@ -1,5 +1,6 @@
 import React,{useEffect,useLayoutEffect,useRef,useState} from 'react'
 import {Check,CheckCircle2,Columns2,Music} from 'lucide-react'
+import {GENERATION_TYPES,formatVersionParamChips,formatVersionPromptPreview} from '../../lib/canvasVersionSnapshots'
 
 // NODE-TOOLBAR-VERSIONS-20261118 (user 11-18): the one place to switch a node's kept versions (asset, image, video and
 // audio generation nodes; the properties panel no longer lists them). Opened from the node toolbar's 历史版本 button
@@ -25,9 +26,10 @@ export function versionPopoverPlacement(rect,surface,size,{gap=12,margin=8}={}){
  return {left:Math.round(left),top:Math.round(top)}
 }
 
-export default function CanvasVersionPopover({node,rect,surface,busy=false,isGone=()=>false,onChoose,onCompare,onToggleFinalized,onClose}){
+export default function CanvasVersionPopover({node,snapshots={},rect,surface,busy=false,isGone=()=>false,onChoose,onCompare,onToggleFinalized,onClose}){
  const ref=useRef(null),[size,setSize]=useState(null)
  const kind=node.asset?.kind||(node.type==='asset'?'image':node.type),label=`${KIND_LABEL[kind]||''}历史版本`
+ const isGeneration=GENERATION_TYPES.has(node.type)
  const candidates=node.candidates||[],currentId=node.asset?.id??node.selectedCandidateId
  const liveCount=candidates.filter(asset=>asset?.id&&!isGone(asset)).length
  const canCompare=Boolean(onCompare)&&liveCount>=2
@@ -61,10 +63,21 @@ export default function CanvasVersionPopover({node,rect,surface,busy=false,isGon
   </div>}
   <div className="cv-version-list" role="group" aria-label="保留的版本">
    {candidates.map((asset,index)=>{const gone=isGone(asset),time=versionTime(asset),current=asset.id===currentId,itemKind=asset.kind||kind
+    const snapshot=isGeneration?(snapshots?.[asset.id]||node.versionSnapshots?.[asset.id]||null):null
+    const paramChips=snapshot?formatVersionParamChips(snapshot,node.type):[]
+    const promptPreview=snapshot?formatVersionPromptPreview(snapshot,56):''
+    const fullPrompt=typeof snapshot?.text==='string'?snapshot.text.trim():''
+    const hasSnapshot=Boolean(snapshot&&(fullPrompt||paramChips.length||snapshot.providerSelection))
     const reason=gone?'该版本已在素材库中删除':busy?'请等待当前操作完成':undefined
-    return <button type="button" key={asset.id} className="cv-version-item" data-version-id={asset.id} disabled={busy||gone} title={reason||(current?'当前版本':`切换到版本 ${index+1}`)} aria-label={`版本 ${index+1}`} aria-description={[current?'当前版本':'',current&&finalized?'已定稿':'',time,gone?'已删除':''].filter(Boolean).join('，')||undefined} aria-pressed={current} onClick={()=>onChoose(asset)}>
+    const actionHint=current?'当前版本':(hasSnapshot?`切换到版本 ${index+1}（同步提示词与生成参数）`:`切换到版本 ${index+1}`)
+    const itemTitle=reason||(fullPrompt?`${actionHint}\n提示词：${fullPrompt}`:actionHint)
+    return <button type="button" key={asset.id} className="cv-version-item" data-version-id={asset.id} disabled={busy||gone} title={itemTitle} aria-label={`版本 ${index+1}`} aria-description={[current?'当前版本':'',current&&finalized?'已定稿':'',time,gone?'已删除':''].filter(Boolean).join('，')||undefined} aria-pressed={current} onClick={()=>onChoose(asset)}>
      <span className="cv-version-thumb">{gone?<span className="cv-history-deleted">已删除</span>:itemKind==='video'?<video src={asset.url} muted preload="metadata" playsInline aria-hidden="true"/>:itemKind==='audio'?<Music size={18} aria-hidden="true"/>:<img src={asset.url} alt="" loading="lazy" draggable={false}/>}</span>
      <span className="cv-version-meta"><b>版本 {index+1}</b>{current&&<small className="cv-version-current">当前</small>}{current&&finalized&&<small className="cv-version-final"><Check size={10} aria-hidden="true"/>定稿</small>}{time&&<small>{time}</small>}{gone&&<small>（已删除）</small>}</span>
+     {hasSnapshot&&(paramChips.length>0||promptPreview)&&<span className="cv-version-snapshot" data-testid={`version-snapshot-${asset.id}`}>
+      {paramChips.length>0&&<span className="cv-version-params" title={paramChips.join(' · ')}>{paramChips.slice(0,3).map(chip=><span key={chip} className="cv-version-param-chip">{chip}</span>)}</span>}
+      {promptPreview&&<span className="cv-version-prompt" title={fullPrompt||promptPreview}>{promptPreview}</span>}
+     </span>}
     </button>})}
   </div>
  </div>
