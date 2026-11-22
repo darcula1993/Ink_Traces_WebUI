@@ -1,23 +1,21 @@
-/* CANVAS-LAYOUT-2-20261118: left icon rail + pop-out panels, node toolbar, bottom-left viewport cluster and
- * minimap. Linear-style: neutral surfaces, green only for focus/active; glass only on floating overlays
- * (floating panel, node toolbar, minimap). The pinned panel is a flat docked surface.
+/* CANVAS-LAYOUT-2-20261118 / OBSIDIAN-AMBER-20261122: left icon rail + pop-out panels, node toolbar,
+ * bottom-left viewport cluster and minimap. Smoked Obsidian Liquid Glass surfaces; amber gold reserved
+ * for focus / selection / primary.
  */
 
-/* Port colour tokens — PORT-COLORS-20261118 final values (贝优妮塔). The single source for every port dot, edge,
+/* Port colour tokens — OBSIDIAN-AMBER-20261122. The single source for every port dot, edge,
  * drag preview, drop-ready ring, group badge, reference-number corner, minimap block and -soft fill in canvas/;
- * nothing else in canvas/ may hard-code a port colour. Green stays reserved for focus / selection / primary.
- * Contrast (WCAG, measured): solid on --bg #0c0d0e / node #121314 / label #18191b; edge = 80% stroke-opacity on
- * #121314; badge = --on-accent #06140d text on the colour (needs >= 4.5).
- * Colour-vision check (Machado 2009, severity 1, CIE76 dE between the three kinds): normal >= 68, protan >= 43,
- * deutan >= 32 (video/audio differ mainly by lightness), tritan >= 45. Kinds also differ by dot shape
- * (image circle, video rounded square, audio diamond; canvasPorts.css) so colour is never the only cue. */
+ * nothing else in canvas/ may hard-code a port colour. Molten amber gold (#F59E0B) is reserved for
+ * focus / selection / primary, so image ports use crisp high-contrast jade-emerald (#34D399) to avoid
+ * clashing with amber selection/focus while remaining clearly distinct from sky-blue video (#7DD3F5),
+ * violet audio (#A47CF3), and danger red (#F87171). Kinds also differ by dot shape (image circle,
+ * video rounded square, audio diamond; canvasPorts.css) so colour is never the only cue. */
 .canvas-studio, .cv-sidebar-menu-portal {
-  /* image: amber. 9.33 / 8.92 / 8.44 : 1; edge 5.9 : 1; badge text 9.0 : 1 */
-  --cv-port-image: #E5A93B;
-  /* video: light sky blue (blue side, away from the focus green). 11.59 / 11.08 / 10.48 : 1; edge 7.4 : 1; badge 11.2 : 1 */
+  /* image: crisp jade-emerald, cleanly separated from amber focus/selection, sky-blue video, violet audio & danger red */
+  --cv-port-image: #34D399;
+  /* video: light sky blue (kept distinct from amber focus and jade image) */
   --cv-port-video: #7DD3F5;
-  /* audio: violet, kept far from the error/over-limit red (dE 66; >= 46 under every simulation).
-   * 6.26 / 5.98 / 5.66 : 1; edge 4.2 : 1; badge 6.1 : 1 */
+  /* audio: violet, kept far from error/over-limit red */
   --cv-port-audio: #A47CF3;
   /* prompt: phase 2, not rendered in phase 1. Neutral light grey (text input), so it never competes with the
    * three media hues. 11.47 / 10.97 / 10.37 : 1 */
@@ -34,11 +32,19 @@
 /* ---- Rail --------------------------------------------------------------------------------------------- */
 /* Own stacking context: rail (31), floating panel (30) and the bottom-left cluster (11) stay below studio-level
  * modal overlays (.cv-studio-overlay, z 9) that are siblings of .cv-layout. */
-.canvas-studio .cv-layout { position: relative; z-index: 0; isolation: isolate; }
+.canvas-studio .cv-layout {
+  position: relative; z-index: 0; isolation: isolate;
+  padding: var(--glass-gap, 8px); gap: var(--glass-gap, 8px);
+}
 .cv-rail {
   flex: 0 0 var(--cv-rail-width); width: var(--cv-rail-width); display: flex; flex-direction: column;
   justify-content: space-between; align-items: center; padding: 10px 0 10px; gap: 8px; z-index: 31;
-  background: var(--surface-1); border-right: 1px solid var(--cv-border);
+  border-radius: var(--glass-radius, 14px);
+  border: 1px solid var(--glass-rim);
+  background: var(--glass-panel-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-panel-shadow);
 }
 .cv-rail-group { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
 .cv-rail-group.is-bottom { gap: 4px; }
@@ -67,40 +73,51 @@
 .canvas-studio .cv-rail .cv-rail-button.is-active .cv-rail-icon { background: rgba(255, 255, 255, .13); color: var(--cv-text); }
 .canvas-studio .cv-rail .cv-rail-button[aria-pressed="true"] { color: var(--cv-text); background-color: rgba(255, 255, 255, .09); border-color: transparent; }
 .canvas-studio .cv-rail .cv-rail-button.is-active::before {
-  content: ""; position: absolute; left: -3px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--cv-green);
+  content: ""; position: absolute; left: 1px; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--cv-green);
 }
 .cv-rail-badge {
   position: absolute; top: 1px; right: 3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
-  font-size: 10px; line-height: 14px; text-align: center; background: var(--cv-green); color: #08130d; font-weight: 600;
+  font-size: 10px; line-height: 14px; text-align: center; background: var(--cv-green); color: var(--on-accent, #0a0602); font-weight: 600;
 }
 
 /* ---- Pop-out panel ------------------------------------------------------------------------------------- */
 .cv-rail-panel-shell.is-floating {
-  position: absolute; left: var(--cv-rail-width); top: 0; bottom: 0; z-index: 30;
+  position: absolute; left: calc(var(--cv-rail-width) + 16px); top: 60px; bottom: 8px; z-index: 30;
 }
 .cv-rail-panel {
   display: flex; flex-direction: column; min-width: 0; width: 100%; height: 100%;
-  background: var(--surface-1); border-right: 1px solid var(--cv-border); color: var(--cv-text);
+  border-radius: var(--glass-radius, 14px); overflow: hidden;
+  border: 1px solid var(--glass-rim);
+  background: var(--glass-panel-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-float-shadow);
+  color: var(--cv-text);
+}
+.cv-rail-panel-shell.is-pinned .cv-rail-panel {
+  background: var(--glass-panel-bg);
 }
 .cv-rail-panel-shell.is-floating .cv-rail-panel {
-  /* Opaque surface (no backdrop blur): a 96% glass fill let nodes/minimap below show through as a blurred ghost
-   * along the panel (11-18 observation). Still reads as a floating layer via border + shadow. */
-  background: var(--surface-solid); border: 1px solid var(--cv-border-strong); border-top: 0; border-left: 0;
-  box-shadow: var(--shadow-2);
+  background: var(--glass-float-bg);
+  border-color: var(--glass-rim-strong);
 }
-.cv-rail-panel-head { display: flex; align-items: center; gap: 4px; height: 44px; min-height: 44px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--cv-border); flex: 0 0 auto; }
+/* 1px parent top border + 42px inner + 1px bottom border = 44px flush with .cv-topbar bottom hairline. */
+.cv-rail-panel-head {
+  display: flex; align-items: center; gap: 4px; height: 43px; min-height: 43px; padding: 0 8px 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .10); background: rgba(255, 255, 255, .04); flex: 0 0 auto;
+}
 .cv-rail-panel-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 600; color: var(--cv-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cv-rail-panel-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 /* The body carries .cv-sidebar so the existing node-list / asset-tree styles apply; undo the old shell layout. */
 .canvas-studio .cv-rail-panel .cv-rail-panel-body.cv-sidebar {
-  width: auto; flex: 1 1 auto; display: flex; padding: 0; gap: 0; background: transparent; border: 0; box-shadow: none; overflow: hidden;
+  width: auto; flex: 1 1 auto; display: flex; padding: 0; gap: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; overflow: hidden;
 }
 .cv-rail-panel-body > * { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .cv-panel-assets, .cv-panel-tasks { overflow: auto; }
 .cv-panel-prompts { overflow: hidden; }
 .cv-panel-project { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .cv-panel-assets { padding: 0 4px; }
-.cv-panel-footer { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; color: var(--cv-secondary); border-top: 1px solid var(--cv-border); }
+.cv-panel-footer { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px; color: var(--cv-secondary); border-top: 1px solid rgba(255, 255, 255, .10); }
 .cv-panel-empty, .cv-panel-hint { margin: 12px; font-size: 12px; color: var(--cv-secondary); }
 .cv-panel-hint { margin: 0 12px; }
 .cv-panel-status { min-height: 16px; padding: 0 12px 8px; font-size: 12px; color: var(--cv-secondary); }
@@ -162,7 +179,7 @@
 .cv-workflow-item {
   position: relative; display: flex; align-items: center; gap: 4px; min-width: 0;
   height: 34px; min-height: 34px; padding: 0 6px 0 10px; border-radius: 8px;
-  color: rgba(228, 229, 231, .84); transition: background-color var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
+  color: rgba(245, 245, 247, .84); transition: background-color var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
 }
 .cv-workflow-item:hover:not(.is-active) { background: rgba(255, 255, 255, .045); color: var(--cv-text); }
 .cv-workflow-item.is-active { background: rgba(255, 255, 255, .09); color: var(--cv-text); }
@@ -252,8 +269,8 @@
 
 /* ---- Node toolbar -------------------------------------------------------------------------------------- */
 .canvas-studio .cv-image-toolbar.cv-node-toolbar {
-  position: absolute; z-index: 12; display: flex; gap: 2px; padding: 4px; border-radius: 8px;
-  background: var(--overlay-fill); border: 1px solid var(--cv-border-strong); box-shadow: var(--shadow-2);
+  position: absolute; z-index: 12; display: flex; gap: 2px; padding: 4px; border-radius: var(--glass-radius, 14px);
+  background: var(--glass-pill-bg); border: 1px solid var(--glass-rim); box-shadow: var(--glass-pill-shadow);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
 }
 .cv-node-toolbar .cv-node-toolbar-button {
@@ -304,8 +321,9 @@
   pointer-events: auto;
 }
 .cv-viewport-bar {
-  display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 4px; border-radius: 8px;
-  background: var(--surface-1); border: 1px solid var(--cv-border); box-shadow: var(--shadow-1);
+  display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 4px; border-radius: var(--glass-radius, 14px);
+  background: var(--glass-pill-bg); border: 1px solid var(--glass-rim); box-shadow: var(--glass-pill-shadow);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
 }
 .canvas-studio .cv-viewport-bar button,
 .cv-viewport-bar button {
@@ -326,25 +344,35 @@
 .cv-zoom-value { min-width: 52px !important; font-variant-numeric: tabular-nums; }
 .cv-zoom-menu {
   position: absolute; bottom: calc(100% + 6px); left: 0; display: flex; flex-direction: column; min-width: 104px; padding: 4px;
-  border-radius: 8px; background: var(--overlay-fill); border: 1px solid var(--cv-border-strong); box-shadow: var(--shadow-2);
+  border-radius: var(--glass-radius, 14px); background: var(--glass-float-bg); border: 1px solid var(--glass-rim); box-shadow: var(--glass-float-shadow);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
 }
 .cv-zoom-menu button { justify-content: flex-start; width: 100%; }
 .cv-minimap {
-  position: relative; overflow: hidden; border-radius: 8px; cursor: pointer; touch-action: none; user-select: none;
-  background: var(--overlay-fill); border: 1px solid var(--cv-border-strong); box-shadow: var(--shadow-2);
+  position: relative; overflow: hidden; border-radius: var(--glass-radius, 14px); cursor: pointer; touch-action: none; user-select: none;
+  background: var(--glass-pill-bg); border: 1px solid var(--glass-rim); box-shadow: var(--glass-pill-shadow);
   -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
 }
 .cv-minimap:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 1px; }
 .cv-minimap canvas { display: block; }
-.cv-minimap-frame { position: absolute; border: 1px solid var(--cv-green); border-radius: 2px; background: rgba(69, 192, 136, .08); pointer-events: none; }
+.cv-minimap-frame { position: absolute; border: 1px solid var(--cv-green); border-radius: 2px; background: rgba(var(--accent-rgb, 245, 158, 11), .10); pointer-events: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .cv-rail .cv-rail-button, .cv-rail .cv-rail-icon, .cv-workflow-item, .cv-workflow-item-actions, .cv-minimap-frame, .cv-node-toolbar { transition: none; }
 }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .cv-rail, .cv-rail-panel, .cv-rail-panel-shell.is-pinned .cv-rail-panel, .cv-rail-panel-shell.is-floating .cv-rail-panel,
+  .canvas-studio .cv-image-toolbar.cv-node-toolbar, .cv-viewport-bar, .cv-minimap, .cv-zoom-menu {
+    background: var(--cv-glass-solid);
+  }
+}
 @media (prefers-reduced-transparency: reduce) {
-  .cv-rail-panel-shell.is-floating .cv-rail-panel, .canvas-studio .cv-image-toolbar.cv-node-toolbar, .cv-minimap, .cv-zoom-menu {
+  .cv-rail, .cv-rail-panel, .cv-rail-panel-shell.is-pinned .cv-rail-panel, .cv-rail-panel-shell.is-floating .cv-rail-panel,
+  .canvas-studio .cv-image-toolbar.cv-node-toolbar, .cv-viewport-bar, .cv-minimap, .cv-zoom-menu {
     background: var(--cv-glass-solid); -webkit-backdrop-filter: none; backdrop-filter: none;
+  }
+  .cv-rail-panel-head {
+    background: #0c0c10;
   }
 }
 
@@ -364,15 +392,15 @@
 .canvas-studio .cv-node .cv-port-out[data-kind=image] { --port-color: var(--cv-port-image); }
 .canvas-studio .cv-node .cv-port-out[data-kind=video] { --port-color: var(--cv-port-video); }
 .canvas-studio .cv-node .cv-port-out[data-kind=audio] { --port-color: var(--cv-port-audio); }
-.canvas-studio .cv-node .cv-port-out[data-kind]::after { background: var(--port-color); box-shadow: 0 0 0 2px var(--surface-1, #111); }
+.canvas-studio .cv-node .cv-port-out[data-kind]::after { background: var(--port-color); box-shadow: 0 0 0 2px var(--surface-1, #0b0b0e); }
 /* Non-colour type cue (PORT-COLORS-20261118): video rounded square, audio diamond; image stays a circle. */
 .canvas-studio .cv-node .cv-port-out[data-kind=video]::after { border-radius: 2px; }
 .canvas-studio .cv-node .cv-port-out[data-kind=audio]::after { border-radius: 2px; transform: rotate(45deg) scale(.9); }
-.canvas-studio .cv-node .cv-port-out[data-kind]:is(:hover, :focus-visible, .is-pending)::after { box-shadow: 0 0 0 2px var(--surface-1, #111), 0 0 0 4px var(--cv-focus); }
+.canvas-studio .cv-node .cv-port-out[data-kind]:is(:hover, :focus-visible, .is-pending)::after { box-shadow: 0 0 0 2px var(--surface-1, #0b0b0e), 0 0 0 4px var(--cv-focus); }
 /* Card reference row "+" (spec 1.3). */
 .canvas-studio .cv-reference-add {
   flex: 0 0 auto; align-self: center; width: 28px; height: 28px; min-height: 0; padding: 0; display: inline-grid; place-items: center;
-  border: 1px dashed var(--cv-border-strong); border-radius: 6px; background: var(--overlay-fill, rgba(12, 13, 14, .7)); color: var(--cv-text); cursor: pointer;
+  border: 1px dashed var(--cv-border-strong); border-radius: 6px; background: var(--overlay-fill, rgba(9, 9, 12, .68)); color: var(--cv-text); cursor: pointer;
 }
 .canvas-studio .cv-reference-add:hover { border-color: var(--cv-focus); }
 .canvas-studio .cv-reference-add:focus-visible { outline: 2px solid var(--cv-focus); outline-offset: 1px; }
@@ -383,6 +411,9 @@
 @container cv-main (max-width: 760px) {
   .canvas-studio .cv-bottom-dock { left: calc(12px + var(--cv-float-panel, 0px)); right: 12px; }
 }
+@container cv-main (max-width: 584px) {
+  .canvas-studio .cv-bottom-dock { left: calc(8px + var(--cv-float-panel, 0px)); right: 8px; column-gap: 6px; }
+}
 @container cv-bottom-dock (max-width: 680px) {
   .canvas-studio .cv-viewport-bar { gap: 1px; padding: 0 3px; height: 34px; }
   .canvas-studio .cv-viewport-bar button { min-width: 24px; height: 26px; min-height: 26px; padding: 0 2px; }
@@ -391,6 +422,12 @@
   .canvas-studio .cv-tools { padding: 4px; gap: 3px; }
   .canvas-studio .cv-tools button:where(:not(.btn)) { width: 30px; height: 30px; min-height: 30px; }
   .canvas-studio .cv-tools hr { margin: 0 2px; }
+}
+@container cv-bottom-dock (max-width: 560px) {
+  .canvas-studio .cv-tools { padding: 3px; gap: 2px; }
+  .canvas-studio .cv-tools button:where(:not(.btn)) { width: 26px; height: 26px; min-height: 26px; }
+  .canvas-studio .cv-tools button:where(:not(.btn)) svg { width: 15px; height: 15px; }
+  .canvas-studio .cv-tools hr { height: 20px; margin: 0 1px; }
 }
 @container cv-bottom-dock (max-width: 520px) {
   .canvas-studio .cv-viewport-bar button[aria-label="画布快捷键帮助"] { display: none; }

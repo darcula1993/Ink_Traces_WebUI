@@ -1,7 +1,7 @@
-/* UI-ITER-R1: global design tokens. Structure from 艾达's spec draft (section 2); values follow
- * the user's 2026-11-13 decision: Linear-style principles on a green-black base — neutral
- * near-black surfaces layered by lightness, green only as an accent, glass only on overlays.
- * Canvas-local aliases (--cv-*) in canvasTheme.css point at these tokens. */
+/* OBSIDIAN-AMBER-20261122: single source of truth for Cinema Obsidian & Amber Liquid Glass tokens.
+ * Direction (user 2026-11-22): unified 14px rounded smoked-obsidian Liquid Glass across panels, sidebars,
+ * topbars, floating overlays & global modals + molten amber gold accent (#f59e0b) for focus/selection/primary/generating;
+ * 100% pure neutral media previews; solid fallback under reduced transparency. */
 :root {
   /* spacing (4px base) */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
@@ -14,36 +14,48 @@
   --fs-caption: 12px; --lh-caption: 18px;
   --fs-mono: 12px;
 
-  /* surfaces: neutral near-black, three lightness steps (~3-5% apart), no hue */
-  --bg: #0c0d0e;
-  --surface-1: #121314;      /* panels: sidebar, toolbars, nodes, cards */
-  --surface-2: #18191b;      /* overlays: dialogs, menus, node editor */
-  --surface-solid: #18191b;
-  --surface-raised: #1e1f22; /* hover rows, popovers inside overlays */
-  --overlay-fill: rgba(24, 25, 27, .96);
-  --field: rgba(255, 255, 255, .03);
+  /* surfaces: rich pitch obsidian ground with subtle warm amber ambient depth for glass refraction */
+  --bg: #050507;
+  --bg-ambient:
+    radial-gradient(46% 36% at 22% 8%, rgba(255, 228, 178, .065) 0%, rgba(245, 158, 11, .02) 44%, transparent 72%),
+    radial-gradient(60% 52% at 10% 18%, rgba(217, 119, 6, .20) 0%, rgba(146, 64, 14, .07) 48%, transparent 76%),
+    radial-gradient(56% 56% at 88% 16%, rgba(180, 83, 9, .17) 0%, rgba(120, 53, 15, .06) 48%, transparent 76%),
+    radial-gradient(60% 50% at 84% 86%, rgba(245, 158, 11, .15) 0%, rgba(120, 53, 15, .05) 50%, transparent 78%),
+    radial-gradient(54% 46% at 38% 92%, rgba(146, 64, 14, .16) 0%, rgba(78, 36, 12, .05) 50%, transparent 78%),
+    linear-gradient(145deg, #030305 0%, #08070a 50%, #030305 100%);
+  --surface-1: #0b0b0e;      /* solid fallback panels & cards */
+  --surface-2: #111116;      /* solid fallback dialogs, menus, popovers */
+  --surface-solid: #111116;
+  --surface-raised: #18181f; /* hover rows, popovers inside overlays */
+  /* Keep --overlay-fill as a pure color so any background-color consumer remains valid CSS. */
+  --overlay-fill: rgba(9, 9, 12, .68);
+  --field: rgba(255, 255, 255, .045);
 
-  /* borders: 1px low-opacity neutral */
-  --border: rgba(255, 255, 255, .08);
-  --border-strong: rgba(255, 255, 255, .14);
-  --border-focus: #4fc48c;
+  /* borders: crisp 1px rims on obsidian */
+  --border: rgba(255, 255, 255, .085);
+  --border-strong: rgba(255, 255, 255, .15);
+  --border-focus: #f59e0b;
 
-  /* text: neutral greys */
-  --text: #e4e5e7;
-  --text-2: #a1a4a9;
-  --text-3: #6d7177;
+  /* text: crisp high-contrast neutral scale on obsidian */
+  --text: #f5f5f7;
+  --text-2: #a3a3ad;
+  --text-3: #686873;
 
-  /* accent green: focus, selection, primary, generating, key figures only */
-  --accent: #45c088;
-  --accent-hover: #58cc96;
-  --accent-soft: rgba(69, 192, 136, .12);
-  --accent-glow: rgba(69, 192, 136, .18);
-  --on-accent: #06140d;
+  /* accent molten amber gold: focus, selection, primary, generating, key figures only */
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --accent-deep: #d97706;
+  --accent-rgb: 245, 158, 11;
+  --accent-soft: rgba(245, 158, 11, .14);
+  --accent-glow: rgba(245, 158, 11, .24);
+  --on-accent: #0a0602;
 
-  /* status (desaturated) */
-  --danger: #df8a90;
-  --danger-soft: rgba(223, 138, 144, .10);
-  --warning: #d6bd86;
+  /* status */
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, .14);
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, .14);
+  --warning: #fbbf24;
   --info: var(--text-2);
 
   /* media kinds use neutral icons; colour is reserved for state */
@@ -51,23 +63,56 @@
   --kind-video: var(--text-2);
   --kind-audio: var(--text-2);
 
-  /* radius: 6-8px; pill for chips */
+  /* radius: 6-8px controls; 14px unified Liquid Glass panels; pill for chips */
   --r-sm: 6px; --r-md: 8px; --r-lg: 8px; --r-xl: 10px; --r-pill: 999px;
+  --glass-radius: 14px;
+  --glass-gap: 8px;
 
-  /* elevation: minimal; glass only on overlays */
+  /* elevation & Smoked Obsidian Liquid Glass tokens (use --glass-*-bg with `background:`, never `background-color:`) */
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
   --shadow-2: 0 8px 24px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .04);
-  --glass-blur: blur(12px) saturate(110%);
+  --glass-blur: blur(24px) saturate(165%);
+  --glass-blur-soft: blur(16px) saturate(150%);
+  --glass-rim: rgba(255, 244, 224, .13);
+  --glass-rim-strong: rgba(255, 232, 190, .24);
+  --glass-highlight-top: inset 0 1px 0 rgba(255, 240, 214, .18);
+  --glass-highlight-soft: inset 0 1px 0 rgba(255, 240, 214, .08);
+  --glass-sheen: linear-gradient(155deg, rgba(255, 244, 224, .06) 0%, rgba(255, 244, 224, .018) 32%, rgba(255, 244, 224, 0) 100%);
+  --glass-panel-bg: linear-gradient(155deg, rgba(255, 244, 224, .055) 0%, rgba(255, 244, 224, .015) 30%, rgba(0, 0, 0, 0) 65%, rgba(245, 158, 11, .025) 100%), rgba(9, 9, 12, .60);
+  --glass-bar-bg: linear-gradient(180deg, rgba(255, 244, 224, .065) 0%, rgba(255, 244, 224, .012) 100%), rgba(10, 10, 14, .64);
+  --glass-float-bg: linear-gradient(155deg, rgba(255, 244, 224, .065) 0%, rgba(255, 244, 224, .018) 32%, rgba(0, 0, 0, 0) 68%, rgba(245, 158, 11, .03) 100%), rgba(10, 10, 14, .64);
+  --glass-pill-bg: linear-gradient(180deg, rgba(255, 244, 224, .07) 0%, rgba(255, 244, 224, .018) 55%, rgba(0, 0, 0, 0) 100%), rgba(11, 11, 15, .66);
+  --glass-modal-bg: linear-gradient(155deg, rgba(255, 244, 224, .06) 0%, rgba(255, 244, 224, .015) 30%, rgba(0, 0, 0, 0) 68%, rgba(245, 158, 11, .025) 100%), rgba(11, 11, 15, .78);
+  --glass-backdrop: rgba(2, 2, 4, .62);
+  --glass-panel-shadow: 0 14px 36px rgba(0, 0, 0, .58), inset 0 1px 0 rgba(255, 240, 214, .18), inset 0 -1px 0 rgba(255, 255, 255, .04);
+  --glass-float-shadow: 0 22px 52px rgba(0, 0, 0, .68), 0 2px 12px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 240, 214, .20), inset 0 -1px 0 rgba(255, 255, 255, .05);
+  --glass-pill-shadow: 0 12px 32px rgba(0, 0, 0, .60), 0 1px 4px rgba(0, 0, 0, .34), inset 0 1px 0 rgba(255, 240, 214, .20);
+  --glass-panel-inset: inset 0 1px 0 rgba(255, 240, 214, .14);
+
   --ring-selected: 0 0 0 1px var(--accent);
-  --ring-focus: 0 0 0 2px rgba(79, 196, 140, .5);
+  --ring-focus: 0 0 0 2px rgba(245, 158, 11, .52);
 
   /* motion */
   --dur-fast: 120ms;
   --ease-out: cubic-bezier(.2, .7, .3, 1);
 }
 
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-blur: none;
+    --glass-blur-soft: none;
+    --glass-float-bg: #111116;
+    --glass-pill-bg: #111116;
+    --glass-modal-bg: #111116;
+    --glass-panel-bg: #0c0c10;
+    --glass-bar-bg: #0c0c10;
+    --overlay-fill: #111116;
+    --glass-backdrop: rgba(2, 2, 4, .88);
+  }
+}
+
 @media (prefers-contrast: more) {
-  :root { --border: rgba(255, 255, 255, .3); --border-strong: rgba(255, 255, 255, .5); --text-2: #cfd1d4; --text-3: #a1a4a9; }
+  :root { --border: rgba(255, 255, 255, .3); --border-strong: rgba(255, 255, 255, .5); --glass-rim: rgba(255, 255, 255, .45); --glass-rim-strong: rgba(255, 255, 255, .65); --text-2: #cfd1d4; --text-3: #a3a3ad; }
 }
 
 @media (prefers-reduced-motion: reduce) {

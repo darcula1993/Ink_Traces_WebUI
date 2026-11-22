@@ -1,11 +1,10 @@
-/* UI-ITER-R1: the single button system for the whole app.
+/* OBSIDIAN-AMBER-20261122: the single button system for the whole app.
  * Classes: .btn + one variant (.btn-primary | .btn-secondary | .btn-ghost | .btn-danger | .btn-icon),
  * optional size (.btn-sm 28px | default 32px | .btn-lg 36px), .btn-block, .btn-round (circular icon),
  * state .is-active / [aria-pressed=true] / [aria-expanded=true].
- * Direction (user 2026-11-13, Linear-like on neutral near-black): almost no fill, 1px low-contrast
- * rims, primary = low-saturation deep green (green only as accent), hierarchy by lightness
- * (hover +4%, press darker), thin 2px green focus ring, no glow / heavy shadow, faint inner
- * highlight only. Transitions 120ms, disabled under prefers-reduced-motion.
+ * Direction (user 2026-11-22, Cinema Obsidian & Amber): crisp 1px rims on obsidian glass, primary =
+ * molten amber gold gradient with dark obsidian ink (#0a0602, WCAG AAA ~9:1), thin 2px amber focus
+ * ring, subtle inner specular highlight. Transitions 120ms, disabled under prefers-reduced-motion.
  * Unstyled <button>s inside the canvas fall back to the secondary look via canvasTheme.css
  * using the same --btn-* tokens below. */
 :root {
@@ -16,25 +15,25 @@
   --btn-radius: 7px;
   --btn-font: 500 13px/1 var(--font-sans, Inter, system-ui, sans-serif);
   --btn-tracking: -.01em;
-  --btn-highlight: inset 0 1px 0 rgba(255, 255, 255, .03);
-  --btn-rim: rgba(255, 255, 255, .09);
-  --btn-rim-hover: rgba(255, 255, 255, .14);
-  --btn-fill: rgba(255, 255, 255, .02);
-  --btn-fill-hover: rgba(255, 255, 255, .06);
-  --btn-fill-press: rgba(0, 0, 0, .14);
-  --btn-text: #e4e5e7;
-  --btn-text-muted: #a1a4a9;
-  --btn-primary-fill: #246646;
-  --btn-primary-fill-hover: #2c7a54;
-  --btn-primary-fill-press: #1d5238;
-  --btn-primary-rim: rgba(94, 214, 155, .56);
-  --btn-primary-text: #f4fbf7;
-  --btn-active-fill: rgba(69, 192, 136, .10);
-  --btn-active-rim: rgba(79, 196, 140, .30);
-  --btn-active-text: #9fe0c0;
-  --btn-danger-text: #d9959a;
-  --btn-danger-fill-hover: rgba(223, 138, 144, .10);
-  --btn-danger-rim-hover: rgba(223, 138, 144, .30);
+  --btn-highlight: inset 0 1px 0 rgba(255, 255, 255, .065);
+  --btn-rim: rgba(255, 255, 255, .10);
+  --btn-rim-hover: rgba(255, 255, 255, .18);
+  --btn-fill: rgba(255, 255, 255, .035);
+  --btn-fill-hover: rgba(255, 255, 255, .085);
+  --btn-fill-press: rgba(0, 0, 0, .28);
+  --btn-text: #f5f5f7;
+  --btn-text-muted: #a3a3ad;
+  --btn-primary-fill: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  --btn-primary-fill-hover: linear-gradient(180deg, #fbbf24 0%, #e5850b 100%);
+  --btn-primary-fill-press: #c26a06;
+  --btn-primary-rim: rgba(253, 224, 71, .52);
+  --btn-primary-text: #0a0602;
+  --btn-active-fill: rgba(245, 158, 11, .14);
+  --btn-active-rim: rgba(245, 158, 11, .42);
+  --btn-active-text: #fcd34d;
+  --btn-danger-text: #f87171;
+  --btn-danger-fill-hover: rgba(248, 113, 113, .14);
+  --btn-danger-rim-hover: rgba(248, 113, 113, .38);
   --btn-ring: var(--ring-focus);
   --btn-transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
@@ -64,7 +63,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 .btn svg { flex-shrink: 0; width: 15px; height: 15px; }
-.btn:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); color: #f4f5f6; }
+.btn:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); color: #ffffff; }
 .btn:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-fill-press); }
 .btn:focus-visible { outline: none; box-shadow: var(--btn-highlight), var(--btn-ring); }
 .btn:disabled, .btn[aria-disabled=true] { opacity: .4; cursor: not-allowed; box-shadow: none; }
@@ -81,10 +80,10 @@
 .btn.btn-lg svg { width: 16px; height: 16px; }
 .btn.btn-block { display: flex; width: 100%; }
 
-/* primary: clear enabled deep-green fill on dark neutral ground; green stays an accent */
-.btn.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); }
-.btn.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(110, 224, 168, .75); background: var(--btn-primary-fill-hover); color: #fff; }
-.btn.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); }
+/* primary: Cinema Amber Gold fill with high-contrast dark obsidian ink (#0a0602) */
+.btn.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); font-weight: 600; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .26), 0 1px 3px rgba(0, 0, 0, .38); }
+.btn.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(253, 224, 71, .75); background: var(--btn-primary-fill-hover); color: #050300; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .32), 0 4px 16px rgba(245, 158, 11, .32); }
+.btn.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); color: #050300; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .30); }
 
 /* secondary is the base look */
 .btn.btn-secondary { }
@@ -93,10 +92,10 @@
 .btn.btn-ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--btn-text-muted); }
 .btn.btn-ghost:hover:not(:disabled):not([aria-disabled=true]) { border-color: transparent; background: var(--btn-fill-hover); color: var(--btn-text); }
 
-/* danger: identical to secondary at rest; only text/icon are a muted red; red fill appears on hover */
+/* danger: identical to secondary at rest; only text/icon are red; soft red fill appears on hover */
 .btn.btn-danger { color: var(--btn-danger-text); }
-.btn.btn-danger:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-danger-rim-hover); background: var(--btn-danger-fill-hover); color: #efb3b7; }
-.btn.btn-danger:focus-visible { box-shadow: var(--btn-highlight), 0 0 0 2px rgba(223, 138, 144, .45); }
+.btn.btn-danger:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-danger-rim-hover); background: var(--btn-danger-fill-hover); color: #fca5a5; }
+.btn.btn-danger:focus-visible { box-shadow: var(--btn-highlight), 0 0 0 2px rgba(248, 113, 113, .5); }
 
 /* icon: square, ghost visuals; hit area >= 28px */
 .btn.btn-icon { width: var(--btn-h); min-width: var(--btn-h); height: var(--btn-h); min-height: var(--btn-h); padding: 0; border-color: transparent; background: transparent; box-shadow: none; color: var(--btn-text-muted); }
@@ -107,10 +106,10 @@
 .btn.btn-icon.btn-outlined:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-rim-hover); background: var(--btn-fill-hover); }
 .btn.btn-icon.btn-danger { color: var(--btn-danger-text); }
 .btn.btn-icon.btn-danger:hover:not(:disabled):not([aria-disabled=true]),
-.btn.btn-icon.btn-outlined.btn-danger:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-danger-rim-hover); background: var(--btn-danger-fill-hover); color: #efb3b7; }
-.btn.btn-icon.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); }
-.btn.btn-icon.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(79, 196, 140, .45); background: var(--btn-primary-fill-hover); color: #fff; }
-.btn.btn-icon.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); }
+.btn.btn-icon.btn-outlined.btn-danger:hover:not(:disabled):not([aria-disabled=true]) { border-color: var(--btn-danger-rim-hover); background: var(--btn-danger-fill-hover); color: #fca5a5; }
+.btn.btn-icon.btn-primary { border-color: var(--btn-primary-rim); background: var(--btn-primary-fill); color: var(--btn-primary-text); font-weight: 600; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .26), 0 1px 3px rgba(0, 0, 0, .38); }
+.btn.btn-icon.btn-primary:hover:not(:disabled):not([aria-disabled=true]) { border-color: rgba(253, 224, 71, .75); background: var(--btn-primary-fill-hover); color: #050300; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .32), 0 4px 16px rgba(245, 158, 11, .32); }
+.btn.btn-icon.btn-primary:active:not(:disabled):not([aria-disabled=true]) { background: var(--btn-primary-fill-press); color: #050300; }
 .btn.btn-round { border-radius: var(--r-pill); }
 
 @media (prefers-reduced-motion: reduce) {

@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="License: MIT" />
-  <img src="https://img.shields.io/badge/version-2.4.2-1f6feb?style=flat-square" alt="Version 2.4.2" />
+  <img src="https://img.shields.io/badge/version-2.5.0-1f6feb?style=flat-square" alt="Version 2.5.0" />
   <img src="https://img.shields.io/badge/stack-React%2018%20%2B%20Flask%20%2B%20SQLite-24292f?style=flat-square" alt="Tech Stack: React 18 + Flask + SQLite" />
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/node-18%2B-339933?style=flat-square" alt="Node.js 18+" />
@@ -36,7 +36,7 @@ Built for solo creators and developers producing multi-shot visual stories with 
 ## Core Features
 
 ### Project → Multi-Canvas → Node Workflow
-- **Flat full-bleed dark studio & URL persistence**: Full-bleed desktop IDE layout with a 48px icon rail, pinnable drawers (Canvas, Library, Character Cards, Prompt Vault, Canvas Tasks), browser URL route persistence (`?project=…&canvas=…`), bottom-left minimap, undo/redo, and zoom controls.
+- **Obsidian & Amber smoked Liquid Glass studio & URL persistence**: Unified 14px rounded smoked-obsidian Liquid Glass panels on a `#050507` darkroom ground with molten-amber focus/actions, 100% neutral media preview stages, Ink-Trace launch reveal, 48px icon rail, pinnable drawers (Canvas, Library, Character Cards, Prompt Vault, Canvas Tasks), browser URL route persistence (`?project=…&canvas=…`), bottom-left minimap, undo/redo, and zoom controls.
 - **Unified right properties panel & reliability guardrails**: Shared single-column properties panel across Canvas and standalone Image, Video, and Audio tools (44px neutral icon header, 36px controls with prefix icons, collapsible Advanced drawer, sticky 3-decimal USD cost estimate footer), with Seedance video-reference/extend `ratio=adaptive` guardrails, expandable/copyable sanitized errors with allowlisted fix hints, and multi-select **Run Selected**.
 - **In-card prompt editing, collapsed `@` character badges & typed ports**: Edit prompts directly inside generation cards (with leading `@character` blocks collapsed to a compact 1-line badge while keeping submitted plaintext byte-exact), atomic `@图片N` / `@视频N` / `@音频N` mentions, and color-coded dynamic reference ports whose order determines video first/last frames.
 - **Short-drama iteration & reuse**: Compare 2–4 node versions side-by-side (linked image zoom; muted-by-default synced video playback), mark finalized 「定稿」 versions with sidebar filtering, spawn downstream video **Extend / Edit** nodes in one click (never auto-submitting paid tasks), save reusable **Node Group Structural Templates** (`/api/canvas/templates`, zero bundled presets), and execute **Run Node Group** server-side.

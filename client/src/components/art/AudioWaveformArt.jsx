@@ -24,7 +24,7 @@ const COMPACT_ENVELOPE = [
 export default function AudioWaveformArt({
   variant = 'card',
   compact = false,
-  accent = 'green',
+  accent = 'amber',
   progress = null,
   className = '',
 }) {
@@ -38,7 +38,7 @@ export default function AudioWaveformArt({
   const usableWidth = viewWidth - padX * 2
   const step = usableWidth / (heights.length - 1)
   const barWidth = isMini ? 2.6 : 2.8
-  const accentColor = accent === 'purple' ? '#A47CF3' : '#45c088'
+  const accentColor = accent === 'purple' ? '#A47CF3' : '#f59e0b'
   const hasProgress = typeof progress === 'number' && Number.isFinite(progress)
 
   return (
@@ -53,7 +53,7 @@ export default function AudioWaveformArt({
     >
       {/* Subtle concentric acoustic arcs (card variant only) */}
       {!isMini && (
-        <g stroke="#e4e5e7" strokeLinecap="round">
+        <g stroke="#f5f5f7" strokeLinecap="round">
           <path
             d="M72 30A56 56 0 0 1 168 30"
             strokeOpacity="0.06"
@@ -85,7 +85,7 @@ export default function AudioWaveformArt({
         y1={centerY}
         x2={viewWidth - padX + 6}
         y2={centerY}
-        stroke="#e4e5e7"
+        stroke="#f5f5f7"
         strokeOpacity="0.14"
         strokeWidth="1"
         strokeLinecap="round"
@@ -103,7 +103,7 @@ export default function AudioWaveformArt({
           ? accentColor
           : isPrimaryPeak
             ? accentColor
-            : '#e4e5e7'
+            : '#f5f5f7'
         const fillOpacity = played
           ? 0.9
           : isPrimaryPeak
@@ -125,8 +125,8 @@ export default function AudioWaveformArt({
       })}
 
       {/* Baseline end ticks */}
-      <circle cx={padX - 6} cy={centerY} r="1.4" fill="#e4e5e7" fillOpacity="0.24" />
-      <circle cx={viewWidth - padX + 6} cy={centerY} r="1.4" fill="#e4e5e7" fillOpacity="0.24" />
+      <circle cx={padX - 6} cy={centerY} r="1.4" fill="#f5f5f7" fillOpacity="0.24" />
+      <circle cx={viewWidth - padX + 6} cy={centerY} r="1.4" fill="#f5f5f7" fillOpacity="0.24" />
     </svg>
   )
 }

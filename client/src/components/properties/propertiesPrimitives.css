@@ -1,16 +1,16 @@
 /* UNIFY-PROPS-PANEL-20261122: shared Linear-style right properties panel primitives.
  * Single source of truth for standalone tools (.inspector-pane), LayerStudio (.layer-studio-right),
- * and Canvas (.cv-properties). One column, 36px controls, neutral dark surfaces, green only for
+ * and Canvas (.cv-properties). One column, 36px controls, obsidian dark surfaces, amber only for
  * focus rings, checked switches, and primary actions. */
 :root {
   --pf-h: 36px;
   --pf-gap: 12px;
   --pf-pad: 16px;
-  --pf-rim: rgba(255, 255, 255, .10);
-  --pf-rim-hover: rgba(255, 255, 255, .16);
-  --pf-fill: rgba(255, 255, 255, .03);
-  --pf-fill-hover: rgba(255, 255, 255, .05);
-  --pf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a4a9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --pf-rim: rgba(255, 244, 224, .11);
+  --pf-rim-hover: rgba(255, 244, 224, .20);
+  --pf-fill: rgba(5, 5, 8, .55);
+  --pf-fill-hover: rgba(17, 17, 22, .78);
+  --pf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a3a3ad' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* ---- panel shell: fixed head + scrollable body + pinned footer */
@@ -20,7 +20,10 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--surface-1);
+  background: var(--glass-panel-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-panel-shadow);
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
@@ -34,11 +37,9 @@
   height: 44px;
   min-height: 44px;
   padding: 0 var(--pf-pad);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-1);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  box-shadow: none;
+  border-bottom: 1px solid rgba(255, 244, 224, .085);
+  background: rgba(255, 244, 224, .03);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 224, .12);
 }
 
 .pf-kind-box {
@@ -50,6 +51,7 @@
   border: 1px solid var(--pf-rim);
   border-radius: 6px;
   background: var(--pf-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
   color: var(--text-2);
 }
 
@@ -88,8 +90,28 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0 var(--pf-pad) var(--pf-pad);
+  padding: 0 var(--pf-pad) 20px;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, .18) transparent;
+}
+
+.pf-panel-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pf-panel-body::-webkit-scrollbar-track {
+  background: transparent;
+  margin: 4px 0;
+}
+
+.pf-panel-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .16);
+}
+
+.pf-panel-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, .28);
 }
 
 /* ---- sections */
@@ -198,6 +220,9 @@
 
 .pf-field select,
 .pf-field input:not([type=checkbox]),
+.pf-select,
+.pf-input,
+.pf-stepper,
 .pf-panel .ip-controls.is-panel select,
 .pf-panel .ip-controls.is-panel input:not([type=checkbox]) {
   width: 100%;
@@ -215,8 +240,8 @@
   text-overflow: ellipsis;
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: none;
-  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 
 .pf-field select,
@@ -251,7 +276,7 @@
 .pf-field :is(select, input:not([type=checkbox])):focus-visible,
 .pf-panel .ip-controls.is-panel :is(select, input:not([type=checkbox])):focus-visible {
   outline: none;
-  border-color: var(--border-focus);
+  border-color: var(--accent, #f59e0b);
   box-shadow: var(--ring-focus);
 }
 
@@ -309,6 +334,7 @@
 
 /* ---- toggle row + 32x18 Linear switch */
 .pf-toggle,
+.pf-toggle-row,
 .pf-panel .ip-controls.is-panel .ip-toggle {
   display: flex;
   align-items: center;
@@ -319,9 +345,18 @@
   border: 1px solid var(--pf-rim);
   border-radius: 8px;
   background: var(--pf-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
   font-size: 13px;
   color: var(--text);
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+
+.pf-toggle:hover:not(.is-disabled),
+.pf-toggle-row:hover:not(.is-disabled),
+.pf-panel .ip-controls.is-panel .ip-toggle:hover {
+  border-color: var(--pf-rim-hover);
+  background: var(--pf-fill-hover);
 }
 
 .pf-toggle.is-disabled {
@@ -423,19 +458,22 @@
   gap: 6px;
   width: 100%;
   min-height: 32px;
-  padding: 0 4px 0 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
+  padding: 0 10px;
+  border: 1px solid var(--pf-rim);
+  border-radius: 8px;
+  background: var(--pf-fill);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 
 .pf-advanced-toggle:hover:not(:disabled) {
-  background: transparent;
+  border-color: var(--pf-rim-hover);
+  background: var(--pf-fill-hover);
   color: var(--text);
 }
 
@@ -540,7 +578,12 @@
 .pf-panel .ip-controls.is-panel .ip-size-tools {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
+}
+
+.pf-panel .ip-controls.is-panel .ip-size-tools button:where(:not(.btn, .pf-advanced-toggle, .cv-pf-advanced-toggle)) {
+  padding: 0 4px;
+  font-size: 12px;
 }
 
 .pf-panel .ip-controls.is-panel .ip-reference-size {
@@ -597,17 +640,20 @@
 
 /* ---- pinned CostEstimateFooter */
 .pf-panel-footer {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
-  background: var(--surface-1);
+  border-top: 1px solid rgba(255, 244, 224, .085);
+  background: rgba(6, 6, 9, .48);
+  box-shadow: 0 -10px 18px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 244, 224, .08);
 }
 
 .pf-cost-details {
   padding: 10px var(--pf-pad);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  border-bottom: 1px solid rgba(255, 244, 224, .08);
+  background: rgba(255, 244, 224, .025);
   font-size: 12px;
   line-height: 18px;
   color: var(--text-2);
@@ -675,7 +721,7 @@
 }
 
 .pf-cost-value.is-warn {
-  color: var(--warning, #d9b15f);
+  color: var(--warning, #fbbf24);
 }
 
 .pf-cost-value.is-muted {
@@ -695,4 +741,33 @@
 
 .pf-cost-chevron.is-open {
   transform: rotate(180deg);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .pf-panel {
+    background: var(--surface-1);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pf-panel {
+    background: var(--glass-panel-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .pf-header {
+    background: #0e0e13;
+  }
+
+  .pf-panel-footer {
+    background: #0a0a0e;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --pf-rim: rgba(255, 255, 255, .36);
+    --pf-rim-hover: rgba(255, 255, 255, .56);
+  }
 }

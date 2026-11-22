@@ -1,16 +1,16 @@
-/* V24-W2-TEMPLATES-API: Linear-style dark neutral overlays for group structural templates.
- * Glass blur stays on the modal overlay only; green accent reserved for focus/primary CTA. */
+/* V24-W2-TEMPLATES-API: Obsidian & Amber overlays for group structural templates.
+ * Glass blur stays on the modal overlay only; amber accent reserved for focus/primary CTA. */
 
 .cv-tpl-overlay {
   position: fixed;
   inset: 0;
   z-index: 95;
-  background: rgba(0, 0, 0, .62);
+  background: var(--glass-backdrop, rgba(5, 5, 7, .56));
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 20px;
-  color: var(--text, #e8ece9);
+  color: var(--text, #f5f5f7);
 }
 
 .cv-tpl-dialog {
@@ -18,12 +18,12 @@
   max-height: min(82vh, 720px);
   display: flex;
   flex-direction: column;
-  background: var(--overlay-fill, rgba(22, 25, 24, .95));
-  -webkit-backdrop-filter: var(--glass-blur, blur(14px));
-  backdrop-filter: var(--glass-blur, blur(14px));
-  border: 1px solid var(--border-strong, rgba(255, 255, 255, .14));
-  border-radius: var(--r-lg, 8px);
-  box-shadow: var(--shadow-2, 0 18px 48px rgba(0, 0, 0, .55));
+  background: var(--glass-modal-bg, rgba(14, 14, 18, .66));
+  -webkit-backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  border: 1px solid var(--glass-rim, rgba(255, 255, 255, .14));
+  border-radius: var(--glass-radius, 14px);
+  box-shadow: var(--glass-float-shadow, 0 18px 44px rgba(0, 0, 0, .54), inset 0 1px 0 rgba(255, 255, 255, .14));
   outline: none;
   overflow: hidden;
   font-size: 14px;
@@ -40,6 +40,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 14px 18px;
+  background: rgba(255, 255, 255, .04);
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, .09));
 }
 
@@ -51,7 +52,7 @@
 }
 
 .cv-tpl-title-group svg {
-  color: var(--accent, #4fc48c);
+  color: var(--accent, #f59e0b);
   flex-shrink: 0;
 }
 
@@ -59,7 +60,7 @@
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: var(--text, #eef2ef);
+  color: var(--text, #f5f5f7);
 }
 
 .cv-tpl-icon-btn {
@@ -72,17 +73,17 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--r-md, 6px);
-  color: var(--text-2, #a8b0ac);
+  color: var(--text-2, #a3a3ad);
   cursor: pointer;
 }
 
 .cv-tpl-icon-btn:hover:not(:disabled) {
   background: rgba(255, 255, 255, .06);
-  color: var(--text, #eef2ef);
+  color: var(--text, #f5f5f7);
 }
 
 .cv-tpl-icon-btn:focus-visible {
-  outline: 2px solid var(--border-focus, rgba(79, 196, 140, .65));
+  outline: 2px solid var(--border-focus, rgba(var(--accent-rgb, 245, 158, 11), .72));
   outline-offset: 1px;
 }
 
@@ -101,7 +102,7 @@
   border-radius: var(--r-md, 6px);
   background: var(--field, rgba(255, 255, 255, .04));
   border: 1px solid var(--border, rgba(255, 255, 255, .08));
-  color: var(--text-2, #b4bcb8);
+  color: var(--text-2, #a3a3ad);
   font-size: 13px;
 }
 
@@ -116,12 +117,12 @@
   align-items: center;
   justify-content: space-between;
   font-size: 13px;
-  color: var(--text-2, #b4bcb8);
+  color: var(--text-2, #a3a3ad);
 }
 
 .cv-tpl-counter {
   font-size: 12px;
-  color: var(--text-3, #87918c);
+  color: var(--text-3, #686873);
   font-variant-numeric: tabular-nums;
 }
 
@@ -132,14 +133,14 @@
   border-radius: var(--r-md, 6px);
   border: 1px solid var(--border-strong, rgba(255, 255, 255, .14));
   background: var(--field, rgba(255, 255, 255, .05));
-  color: var(--text, #eef2ef);
+  color: var(--text, #f5f5f7);
   font: inherit;
 }
 
 .cv-tpl-field input[type="text"]:focus-visible {
-  outline: 2px solid var(--border-focus, rgba(79, 196, 140, .65));
+  outline: 2px solid var(--border-focus, rgba(var(--accent-rgb, 245, 158, 11), .72));
   outline-offset: 1px;
-  border-color: var(--accent, #4fc48c);
+  border-color: var(--accent, #f59e0b);
 }
 
 .cv-tpl-checkbox {
@@ -156,7 +157,7 @@
 .cv-tpl-checkbox input[type="checkbox"] {
   margin-top: 3px;
   flex-shrink: 0;
-  accent-color: var(--accent, #4fc48c);
+  accent-color: var(--accent, #f59e0b);
 }
 
 .cv-tpl-checkbox span {
@@ -169,12 +170,12 @@
 .cv-tpl-checkbox strong {
   font-size: 13px;
   font-weight: 500;
-  color: var(--text, #eef2ef);
+  color: var(--text, #f5f5f7);
 }
 
 .cv-tpl-checkbox small {
   font-size: 12px;
-  color: var(--text-2, #a2aba6);
+  color: var(--text-2, #a3a3ad);
   line-height: 1.45;
 }
 
@@ -182,16 +183,16 @@
   margin: 0;
   padding: 8px 10px;
   border-radius: var(--r-md, 6px);
-  border: 1px solid rgba(223, 138, 144, .45);
-  background: rgba(217, 119, 124, .12);
-  color: #f3c8cb;
+  border: 1px solid rgba(248, 113, 113, .45);
+  background: var(--danger-soft, rgba(248, 113, 113, .12));
+  color: #fca5a5;
   font-size: 13px;
 }
 
 .cv-tpl-status {
   margin: 18px 0;
   text-align: center;
-  color: var(--text-2, #a2aba6);
+  color: var(--text-2, #a3a3ad);
   font-size: 13px;
 }
 
@@ -205,24 +206,24 @@
   justify-content: center;
   text-align: center;
   gap: 6px;
-  color: var(--text-2, #a2aba6);
+  color: var(--text-2, #a3a3ad);
 }
 
 .cv-tpl-empty svg {
-  color: var(--text-3, #7e8883);
+  color: var(--text-3, #686873);
   margin-bottom: 4px;
 }
 
 .cv-tpl-empty strong {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text, #e8ece9);
+  color: var(--text, #f5f5f7);
 }
 
 .cv-tpl-empty p {
   margin: 0;
   font-size: 13px;
-  color: var(--text-2, #a2aba6);
+  color: var(--text-2, #a3a3ad);
 }
 
 .cv-tpl-list {
@@ -242,7 +243,7 @@
   padding: 10px 12px;
   border-radius: var(--r-md, 6px);
   border: 1px solid var(--border, rgba(255, 255, 255, .09));
-  background: var(--surface-1, rgba(255, 255, 255, .03));
+  background: rgba(255, 255, 255, .035);
 }
 
 .cv-tpl-item:hover {
@@ -268,7 +269,7 @@
 .cv-tpl-item-title strong {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text, #eef2ef);
+  color: var(--text, #f5f5f7);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -279,16 +280,16 @@
   height: 9px;
   border-radius: 999px;
   flex-shrink: 0;
-  background: rgba(var(--cv-group-rgb, 92, 160, 126), .85);
-  border: 1px solid rgba(var(--cv-group-rgb, 92, 160, 126), 1);
+  background: rgba(var(--cv-group-rgb, 245, 158, 11), .88);
+  border: 1px solid rgba(var(--cv-group-rgb, 245, 158, 11), 1);
 }
 
-.cv-tpl-color-dot[data-color="green"] { --cv-group-rgb: 92, 160, 126; }
-.cv-tpl-color-dot[data-color="cyan"] { --cv-group-rgb: 88, 160, 166; }
-.cv-tpl-color-dot[data-color="blue"] { --cv-group-rgb: 112, 142, 196; }
-.cv-tpl-color-dot[data-color="purple"] { --cv-group-rgb: 150, 128, 190; }
-.cv-tpl-color-dot[data-color="amber"] { --cv-group-rgb: 196, 165, 104; }
-.cv-tpl-color-dot[data-color="rose"] { --cv-group-rgb: 196, 128, 150; }
+.cv-tpl-color-dot[data-color="green"] { --cv-group-rgb: 52, 211, 153; }
+.cv-tpl-color-dot[data-color="cyan"] { --cv-group-rgb: 56, 189, 248; }
+.cv-tpl-color-dot[data-color="blue"] { --cv-group-rgb: 96, 165, 250; }
+.cv-tpl-color-dot[data-color="purple"] { --cv-group-rgb: 167, 139, 250; }
+.cv-tpl-color-dot[data-color="amber"] { --cv-group-rgb: 245, 158, 11; }
+.cv-tpl-color-dot[data-color="rose"] { --cv-group-rgb: 251, 113, 133; }
 
 .cv-tpl-badge {
   flex-shrink: 0;
@@ -297,14 +298,14 @@
   font-size: 11px;
   line-height: 16px;
   border: 1px solid var(--border, rgba(255, 255, 255, .12));
-  color: var(--text-2, #a8b0ac);
+  color: var(--text-2, #a3a3ad);
   background: rgba(255, 255, 255, .03);
 }
 
 .cv-tpl-badge.is-prompt {
-  border-color: rgba(79, 196, 140, .38);
-  color: var(--btn-active-text, #9fe0c0);
-  background: rgba(79, 196, 140, .1);
+  border-color: rgba(var(--accent-rgb, 245, 158, 11), .42);
+  color: var(--btn-active-text, #fcd34d);
+  background: rgba(var(--accent-rgb, 245, 158, 11), .12);
 }
 
 .cv-tpl-item-meta {
@@ -313,7 +314,7 @@
   gap: 6px;
   flex-wrap: wrap;
   font-size: 12px;
-  color: var(--text-3, #87918c);
+  color: var(--text-3, #686873);
   font-variant-numeric: tabular-nums;
 }
 
@@ -337,5 +338,21 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
+  background: rgba(10, 10, 14, .32);
   border-top: 1px solid var(--border, rgba(255, 255, 255, .09));
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .cv-tpl-overlay {
+    background: rgba(5, 5, 7, .84);
+  }
+  .cv-tpl-dialog {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--surface-solid, #111116);
+  }
+  .cv-tpl-header,
+  .cv-tpl-footer {
+    background: var(--surface-1, #0b0b0e);
+  }
 }

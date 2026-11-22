@@ -191,6 +191,7 @@ export default function LayerStudio({ notify }) {
   const [selectedProviderId, setSelectedProviderId] = useState(() => readSessionValue(LAYER_PROVIDER_STORAGE_KEY))
   const [modelKnown, setModelKnown] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [restoringProject, setRestoringProject] = useState(() => Boolean(readSessionValue(LAST_PROJECT_STORAGE_KEY)))
   const providerLoadSeq = useRef(0)
 
   const loadLayerProviders = useCallback(async () => {
@@ -434,7 +435,7 @@ export default function LayerStudio({ notify }) {
   useEffect(() => {
     let alive = true
     loadProjects()
-      .then(list => {
+      .then(async list => {
         if (!alive || incomingSourceRef.current) return
         const lastId = readSessionValue(LAST_PROJECT_STORAGE_KEY)
         if (!lastId) return
@@ -443,11 +444,14 @@ export default function LayerStudio({ notify }) {
           writeSessionValue(LAST_PROJECT_STORAGE_KEY, null)
           return
         }
-        openProject(match.id).catch(() => {
+        try {
+          await openProject(match.id)
+        } catch {
           if (alive) writeSessionValue(LAST_PROJECT_STORAGE_KEY, null)
-        })
+        }
       })
       .catch(() => notify?.('图层工作室项目加载失败', 'error'))
+      .finally(() => { if (alive) setRestoringProject(false) })
     return () => { alive = false }
   }, [loadProjects, notify, openProject])
 
@@ -681,6 +685,8 @@ export default function LayerStudio({ notify }) {
             <img src={sourcePreview} alt={sourceFile ? `源图 ${sourceFile.name}` : '源图'} />
             <div className="layer-source-status" role="status">正在载入源图…</div>
           </div>
+        ) : !project && restoringProject ? (
+          null
         ) : !project ? (
           <div
             className="layer-studio-empty"

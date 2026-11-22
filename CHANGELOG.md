@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.5.0 - 2026-11-22
+
+Cinema Obsidian & Amber darkroom theme, unified 14px smoked Liquid Glass architecture, Ink-Trace launch ritual, zero-flash mode navigation, and comprehensive real-device UI polish.
+
+- **Obsidian & Amber Cinema Darkroom Theme**:
+  - Replaced the pale gray-green palette with a deep obsidian ground (`#050507`), crisp high-contrast near-white typography (`#F5F5F7`), molten amber gold primary actions (`#F59E0B` / `#D97706` with `#0A0602` dark ink), and jade-emerald image reference ports (`#34D399`) clearly separated from amber selection/focus states.
+  - Upgraded the canvas generating overlay (`CodeRainCanvas`) to molten amber digital rain, refreshed `BrandMark`, empty-state illustrations, login smoked-bronze ambient wash, and `favicon.svg`, and differentiated completed (`emerald`) vs. processing (`amber`) task status badges.
+  - Kept all media previews and review stages strictly neutral (`#060608`) with zero color cast.
+- **Unified `14px` Rounded Smoked Liquid Glass System**:
+  - Unified the top navigation bar, canvas left icon rail / topbar / floating & pinned drawers / right properties panel / bottom controls, standalone Image / Video / Audio 3-column workspaces, Layer Studio 6-block grid, Global Task Center, and all modal dialogs onto consistent `14px` rounded smoked-obsidian translucent glass surfaces (`8px` breathing gutters, crisp 1px warm specular top rim, single-layer modal glass with blur-free dark backdrops, and solid fallbacks under `prefers-reduced-transparency`).
+  - Kept canvas node cards and task list cards free of `backdrop-filter` to preserve smooth 60fps pan/zoom/scroll performance.
+- **Ink-Trace Launch Ritual (`LaunchSplash`)**:
+  - Added a pitch-obsidian darkroom boot reveal featuring viewfinder corner locks, animated molten-amber SVG ink-trace drawing, wordmark glide-in, and light sweep on first-tab cold open and login transitions while preloading the workspace in parallel underneath (skippable via click or `Esc`/`Enter`/`Space`, zero artificial delay on same-tab refresh, and full `prefers-reduced-motion` support).
+- **Zero-Flash Top-Nav Switching & 19 Real-Device Polish Fixes**:
+  - Eliminated stale-card, empty-state, 8-card skeleton, Suspense text, and canvas/layer loading flashes during fast top-nav switching (`TaskGallery` scope gate + 180ms delayed skeleton, static core route imports, silent session restore).
+  - Aligned 44px panel headers pixel-for-pixel across Image, Video, Audio, and Layer workspaces; fixed Layer Studio 5.0 Pro dock cost clipping, 1280px pinned bar & right-panel drag overflow, `ProviderSettings` `Esc`/loading/revision handling, floating drawer top alignment, resizer jump prevention, and modal/menu keyboard dismiss ergonomics.
+
 ## 2.4.2 - 2026-11-22
 
 Video asset node toolbar & non-destructive video splitting, canvas media upload progress HUD, unified right properties panels, Global Task Center trash consolidation, and HTTPS workspace proxy template protection.

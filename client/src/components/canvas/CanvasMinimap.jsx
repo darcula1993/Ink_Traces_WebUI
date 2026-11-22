@@ -24,7 +24,7 @@ export default function CanvasMinimap({nodes=[],groups=[],view,surface,selectedI
    const ratio=window.devicePixelRatio||1,ctx=canvas.getContext('2d');if(!ctx)return
    if(canvas.width!==size.width*ratio)canvas.width=size.width*ratio;if(canvas.height!==size.height*ratio)canvas.height=size.height*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,size.width,size.height)
    const colors=Object.fromEntries(['image','video','audio'].map(kind=>[kind,cssVar(canvas,portToken(kind),'')]))
-   const neutral=cssVar(canvas,'--cv-minimap-node','rgba(255,255,255,.35)'),focus=cssVar(canvas,'--cv-green','#45c088'),groupFill=cssVar(canvas,'--cv-minimap-group','rgba(255,255,255,.06)')
+   const neutral=cssVar(canvas,'--cv-minimap-node','rgba(255,255,255,.35)'),focus=cssVar(canvas,'--cv-green','#f59e0b'),groupFill=cssVar(canvas,'--cv-minimap-group','rgba(255,255,255,.06)')
    const byId=new Map(nodes.map(node=>[node.id,node]))
    ctx.fillStyle=groupFill
    for(const group of groups||[]){const members=(group.nodeIds||[]).map(id=>byId.get(id)).filter(Boolean);if(!members.length)continue

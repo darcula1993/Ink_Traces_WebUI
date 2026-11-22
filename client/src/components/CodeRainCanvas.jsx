@@ -84,8 +84,8 @@ function drawStream(context, stream, viewport) {
 
     if (offset === 0) {
       context.globalAlpha = 1
-      context.fillStyle = '#effff4'
-      context.shadowColor = 'rgba(205, 255, 220, 0.98)'
+      context.fillStyle = '#fffbeb'
+      context.shadowColor = 'rgba(253, 224, 71, 0.96)'
       context.shadowBlur = viewport.fontSize * 0.95
       drawGlyph(context, glyph, stream.x, y)
       context.shadowBlur = 0
@@ -95,8 +95,8 @@ function drawStream(context, stream, viewport) {
     let alpha = Math.pow(fade, 1.18) * stream.intensity
     if (offset > stream.length * 0.76) alpha *= 0.46
     context.globalAlpha = Math.max(0.06, alpha)
-    context.fillStyle = offset <= 2 ? '#83ffa1' : '#00f044'
-    context.shadowColor = offset <= 2 ? 'rgba(60, 255, 110, 0.72)' : 'transparent'
+    context.fillStyle = offset <= 2 ? '#fcd34d' : '#f59e0b'
+    context.shadowColor = offset <= 2 ? 'rgba(245, 158, 11, 0.78)' : 'transparent'
     context.shadowBlur = offset <= 2 ? 4 : 0
     drawGlyph(context, glyph, stream.x, y)
   }
@@ -169,7 +169,7 @@ export default function CodeRainCanvas({ status = 'processing', compact = false,
         rowCount: Math.ceil(rect.height / cellHeight),
       }
 
-      context.fillStyle = '#000301'
+      context.fillStyle = '#050402'
       context.fillRect(0, 0, viewport.width, viewport.height)
       configureText()
       buildStreams()
@@ -179,7 +179,7 @@ export default function CodeRainCanvas({ status = 'processing', compact = false,
     const render = (elapsedMs, advance) => {
       context.globalAlpha = 1
       context.shadowBlur = 0
-      context.fillStyle = advance ? 'rgba(0, 3, 1, 0.3)' : '#000301'
+      context.fillStyle = advance ? 'rgba(5, 4, 2, 0.3)' : '#050402'
       context.fillRect(0, 0, viewport.width, viewport.height)
       configureText()
 

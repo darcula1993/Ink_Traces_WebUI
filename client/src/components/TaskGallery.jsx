@@ -35,10 +35,12 @@ function TaskGallery({
 }) {
   const [tasks, setTasks] = useState([])
   const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [loadedScopeKey, setLoadedScopeKey] = useState('')
   const [error, setError] = useState('')
   const [view, setView] = useState('all')
   const effectiveView = !allowTrash && view === 'trash' ? 'all' : view
+  const currentScopeKey = `${mode}:${effectiveView}`
   useEffect(() => {
     if (!allowTrash && view === 'trash') setView('all')
   }, [allowTrash, view])
@@ -140,10 +142,27 @@ function TaskGallery({
     },
   ].filter(Boolean), [filters])
 
+  const restoreMenuTriggerFocus = useCallback(containerRef => {
+    const trigger = containerRef.current?.querySelector('button[aria-haspopup="menu"]')
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+  }, [])
+
   useEffect(() => {
     if (!layoutMenuOpen && !filterMenuOpen) return undefined
     const closeMenu = event => {
-      if (event.type === 'keydown' && event.key !== 'Escape') return
+      if (event.type === 'keydown') {
+        if (event.key !== 'Escape' || event.defaultPrevented) return
+        if (document.querySelector('[aria-modal="true"]')) return
+        event.preventDefault()
+        event.stopPropagation()
+        const wasFilter = filterMenuOpen
+        const wasLayout = layoutMenuOpen
+        setLayoutMenuOpen(false)
+        setFilterMenuOpen(false)
+        if (wasFilter) restoreMenuTriggerFocus(filterMenuRef)
+        else if (wasLayout) restoreMenuTriggerFocus(layoutMenuRef)
+        return
+      }
       if (event.type === 'pointerdown' && (
         layoutMenuRef.current?.contains(event.target) || filterMenuRef.current?.contains(event.target)
       )) return
@@ -156,12 +175,28 @@ function TaskGallery({
       document.removeEventListener('pointerdown', closeMenu)
       document.removeEventListener('keydown', closeMenu)
     }
-  }, [filterMenuOpen, layoutMenuOpen])
+  }, [filterMenuOpen, layoutMenuOpen, restoreMenuTriggerFocus])
 
   useEffect(() => {
     if (!groupMenuOpen && !bulkGroupMenuOpen && !bulkDownloadMenuOpen) return undefined
     const closeMenus = event => {
-      if (event.type === 'keydown' && event.key !== 'Escape') return
+      if (event.type === 'keydown') {
+        if (event.key !== 'Escape' || event.defaultPrevented) return
+        if (document.querySelector('[aria-modal="true"]')) return
+        event.preventDefault()
+        event.stopPropagation()
+        const wasGroup = groupMenuOpen
+        const wasBulkGroup = bulkGroupMenuOpen
+        const wasBulkDownload = bulkDownloadMenuOpen
+        setGroupMenuOpen(false)
+        setBulkGroupMenuOpen(false)
+        setBulkDownloadMenuOpen(false)
+        setEditingGroupId(null)
+        if (wasGroup) restoreMenuTriggerFocus(groupMenuRef)
+        else if (wasBulkGroup) restoreMenuTriggerFocus(bulkGroupMenuRef)
+        else if (wasBulkDownload) restoreMenuTriggerFocus(bulkDownloadMenuRef)
+        return
+      }
       if (event.type === 'pointerdown' && (
         groupMenuRef.current?.contains(event.target) ||
         bulkGroupMenuRef.current?.contains(event.target) ||
@@ -178,7 +213,7 @@ function TaskGallery({
       document.removeEventListener('pointerdown', closeMenus)
       document.removeEventListener('keydown', closeMenus)
     }
-  }, [bulkDownloadMenuOpen, bulkGroupMenuOpen, groupMenuOpen])
+  }, [bulkDownloadMenuOpen, bulkGroupMenuOpen, groupMenuOpen, restoreMenuTriggerFocus])
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 280)
@@ -266,6 +301,7 @@ function TaskGallery({
   }, [fetchFilterOptions])
 
   const fetchTasks = useCallback(async ({ append = false, offset = 0, preserveLoaded = false } = {}) => {
+    const requestScopeKey = currentScopeKey
     const sequence = ++fetchSequenceRef.current
     listRequestRef.current?.abort()
     statusRequestRef.current?.abort()
@@ -301,17 +337,19 @@ function TaskGallery({
             ? previous : next
         })
         setTotal(fetchedTotal)
+        setLoadedScopeKey(requestScopeKey)
         setError('')
       }
     } catch (requestError) {
       if (!controller.signal.aborted && sequence === fetchSequenceRef.current) {
+        setLoadedScopeKey(requestScopeKey)
         setError(requestError.response?.data?.error || '任务列表加载失败')
       }
     } finally {
       if (listRequestRef.current === controller) listRequestRef.current = null
       if (sequence === fetchSequenceRef.current) setLoading(false)
     }
-  }, [buildFilterParams])
+  }, [buildFilterParams, currentScopeKey])
 
   useEffect(() => {
     setTasks([])
@@ -340,9 +378,21 @@ function TaskGallery({
   }), [effectiveView, favoriteGroup, filters.status, items])
 
   // Search is server-side: a matching prompt may extend beyond the summary preview.
-  const visibleItems = categoryItems
+  const scopeReady = loadedScopeKey === currentScopeKey
+  const effectiveLoading = loading || !scopeReady
+  const visibleItems = scopeReady ? categoryItems : []
 
-  const categoryTotal = total
+  const [showSkeleton, setShowSkeleton] = useState(false)
+  useEffect(() => {
+    if (!effectiveLoading || visibleItems.length > 0) {
+      setShowSkeleton(false)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setShowSkeleton(true), 180)
+    return () => window.clearTimeout(timer)
+  }, [effectiveLoading, visibleItems.length])
+
+  const categoryTotal = scopeReady ? total : 0
   const selectedTaskCount = [...selectedKeys].filter(token => token.startsWith('task-')).length
   const activeFavoriteGroup = favoriteGroups.find(group => Number(group.id) === Number(favoriteGroup))
   const favoriteGroupLabel = favoriteGroup === 'ungrouped'
@@ -1053,7 +1103,7 @@ function TaskGallery({
       data-card-size={cardSize}
       data-card-details={cardDetails}
     >
-      <div className={`task-gallery-toolbar liquid-glass flex min-h-[52px] shrink-0 flex-wrap items-center gap-2 px-3 py-1.5 ${selectionMode ? 'task-gallery-toolbar-selection' : ''}`}>
+      <div className={`task-gallery-toolbar liquid-glass flex min-h-[44px] shrink-0 flex-wrap items-center gap-2 px-3 py-1 ${selectionMode ? 'task-gallery-toolbar-selection' : ''}`}>
         <div className="task-gallery-title flex shrink-0 items-center gap-2 text-sm font-semibold text-nexus-text-light">
           <TaskTypeIcon type={mode} />
           {taskTypeLabel(mode)}任务
@@ -1062,7 +1112,8 @@ function TaskGallery({
         {selectionMode ? (
           <div data-testid="selection-summary" className="task-selection-summary ml-3 shrink-0 font-mono text-xs text-nexus-text">
             已选 <span className="text-nexus-green">{selectedKeys.size}</span>
-            <span className="ml-2 text-xs text-nexus-muted">共 {categoryTotal}</span>
+            <span className="text-nexus-muted/60">{' / '}</span>
+            <span className="text-xs text-nexus-muted">共 {categoryTotal}</span>
           </div>
         ) : (
           <div className="task-view-segment ml-1 flex shrink-0 items-center gap-1" role="group" aria-label="任务视图">
@@ -1081,7 +1132,11 @@ function TaskGallery({
               aria-label="筛选收藏分组"
               aria-haspopup="menu"
               aria-expanded={groupMenuOpen}
-              onClick={() => setGroupMenuOpen(open => !open)}
+              onClick={() => {
+                setGroupMenuOpen(open => !open)
+                setFilterMenuOpen(false)
+                setLayoutMenuOpen(false)
+              }}
               className="favorite-group-filter"
             >
               <FolderHeart size={13} />
@@ -1172,7 +1227,7 @@ function TaskGallery({
         {!selectionMode && (
           <div className="task-gallery-search relative w-[152px] min-w-[128px] shrink-0">
             <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 z-10 -translate-y-1/2 text-nexus-muted" />
-            <input value={query} onChange={event => setQuery(event.target.value)} aria-label="搜索任务画廊" placeholder="搜索任务 / ID" className="glass-input h-8 w-full pl-8 pr-2 text-xs outline-none" />
+            <input value={query} onChange={event => setQuery(event.target.value)} aria-label="搜索任务画廊" placeholder="搜索任务 / ID" className="glass-input h-[30px] w-full pl-8 pr-2 text-xs outline-none" />
           </div>
         )}
         {!selectionMode && (
@@ -1181,7 +1236,11 @@ function TaskGallery({
               label="筛选任务"
               aria-haspopup="menu"
               aria-expanded={filterMenuOpen}
-              onClick={() => setFilterMenuOpen(open => !open)}
+              onClick={() => {
+                setFilterMenuOpen(open => !open)
+                setLayoutMenuOpen(false)
+                setGroupMenuOpen(false)
+              }}
               className={filterMenuOpen || activeFilters.length ? 'text-nexus-cyan' : ''}
             >
               <Filter size={15} />
@@ -1209,9 +1268,9 @@ function TaskGallery({
                     </select>
                   </label>
                   <label className="task-filter-field">
-                    <span>端点</span>
+                    <span>接口</span>
                     <select aria-label="按任务端点筛选" value={filters.provider} onChange={event => setFilters(previous => ({ ...previous, provider: event.target.value }))}>
-                      <option value="">全部端点</option>
+                      <option value="">全部接口</option>
                       {filterOptions.providers.map(provider => <option key={provider} value={provider}>{providerLabel(provider)}</option>)}
                     </select>
                   </label>
@@ -1238,7 +1297,11 @@ function TaskGallery({
             label="任务卡片布局"
             aria-haspopup="menu"
             aria-expanded={layoutMenuOpen}
-            onClick={() => setLayoutMenuOpen(open => !open)}
+            onClick={() => {
+              setLayoutMenuOpen(open => !open)
+              setFilterMenuOpen(false)
+              setGroupMenuOpen(false)
+            }}
             className={layoutMenuOpen ? 'text-nexus-green' : ''}
           >
             <LayoutGrid size={15} />
@@ -1484,7 +1547,7 @@ function TaskGallery({
         )}
         <TaskCardList
           items={visibleItems}
-          loading={loading}
+          loading={showSkeleton}
           detailed={cardDetails === 'detailed'}
           showTypeBadge={showTypeBadge}
           selectionMode={selectionMode}
@@ -1499,7 +1562,7 @@ function TaskGallery({
           onMove={moveTaskResults}
           trash={allowTrash && effectiveView === 'trash'}
         />
-        {!loading && visibleItems.length === 0 && (
+        {!effectiveLoading && visibleItems.length === 0 && (
           <div className="task-empty-state" data-empty-kind={emptyArtKind}>
             <TaskEmptyArt kind={emptyArtKind} className="mb-1" />
             <div className="text-sm font-medium text-nexus-text-light">{emptyTitle}</div>
@@ -1509,7 +1572,7 @@ function TaskGallery({
             )}
           </div>
         )}
-        {!selectionMode && tasks.length < total && (
+        {scopeReady && !selectionMode && tasks.length < total && (
           <button
             type="button"
             disabled={loading}

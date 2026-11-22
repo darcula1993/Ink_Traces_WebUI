@@ -2,9 +2,7 @@
   position: absolute;
   inset: 0;
   z-index: 60;
-  background: rgba(0, 0, 0, .68);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--glass-backdrop, rgba(5, 5, 7, .56));
   display: flex;
   justify-content: center;
   padding: var(--sp-5);
@@ -17,10 +15,18 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+  padding: var(--sp-3);
+  box-sizing: border-box;
   outline: none;
-  color: var(--text);
+  color: var(--text, #f5f5f7);
   font-family: var(--font-sans, Inter, system-ui, sans-serif);
   min-height: 0;
+  background: var(--glass-modal-bg, rgba(14, 14, 18, .66));
+  -webkit-backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  border: 1px solid var(--glass-rim, rgba(255, 255, 255, .14));
+  border-radius: var(--glass-radius, 14px);
+  box-shadow: var(--glass-float-shadow, 0 18px 44px rgba(0, 0, 0, .54), inset 0 1px 0 rgba(255, 255, 255, .14));
 }
 
 .ca-toolbar,
@@ -29,11 +35,10 @@
   align-items: center;
   gap: var(--sp-2);
   flex-wrap: wrap;
-  background: var(--overlay-fill);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border, rgba(255, 255, 255, .10));
+  border-radius: var(--r-md, 8px);
   padding: var(--sp-2) var(--sp-3);
-  box-shadow: var(--shadow-2);
 }
 
 .ca-toolbar label,
@@ -51,13 +56,13 @@
   padding: 2px;
   border: 1px solid var(--border-strong);
   border-radius: var(--r-sm);
-  background: var(--surface-1);
+  background: var(--surface-1, #0b0b0e);
   cursor: pointer;
 }
 
 .ca-toolbar input[type=range] {
   width: 88px;
-  accent-color: var(--accent);
+  accent-color: var(--accent, #f59e0b);
   cursor: pointer;
 }
 
@@ -73,7 +78,7 @@
   justify-content: center;
   overflow: hidden;
   touch-action: none;
-  background: var(--bg, #0c0d0e);
+  background: #060608;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   box-shadow: inset 0 2px 16px rgba(0, 0, 0, .45);
@@ -81,12 +86,12 @@
 
 /* T2-5: dark subtle alpha checkerboard on the annotator image stage so transparent PNGs never leak canvas noise. */
 .ca-preview .konvajs-content {
-  background-color: var(--checker-dark, #131416);
+  background-color: var(--checker-dark, #101013);
   background-image: conic-gradient(
-    var(--checker-light, #1a1c1e) 90deg,
-    var(--checker-dark, #131416) 90deg 180deg,
-    var(--checker-light, #1a1c1e) 180deg 270deg,
-    var(--checker-dark, #131416) 270deg
+    var(--checker-light, #18181c) 90deg,
+    var(--checker-dark, #101013) 90deg 180deg,
+    var(--checker-light, #18181c) 180deg 270deg,
+    var(--checker-dark, #101013) 270deg
   );
   background-size: var(--checker-size-lg, 14px) var(--checker-size-lg, 14px);
   border: 1px solid var(--border-strong, rgba(255, 255, 255, .14));
@@ -124,9 +129,9 @@
 }
 
 .ca-dialog [role=alert] {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border: 1px solid rgba(223, 138, 144, .25);
+  background: var(--danger-soft, rgba(248, 113, 113, .12));
+  color: var(--danger, #f87171);
+  border: 1px solid rgba(248, 113, 113, .30);
   border-radius: var(--r-md);
   padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-caption);
@@ -141,4 +146,19 @@
 .ca-dialog .btn:focus-visible {
   outline: none;
   box-shadow: var(--btn-highlight), var(--btn-ring);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ca-overlay {
+    background: rgba(5, 5, 7, .84);
+  }
+  .ca-dialog {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--surface-solid, #111116);
+  }
+  .ca-toolbar,
+  .ca-text {
+    background: var(--surface-1, #0b0b0e);
+  }
 }

@@ -57,7 +57,7 @@ export default function BrandMark({
       {/* Viewfinder precision frame: slightly broken along the ink trajectory */}
       <path
         d="M11.5 6.5H8.5C7.119 6.5 6 7.619 6 9V20.2"
-        stroke="#e4e5e7"
+        stroke="#f5f5f7"
         strokeOpacity="0.72"
         strokeWidth={opt.frameStroke}
         strokeLinecap="round"
@@ -65,7 +65,7 @@ export default function BrandMark({
       />
       <path
         d="M26 11.8V23C26 24.381 24.881 25.5 23.5 25.5H12.5"
-        stroke="#e4e5e7"
+        stroke="#f5f5f7"
         strokeOpacity="0.72"
         strokeWidth={opt.frameStroke}
         strokeLinecap="round"
@@ -74,7 +74,7 @@ export default function BrandMark({
       {/* Upper-right & lower-left architectural frame extensions */}
       <path
         d="M16.2 6.5H20.8"
-        stroke="#e4e5e7"
+        stroke="#f5f5f7"
         strokeOpacity="0.42"
         strokeWidth={opt.frameStroke}
         strokeLinecap="round"
@@ -83,14 +83,14 @@ export default function BrandMark({
         <>
           <path
             d="M9.2 10.2H11.4M9.2 10.2V12.4"
-            stroke="#e4e5e7"
+            stroke="#f5f5f7"
             strokeOpacity="0.34"
             strokeWidth="1.1"
             strokeLinecap="round"
           />
           <path
             d="M22.8 21.8H20.6M22.8 21.8V19.6"
-            stroke="#e4e5e7"
+            stroke="#f5f5f7"
             strokeOpacity="0.34"
             strokeWidth="1.1"
             strokeLinecap="round"
@@ -101,7 +101,7 @@ export default function BrandMark({
       {/* Subtle ambient glow underlay along the ink trace */}
       <path
         d="M5.6 24.2C9.4 23.8 11.6 19.8 15.2 15.6C18.6 11.6 21.4 8.5 26.2 7.2"
-        stroke="#45c088"
+        stroke="#f59e0b"
         strokeOpacity="0.2"
         strokeWidth={opt.glowStroke}
         strokeLinecap="round"
@@ -110,7 +110,7 @@ export default function BrandMark({
       {/* Primary fluid ink trace path */}
       <path
         d="M5.6 24.2C9.4 23.8 11.6 19.8 15.2 15.6C18.6 11.6 21.4 8.5 26.2 7.2"
-        stroke="#45c088"
+        stroke="#f59e0b"
         strokeWidth={opt.traceStroke}
         strokeLinecap="round"
       />
@@ -121,12 +121,12 @@ export default function BrandMark({
           cx="5.6"
           cy="24.2"
           r={opt.dotRadius * 0.68}
-          fill="#18191b"
-          stroke="#45c088"
+          fill="#111116"
+          stroke="#f59e0b"
           strokeWidth="1.25"
         />
       )}
-      <circle cx="26.2" cy="7.2" r={opt.dotRadius} fill="#45c088" />
+      <circle cx="26.2" cy="7.2" r={opt.dotRadius} fill="#f59e0b" />
     </svg>
   )
 }

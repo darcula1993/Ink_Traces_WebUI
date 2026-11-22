@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="License: MIT" />
-  <img src="https://img.shields.io/badge/version-2.4.2-1f6feb?style=flat-square" alt="Version 2.4.2" />
+  <img src="https://img.shields.io/badge/version-2.5.0-1f6feb?style=flat-square" alt="Version 2.5.0" />
   <img src="https://img.shields.io/badge/stack-React%2018%20%2B%20Flask%20%2B%20SQLite-24292f?style=flat-square" alt="Tech Stack: React 18 + Flask + SQLite" />
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/node-18%2B-339933?style=flat-square" alt="Node.js 18+" />
@@ -36,7 +36,7 @@
 ## 核心功能总览
 
 ### 项目 → 多画布 → 节点工作流
-- **Full-Bleed 暗色工作台与 URL 路由持久化**：全站统一 48px 窄图标栏与可钉住弹出面板（画布、素材库、角色卡、提示词库、本画布任务），支持浏览器 URL 路由持久化（`?project=…&canvas=…`，刷新与多标签不迷路），左下角配备小地图、撤销/重做与缩放控制。
+- **曜黑琥珀烟熏液态玻璃工作台与 URL 路由持久化**：全站采用纯黑曜石底（`#050507`）+ `14px` 全圆角烟熏液态玻璃卡片与琥珀金主强调色，媒体预览区保持 100% 纯中性暗底，配「墨痕启幕」开机过渡、48px 窄图标栏与可钉住弹出面板（画布、素材库、角色卡、提示词库、本画布任务）、浏览器 URL 路由持久化（`?project=…&canvas=…`）、左下角小地图与撤销/重做控制。
 - **统一右侧属性面板与可靠性护栏**：画布与独立图片/视频/音频四页共享统一右侧参数栏（44px 图标顶栏、36px 带前缀图标单栏控件、可折叠高级参数抽屉、吸底紧凑 3 位小数 USD 预估），内置 Seedance 视频参考/延长 `ratio=adaptive` 前置护栏、报错展开复制与白名单中文修复提示，框选多节点切换为**运行所选**。
 - **卡片内提示词、`@角色卡` 折叠徽章与动态参考口**：任意缩放下均可直接在卡片内编辑提示词（前导 `@角色卡` 块默认折叠为 1 行徽章，提交明文逐字节不变），支持 `@图片N` / `@视频N` / `@音频N` 提及与按类型着色的动态参考口（口序号即参考与视频首尾帧顺序）。
 - **短剧镜头迭代与结构复用**：单节点支持 2–4 份候选**并排对比**（图片联动缩放、视频默认静音同步播放）、节点与版本**「定稿」**标记及侧栏「仅看定稿」筛选；视频节点一键**「延长此视频 / 编辑此视频」**建下游节点（自动预置 `adaptive`，不自动扣费）；支持将节点组保存为可复用**结构模板**（`/api/canvas/templates`，无内置预设、失效接口只提示不自动换号）以及服务端托管**「运行组内全部」**。

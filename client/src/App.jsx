@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import axios from 'axios'
-const TextToImage = lazyPanel(() => import('./components/TextToImage'))
+import TextToImage from './components/TextToImage'
 const ImageToImage = lazyPanel(() => import('./components/ImageToImage'))
 import ImageOutputControls from './components/image-parameters/ImageOutputControls'
 import useImageDimensionDraft from './components/image-parameters/useImageDimensionDraft'
 import {imageCapabilities,imageTabParams,imageTabPatch,imageParameterIssues,imageRequestFields,imageSizeSummary as getImageSizeSummary,isSeedream55,sanitizeImageTabForProvider} from './lib/imageGenerationRules'
 const PromptCollection = lazyPanel(() => import('./components/PromptCollection'))
-const TaskGallery = lazyPanel(() => import('./components/TaskGallery'))
-const GlobalTaskCenter = lazyPanel(() => import('./components/GlobalTaskCenter'))
+import TaskGallery from './components/TaskGallery'
+import GlobalTaskCenter from './components/GlobalTaskCenter'
 const PngInfoModal = lazyPanel(() => import('./components/PngInfoModal'))
 import useModalFocus, { isTopModal } from './components/ui/useModalFocus'
 const ReferenceMediaModal = lazyPanel(() => import('./components/ReferenceMediaModal'))
@@ -37,7 +37,7 @@ import { CANVAS_LOCATE_NODE_EVENT, CANVAS_RAIL_STATE_EVENT, LAYER_OPEN_SOURCE_EV
 function lazyPanel(load) {
   const Component = React.lazy(load)
   return function LazyPanel(props) {
-    return <React.Suspense fallback={<div role="status" className="p-6 text-nexus-muted">正在加载…</div>}><Component {...props} /></React.Suspense>
+    return <React.Suspense fallback={<div role="status" aria-label="正在加载" className="h-full w-full flex-1" />}><Component {...props} /></React.Suspense>
   }
 }
 
@@ -785,6 +785,62 @@ function App({ onLogout }) {
     return () => window.removeEventListener('keydown', handleEsc)
   }, [showFullEditor])
 
+  const promptDrawerRef = useRef(null)
+  const promptDrawerTriggerRef = useRef(null)
+  const promptDrawerOpen = showPromptCollection && appMode !== 'canvas'
+
+  const closePromptDrawer = useCallback((restoreFocus = true) => {
+    setShowPromptCollection(false)
+    if (!restoreFocus) return
+    const trigger = (promptDrawerTriggerRef.current?.isConnected && promptDrawerTriggerRef.current)
+      || appShellRef.current?.querySelector('[data-canvas-rail-toggle="prompts"]')
+      || document.querySelector('[data-canvas-rail-toggle="prompts"]')
+    promptDrawerTriggerRef.current = null
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+  }, [])
+
+  useEffect(() => {
+    if (!promptDrawerOpen) return undefined
+    if (!promptDrawerTriggerRef.current?.isConnected) {
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      promptDrawerTriggerRef.current = (active && active !== document.body && !promptDrawerRef.current?.contains(active))
+        ? active
+        : (appShellRef.current?.querySelector('[data-canvas-rail-toggle="prompts"]') || null)
+    }
+    const frame = requestAnimationFrame(() => {
+      const drawer = promptDrawerRef.current
+      if (!drawer || drawer.contains(document.activeElement)) return
+      const initialTarget = drawer.querySelector('input[aria-label="搜索提示词"]') || drawer
+      initialTarget.focus({ preventScroll: true })
+    })
+    const handleEsc = (event) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (document.querySelector('[aria-modal="true"]')) return
+      const drawer = promptDrawerRef.current
+      const cancelEditBtn = drawer?.querySelector('button[aria-label="取消编辑"]')
+      if (cancelEditBtn) {
+        event.preventDefault()
+        event.stopPropagation()
+        cancelEditBtn.click()
+        requestAnimationFrame(() => {
+          if (drawer?.isConnected && !drawer.contains(document.activeElement)) {
+            const fallback = drawer.querySelector('input[aria-label="搜索提示词"]') || drawer
+            fallback.focus({ preventScroll: true })
+          }
+        })
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      closePromptDrawer(true)
+    }
+    window.addEventListener('keydown', handleEsc)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('keydown', handleEsc)
+    }
+  }, [promptDrawerOpen, closePromptDrawer])
+
   const handleImageProviderChange = async (optionId) => {
     const option = optionById(toolCapabilities, 'image', optionId)
     if (!option) return
@@ -1272,11 +1328,17 @@ function App({ onLogout }) {
   const handleDragStart = (e) => {
     e.preventDefault()
     isDragging.current = true
+    const startX = e.clientX
+    const promptPane = e.currentTarget?.previousElementSibling
+    const renderedWidth = promptPane?.classList?.contains('prompt-pane')
+      ? promptPane.getBoundingClientRect().width
+      : NaN
+    const startWidth = Number.isFinite(renderedWidth) && renderedWidth > 0 ? renderedWidth : panelWidth
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
     const onMove = (ev) => {
       if (!isDragging.current) return
-      setPanelWidth(Math.min(560, Math.max(300, ev.clientX)))
+      setPanelWidth(Math.round(Math.min(560, Math.max(300, startWidth + (ev.clientX - startX)))))
     }
     const onUp = () => {
       isDragging.current = false
@@ -1318,7 +1380,14 @@ function App({ onLogout }) {
       requestCanvasTogglePrompts()
       return
     }
-    setShowPromptCollection(value => !value)
+    if (showPromptCollection) {
+      closePromptDrawer(true)
+      return
+    }
+    promptDrawerTriggerRef.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement
+      : (appShellRef.current?.querySelector('[data-canvas-rail-toggle="prompts"]') || null)
+    setShowPromptCollection(true)
   }
   const imageModelValue = isSeedream
     ? (isCupsyImage
@@ -1381,7 +1450,7 @@ function App({ onLogout }) {
       <main className="workspace-main flex-grow relative" style={(appMode === 'canvas' || appMode === 'tasks') ? { display: 'flex', backgroundImage: 'none' } : { '--prompt-user-width': `${panelWidth}px` }}>
 
       {appMode === 'canvas' ? (
-        <React.Suspense fallback={<div className="p-6 text-nexus-text">正在载入创作画布…</div>}>
+        <React.Suspense fallback={<div className="flex-1" role="status" aria-label="正在载入创作画布" />}>
           <CanvasStudio beforeLeaveRef={canvasBeforeLeave} notify={notify} providerRevision={providerRevision} />
         </React.Suspense>
       ) : appMode === 'tasks' ? (
@@ -1419,16 +1488,6 @@ function App({ onLogout }) {
                 <span className="min-w-0 break-words">{imageActionError}</span>
               </div>
             )}
-            <div className="mb-2 flex items-center justify-between text-xs text-nexus-muted">
-              <span>本次预估（估算，非实际扣费）</span>
-              <span
-                data-testid="image-action-cost"
-                className={`font-mono ${imageCostEstimate.known ? 'text-nexus-green' : 'text-nexus-amber'}`}
-                title={imageCostEstimate.known ? '' : (imageCostEstimate.reason || '当前参数暂无法估算')}
-              >
-                {imageCostEstimate.known ? `${formatUsdEstimate(imageCostEstimate.estimate)} USD` : '费用待估'}
-              </span>
-            </div>
             <button
               onClick={handleGenerate}
               disabled={!capabilitiesReady || !activeImageOption}
@@ -1459,6 +1518,7 @@ function App({ onLogout }) {
         <section className="canvas-pane">
           <div className="canvas-grid" />
           <TaskGallery
+            key="image"
             mode="image"
             refreshToken={taskGalleryRevision}
             onReuseTask={handleLoadTask}
@@ -1615,7 +1675,7 @@ function App({ onLogout }) {
         </aside>
 
       </>) : appMode === 'layer' ? (
-        <React.Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-nexus-muted">正在加载 Layer Studio...</div>}>
+        <React.Suspense fallback={<div className="absolute inset-0" role="status" aria-label="正在加载 Layer Studio" />}>
           <LayerStudio notify={notify} />
         </React.Suspense>
       ) : appMode === 'video' ? (
@@ -1625,7 +1685,7 @@ function App({ onLogout }) {
           <section className="prompt-pane relative z-20">
             <div className="flex-grow flex flex-col min-h-0 relative z-10">
               <div className="flex-grow flex flex-col min-h-0 relative bg-transparent">
-                <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
+                <div className="prompt-pane-header flex h-11 shrink-0 items-center justify-between px-4">
                   <span className="text-xs font-medium text-nexus-text-light">视频提示词</span>
                   <span className="font-mono text-xs text-nexus-muted">{activeTab.prompt.length}</span>
                 </div>
@@ -1690,6 +1750,7 @@ function App({ onLogout }) {
           <section className="canvas-pane">
             <div className="canvas-grid" />
             <TaskGallery
+              key="video"
               mode="video"
               refreshToken={taskGalleryRevision}
               onReuseTask={handleLoadTask}
@@ -2178,7 +2239,7 @@ function App({ onLogout }) {
         <>
           <section className="prompt-pane relative z-20">
             <div className="relative flex min-h-0 flex-grow flex-col">
-              <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
+              <div className="prompt-pane-header flex h-11 shrink-0 items-center justify-between px-4">
                 <span className="text-xs font-medium text-nexus-text-light">音频场景提示词</span>
                 <span className={`font-mono text-xs ${audioForm.prompt.length > 3000 ? 'text-nexus-red' : 'text-nexus-muted'}`}>{audioForm.prompt.length} / 3000</span>
               </div>
@@ -2238,7 +2299,7 @@ function App({ onLogout }) {
 
           <section className="canvas-pane">
             <div className="canvas-grid" />
-            <TaskGallery mode="audio" refreshToken={taskGalleryRevision} onReuseTask={handleLoadTask} />
+            <TaskGallery key="audio" mode="audio" refreshToken={taskGalleryRevision} onReuseTask={handleLoadTask} />
           </section>
 
           {(() => {
@@ -2427,17 +2488,21 @@ function App({ onLogout }) {
       <AnimatePresence>
         {showPromptCollection && appMode !== 'canvas' && (
           <motion.aside
+            ref={promptDrawerRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-label="提示词库"
             initial={{ x: '100%', opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: '100%', opacity: 0 }}
             transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-            className="drawer-panel liquid-glass-strong absolute bottom-0 right-0 top-0 z-40 flex flex-col"
+            className="drawer-panel liquid-glass-strong absolute bottom-0 right-0 top-0 z-40 flex flex-col outline-none"
           >
-            <div className="glass-drawer-header flex h-12 shrink-0 items-center justify-between px-3">
+            <div className="glass-drawer-header flex h-11 shrink-0 items-center justify-between px-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-nexus-text-light">
                 <Library size={15} className="text-nexus-violet" /> 提示词库
               </div>
-              <IconButton label="关闭提示词库" onClick={() => setShowPromptCollection(false)}><X size={16} /></IconButton>
+              <IconButton label="关闭提示词库" onClick={() => closePromptDrawer(true)}><X size={16} /></IconButton>
             </div>
             <div className="relative flex-grow overflow-hidden">
               <PromptCollection onSelectPrompt={handleSelectSavedPrompt} />
@@ -2555,7 +2620,7 @@ function App({ onLogout }) {
             role={notification.tone === 'error' ? 'alert' : 'status'}
             aria-live="polite"
             data-testid="app-notification"
-            className={`fixed bottom-[88px] left-1/2 -translate-x-1/2 z-[1200] pointer-events-none flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#102019] text-nexus-text-light'}`}
+            className={`fixed bottom-[88px] left-1/2 -translate-x-1/2 z-[1200] pointer-events-none flex max-w-[min(560px,calc(100vw-32px))] items-center gap-2 rounded-md border px-3 py-2.5 text-sm shadow-2xl ${notification.tone === 'error' ? 'border-nexus-red/35 bg-[#211417] text-nexus-red' : 'border-nexus-green/35 bg-[#1c1408] text-nexus-text-light'}`}
           >
             {notification.tone === 'error' ? <CircleAlert size={15} /> : <Check size={15} className="text-nexus-green" />}
             {notification.message}

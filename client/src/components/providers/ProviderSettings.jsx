@@ -47,7 +47,8 @@ export default function ProviderSettings({ onClose, onSaved }) {
   const [profiles, setProfiles] = useState([])
   const [selected, setSelected] = useState(null)
   const [form, setForm] = useState(blankForm)
-  const [busy, setBusy] = useState(true)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
   const [checking, setChecking] = useState(false)
   const [preflight, setPreflight] = useState(null)
   const [dirty, setDirty] = useState(false)
@@ -56,10 +57,13 @@ export default function ProviderSettings({ onClose, onSaved }) {
   const [conflict, setConflict] = useState(false)
   const [pending, setPending] = useState(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const openerRef = useRef(null)
   const confirmRef = useRef(null)
   const formScrollRef = useRef(null)
   const preflightRef = useRef(null)
+  const escHandlerRef = useRef(null)
   const dialogRef = useRef(null), lock = useRef(false), mounted = useRef(true)
+  const formBusy = loading || submitting || checking
   const loadList = async () => (await axios.get(endpoint)).data.profiles || []
   const install = profile => {
     setSelected(profile || null)
@@ -73,10 +77,19 @@ export default function ProviderSettings({ onClose, onSaved }) {
   }
   useEffect(() => {
     mounted.current = true
-    const previousFocus = document.activeElement
+    if (!openerRef.current) openerRef.current = document.activeElement
     dialogRef.current?.focus()
-    loadList().then(items => { if (mounted.current) { setProfiles(items); install(items[0]) } }).catch(failure => { if (mounted.current) setError(messageOf(failure)) }).finally(() => { if (mounted.current) setBusy(false) })
-    return () => { mounted.current = false; previousFocus?.focus?.() }
+    loadList()
+      .then(items => { if (mounted.current) { setProfiles(items); install(items[0]) } })
+      .catch(failure => { if (mounted.current) setError(messageOf(failure)) })
+      .finally(() => { if (mounted.current) setLoading(false) })
+    return () => {
+      mounted.current = false
+      const opener = openerRef.current
+      if (opener && typeof opener.focus === 'function' && opener.isConnected) {
+        opener.focus()
+      }
+    }
   }, [])
   useEffect(() => { if (pending || confirmDelete) confirmRef.current?.querySelector('button')?.focus(); else dialogRef.current?.focus() }, [pending, confirmDelete])
   useEffect(() => {
@@ -92,11 +105,41 @@ export default function ProviderSettings({ onClose, onSaved }) {
   const change = patch => { setForm(current => ({ ...current, ...patch })); setDirty(true); setNotice(''); setPreflight(null) }
   const setting = (key, value) => change({ settings: { ...form.settings, [key]: value } })
   function navigate(action) {
-    if (busy || checking) return
+    if (formBusy) return
     if (dirty) { setPending(() => action); return }
     action()
   }
-  const close = () => navigate(onClose)
+  function requestClose() {
+    if (submitting) return
+    if (dirty) { setPending(() => onClose); return }
+    onClose()
+  }
+  escHandlerRef.current = event => {
+    if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return
+    if (event.defaultPrevented) return
+    const target = event.target
+    if (target instanceof Element && target.closest('.ui-select-menu, [role="listbox"], [role="menu"]')) return
+    if (submitting) {
+      event.preventDefault()
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    if (pending) {
+      setPending(null)
+      return
+    }
+    if (confirmDelete) {
+      setConfirmDelete(false)
+      return
+    }
+    requestClose()
+  }
+  useEffect(() => {
+    const onKeyDown = event => escHandlerRef.current?.(event)
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
   function changeKind(kind) { const adapter = adaptersFor(kind).includes(form.adapter) ? form.adapter : adaptersFor(kind)[0]; change({ kind, adapter, settings: blankForm(kind, adapter).settings }) }
   const sameAdapterPeers = profiles.filter(item => item.adapter === form.adapter && item.id !== selected?.id)
   const changingKey = Boolean(form.clear_api_key || form.api_key.trim())
@@ -107,7 +150,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
     .filter(group => group.items.length > 0)
 
   async function runPreflight() {
-    if (busy || checking || lock.current) return
+    if (formBusy || lock.current) return
     setChecking(true)
     setError('')
     try {
@@ -124,34 +167,38 @@ export default function ProviderSettings({ onClose, onSaved }) {
 
   async function save(event) {
     event.preventDefault()
-    if (lock.current || conflict) return
-    lock.current = true; setBusy(true); setError(''); setNotice('')
+    if (lock.current || conflict || loading) return
+    lock.current = true; setSubmitting(true); setError(''); setNotice('')
     try {
       const payload = payloadFor(form, selected?.revision, canSyncAdapterKey)
       const response = selected ? await axios.patch(`${endpoint}/${selected.id}`, payload) : await axios.post(endpoint, payload)
       const saved = response.data.profile
       const syncedIds = Array.isArray(response.data.synced_profile_ids) ? response.data.synced_profile_ids : []
       if (!saved?.id) throw new Error('invalid response')
-      install(saved)
-      setProfiles(current => [...current.filter(item => item.id !== saved.id).map(item => saved.is_default && item.kind === saved.kind ? { ...item, is_default: false } : item), saved])
-      setNotice(
-        syncedIds.length
-          ? `配置已保存，并同步更新了另外 ${syncedIds.length} 个 ${ADAPTERS[saved.adapter] || saved.adapter} 配置的 API Key，修改已即时生效。`
-          : '配置已保存并即时生效，后续新任务可选择使用。'
-      )
+      if (mounted.current) {
+        install(saved)
+        setProfiles(current => [...current.filter(item => item.id !== saved.id).map(item => saved.is_default && item.kind === saved.kind ? { ...item, is_default: false } : item), saved])
+        setNotice(
+          syncedIds.length
+            ? `配置已保存，并同步更新了另外 ${syncedIds.length} 个 ${ADAPTERS[saved.adapter] || saved.adapter} 配置的 API Key，修改已即时生效。`
+            : '配置已保存并即时生效，后续新任务可选择使用。'
+        )
+      }
       onSaved?.(saved)
       // Setting a default or syncing same-adapter keys can revise other profiles. Refresh
       // revisions and key badges without replacing the current form or returning any credential.
       try { const items = await loadList(); if (mounted.current) setProfiles(items) } catch { if (mounted.current) setNotice('配置已保存；列表刷新失败，重新打开可查看最新列表。') }
     } catch (failure) {
-      if (failure?.response?.status === 409) { setConflict(true); setError('该配置已在其他窗口更新。本地输入仍保留，请重新载入后再编辑。') }
-      else setError(messageOf(failure))
-    } finally { lock.current = false; if (mounted.current) setBusy(false) }
+      if (mounted.current) {
+        if (failure?.response?.status === 409) { setConflict(true); setError('该配置已在其他窗口更新。本地输入仍保留，请重新载入后再编辑。') }
+        else setError(messageOf(failure))
+      }
+    } finally { lock.current = false; if (mounted.current) setSubmitting(false) }
   }
   async function remove() {
-    if (!selected || lock.current || conflict) return
+    if (!selected || lock.current || conflict || loading) return
     const target = selected
-    lock.current = true; setBusy(true); setError(''); setNotice(''); setConfirmDelete(false)
+    lock.current = true; setSubmitting(true); setError(''); setNotice(''); setConfirmDelete(false)
     try {
       await axios.delete(`${endpoint}/${target.id}`, { data: { revision: target.revision } })
       let items
@@ -167,30 +214,43 @@ export default function ProviderSettings({ onClose, onSaved }) {
         if (failure?.response?.status === 409) { setConflict(true); setError('该配置已在其他窗口更新。请重新载入后再操作。') }
         else setError(messageOf(failure))
       }
-    } finally { lock.current = false; if (mounted.current) setBusy(false) }
+    } finally { lock.current = false; if (mounted.current) setSubmitting(false) }
   }
   async function reload() {
     if (lock.current) return
-    lock.current = true; setBusy(true)
-    try { const items = await loadList(); setProfiles(items); install(items.find(item => item.id === selected?.id) || items[0] || null); setPending(null) } catch (failure) { setError(messageOf(failure)) } finally { lock.current = false; setBusy(false) }
+    lock.current = true; setLoading(true)
+    try {
+      const items = await loadList()
+      if (mounted.current) {
+        setProfiles(items)
+        install(items.find(item => item.id === selected?.id) || items[0] || null)
+        setPending(null)
+      }
+    } catch (failure) {
+      if (mounted.current) setError(messageOf(failure))
+    } finally {
+      lock.current = false
+      if (mounted.current) setLoading(false)
+    }
   }
   function keyboard(event) {
-    if (event.key === 'Escape') { event.stopPropagation(); event.preventDefault(); if (confirmDelete) setConfirmDelete(false); else if (pending) setPending(null); else close(); return }
     if (event.key !== 'Tab') return
     const scope = (pending || confirmDelete) ? confirmRef.current : dialogRef.current
+    if (!scope) return
     const items = [...scope.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),summary,[tabindex="0"]')].filter(item => item.getClientRects().length)
     const first = items[0], last = items[items.length - 1]
+    if (!first) { event.preventDefault(); scope.focus(); return }
     if (event.shiftKey && (document.activeElement === first || document.activeElement === scope)) { event.preventDefault(); last?.focus() }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }
   return <div className="provider-settings-backdrop">
     <section ref={dialogRef} className="provider-settings" role="dialog" aria-modal="true" aria-labelledby="provider-settings-title" tabIndex={-1} onKeyDown={keyboard}>
-      <header className="ps-header"><div><h2 id="provider-settings-title"><Server size={20} />接口管理</h2><p>统一管理所有接口配置与密钥；修改后即时生效，无需重启或修改 config.json。</p></div><button type="button" className="btn btn-icon btn-outlined" onClick={close} disabled={busy || checking} aria-label="关闭接口管理" title="关闭接口管理"><X size={19} /></button></header>
+      <header className="ps-header"><div><h2 id="provider-settings-title"><Server size={20} />接口管理</h2><p>统一管理所有接口配置与密钥；修改后即时生效，无需重启或修改 config.json。</p></div><button type="button" className="btn btn-icon btn-outlined" onClick={requestClose} disabled={submitting} aria-label="关闭接口管理" title="关闭接口管理"><X size={19} /></button></header>
       <div className="ps-layout">
         <aside className="ps-sidebar" aria-label="已保存的接口配置">
-          <button type="button" className="btn btn-secondary btn-block ps-add" disabled={busy || checking} onClick={() => navigate(() => install(null))}><Plus size={16} />新建配置</button>
+          <button type="button" className="btn btn-secondary btn-block ps-add" disabled={formBusy} onClick={() => navigate(() => install(null))}><Plus size={16} />新建配置</button>
           <div className="ps-profile-list">
-            {!profiles.length && <p className="ps-muted">{busy ? '正在读取配置…' : '还没有接口配置，点击上方「新建配置」开始'}</p>}
+            {!profiles.length && <p className="ps-muted">{loading ? '正在读取配置…' : '还没有接口配置，点击上方「新建配置」开始'}</p>}
             {groupedProfiles.map(group => (
               <div key={group.kind} className="ps-group" role="group" aria-label={`${group.label}配置`} data-provider-group={group.kind}>
                 <div className="ps-group-head">
@@ -198,7 +258,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
                   <small>{group.items.length}</small>
                 </div>
                 {group.items.map(profile => (
-                  <button type="button" className="ps-profile" key={profile.id} aria-pressed={selected?.id === profile.id} disabled={busy || checking} onClick={() => navigate(() => install(profile))}>
+                  <button type="button" className="ps-profile" key={profile.id} aria-pressed={selected?.id === profile.id} disabled={formBusy} onClick={() => navigate(() => install(profile))}>
                     <div className="ps-profile-head">
                       <strong>{profile.name}</strong>
                     </div>
@@ -213,7 +273,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
         <form className="ps-form" onSubmit={save}>
           <div className="ps-form-scroll" ref={formScrollRef}>
             <div className="ps-form-head"><h3>{selected ? '编辑接口配置' : '新建接口配置'}</h3></div>
-            {error && <div className="ps-error" role="alert">{error}{conflict && <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => (dirty ? setPending(() => reload) : reload())}><RefreshCw size={14} />重新载入服务器版本</button>}</div>}
+            {error && <div className="ps-error" role="alert">{error}{conflict && <button type="button" className="btn btn-secondary btn-sm" disabled={loading || submitting} onClick={() => (dirty ? setPending(() => reload) : reload())}><RefreshCw size={14} />重新载入服务器版本</button>}</div>}
             {notice && <div className="ps-notice" role="status">{notice}</div>}
             {preflight && (
               <section ref={preflightRef} className={`ps-preflight is-${preflight.status || 'ok'}`} role="region" aria-label="配置预检结果" data-testid="provider-preflight-result">
@@ -233,7 +293,7 @@ export default function ProviderSettings({ onClose, onSaved }) {
                 </ul>
               </section>
             )}
-            <fieldset disabled={busy || checking}>
+            <fieldset disabled={formBusy}>
               <label>配置名称<input required maxLength={100} value={form.name} placeholder="例如：Ark 主账号" onChange={event => change({ name: event.target.value })} /></label>
               <div className="ps-row"><label>生成类型<Select ariaLabel="生成类型" disabled={Boolean(selected)} value={form.kind} options={Object.entries(KINDS).map(([value, label]) => ({ value, label }))} onChange={changeKind} /></label><label>服务适配器<Select ariaLabel="服务适配器" disabled={Boolean(selected)} value={form.adapter} options={(adaptersFor(form.kind).includes(form.adapter) ? adaptersFor(form.kind) : [form.adapter, ...adaptersFor(form.kind)]).map(value => ({ value, label: ADAPTERS[value] || value }))} onChange={value => change({ adapter: value, settings: blankForm(form.kind, value).settings })} /></label></div>
               {selected && <p className="ps-muted">类型和适配器创建后固定；使用另一种适配器请新建配置。</p>}
@@ -265,11 +325,11 @@ export default function ProviderSettings({ onClose, onSaved }) {
             </fieldset>
           </div>
           <footer className="ps-footer">
-            <span>{dirty ? '有未保存的修改' : selected ? `配置版本 ${selected.revision}` : '保存后可在节点中选择'}</span>
+            <span>{dirty ? '有未保存的修改' : selected ? (selected.revision != null ? `配置版本 ${selected.revision}` : '已加载配置') : '保存后可在节点中选择'}</span>
             <div className="ps-footer-actions">
-              <button type="button" className="btn btn-secondary" disabled={busy || checking} onClick={runPreflight}><ShieldCheck size={15} />{checking ? '预检中…' : '配置预检'}</button>
-              {selected && <button type="button" className="btn btn-danger" disabled={busy || checking || conflict} onClick={() => setConfirmDelete(true)}><Trash2 size={15} />删除配置</button>}
-              <button className="btn btn-primary" type="submit" disabled={busy || checking || conflict}>{busy ? '处理中…' : <><Save size={15} />保存配置</>}</button>
+              <button type="button" className="btn btn-secondary" disabled={formBusy} onClick={runPreflight}><ShieldCheck size={15} />{checking ? '预检中…' : '配置预检'}</button>
+              {selected && <button type="button" className="btn btn-danger" disabled={formBusy || conflict} onClick={() => setConfirmDelete(true)}><Trash2 size={15} />删除配置</button>}
+              <button className="btn btn-primary" type="submit" disabled={formBusy || conflict}>{submitting ? '处理中…' : <><Save size={15} />保存配置</>}</button>
             </div>
           </footer>
         </form>

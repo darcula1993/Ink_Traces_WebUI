@@ -1,21 +1,54 @@
-/* CANVAS-LAYOUT-1-20261117: fixed right properties panel + prompt in the node card.
- * Linear-style: solid neutral surface (no glass on the fixed panel), 1px low-alpha rims, 4px spacing base. */
+/* GLASS-ROUND-CORE-20261122: unified 14px rounded translucent Liquid Glass right properties island.
+ * .cv-layout provides 8px outer padding and 8px flex gaps, so zero negative margin is needed. */
 .canvas-studio .cv-properties {
-  position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
-  background: var(--surface-1); border-left: 1px solid var(--cv-border); color: var(--cv-text); font-size: 13px; line-height: 1.45;
+  position: relative; z-index: 12; flex: 0 0 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--glass-radius, 14px);
+  border: 1px solid var(--glass-rim);
+  background: var(--glass-float-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-float-shadow);
+  color: var(--cv-text); font-size: 13px; line-height: 1.45;
 }
-.canvas-studio .cv-properties.is-collapsed { width: 24px; align-items: center; padding-top: 8px; }
+.canvas-studio .cv-properties.is-collapsed { width: 24px; margin: 0; border-radius: var(--glass-radius, 14px); align-items: center; padding-top: 8px; }
 .canvas-studio .cv-properties.is-collapsed .btn { width: 20px; height: 24px; padding: 0; }
-.canvas-studio .cv-properties-resize { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.canvas-studio .cv-properties-resize { position: absolute; left: 0; top: 8px; bottom: 8px; width: 6px; cursor: col-resize; z-index: 3; border-radius: 4px; }
 .canvas-studio .cv-properties-resize:hover, .canvas-studio .cv-properties-resize:focus-visible, .canvas-studio .cv-properties.is-resizing .cv-properties-resize { background: var(--accent-soft); outline: none; }
-.canvas-studio .cv-properties-head { display: flex; align-items: center; gap: 6px; height: 44px; min-height: 44px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--cv-border); flex: 0 0 auto; }
+/* 1px parent top border + 42px inner + 1px bottom border = 44px flush with .cv-topbar & pinned .cv-rail-panel-head. */
+.canvas-studio aside.cv-properties .cv-properties-head { display: flex; align-items: center; gap: 6px; height: 43px; min-height: 43px; padding: 0 8px 0 var(--pf-pad, 16px); border-radius: 13px 13px 0 0; border-bottom: 1px solid rgba(255, 255, 255, .10); background: rgba(255, 255, 255, .04); flex: 0 0 auto; }
 .canvas-studio .cv-properties-head .cv-panel-title { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--cv-text); font-size: 14px; font-weight: 600; }
 .canvas-studio .cv-properties-head .cv-panel-title:hover { border-color: var(--cv-border); }
 .canvas-studio .cv-properties-head .cv-panel-title:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: var(--ring-focus); }
 .canvas-studio .cv-properties-kind { flex-shrink: 0; color: var(--text-2); }
 .canvas-studio .cv-properties-title { flex: 1; min-width: 0; margin: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.canvas-studio .cv-properties-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 12px 12px; overscroll-behavior: contain; }
-.canvas-studio .cv-properties-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 56px; padding: 8px 12px; border-top: 1px solid var(--cv-border); background: var(--surface-1); }
+.canvas-studio aside.cv-properties .cv-properties-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 0 var(--pf-pad, 16px) 20px; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent;
+}
+.canvas-studio aside.cv-properties .cv-properties-body::-webkit-scrollbar { width: 6px; }
+.canvas-studio aside.cv-properties .cv-properties-body::-webkit-scrollbar-track { background: transparent; margin: 4px 0; }
+.canvas-studio aside.cv-properties .cv-properties-body::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(255, 255, 255, .16); }
+.canvas-studio aside.cv-properties .cv-properties-body::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .28); }
+.canvas-studio .cv-properties-footer {
+  position: relative; z-index: 1; flex: 0 0 auto; display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  min-height: 56px; padding: 8px 12px; border-radius: 0 0 13px 13px;
+  border-top: 1px solid rgba(255, 255, 255, .10); background: rgba(6, 6, 9, .38);
+  box-shadow: 0 -10px 18px rgba(4, 4, 6, .48), inset 0 1px 0 rgba(255, 240, 214, .10);
+}
+/* Avoid nested backdrop-filter inside the glass properties island (e.g. LibraryUploadMenu dropdown). */
+.canvas-studio aside.cv-properties .ul-upload-menu > div {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--surface-raised, #18181f);
+  border-color: var(--glass-rim);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .52), inset 0 1px 0 rgba(255, 240, 214, .10);
+}
+/* Keep the three custom-size buttons ("交换宽高 / 锁定比例 / 16px对齐") untruncated at 288px panel width. */
+.canvas-studio .cv-properties .ip-controls.is-panel .ip-size .ip-size-tools { gap: 6px; }
+.canvas-studio .cv-properties .ip-controls.is-panel .ip-size-tools button { padding: 0 4px; font-size: 12px; }
 .canvas-studio .cv-properties-footer .cv-generation-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .canvas-studio .cv-properties-footer .cv-video-estimate { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .canvas-studio .cv-properties-footer .cv-run-selected { display: inline-flex; align-items: center; gap: 6px; }
@@ -40,7 +73,7 @@
 .canvas-studio .cv-prop-list li span { color: var(--text-2); text-align: right; min-width: 0; overflow-wrap: anywhere; }
 .canvas-studio .cv-prop-link { border: 0; background: transparent; color: var(--cv-text); padding: 0; min-height: 0; text-decoration: underline; text-decoration-color: var(--cv-border-strong); text-underline-offset: 2px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-studio .cv-prop-link:focus-visible { outline: none; box-shadow: var(--ring-focus); border-radius: 4px; }
-.canvas-studio .cv-properties .cv-task-active { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--cv-border); border-radius: 6px; background: var(--surface-2, rgba(255, 255, 255, .03)); }
+.canvas-studio .cv-properties .cv-task-active { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 8px; background: rgba(255, 255, 255, .05); }
 .canvas-studio .cv-properties .cv-task-active-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .canvas-studio .cv-properties .cv-task-active-meta { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
 .canvas-studio .cv-properties .cv-task-active-note { margin: 0; font-size: 12px; color: var(--text-2); }
@@ -53,13 +86,13 @@
 .canvas-studio .cv-properties .cv-task-failure-tools button:where(:not(.btn)) { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 2px 8px; min-height: 24px; border: 1px solid rgba(255, 255, 255, .14); border-radius: 6px; background: rgba(255, 255, 255, .04); color: var(--cv-text); cursor: pointer; }
 .canvas-studio .cv-properties .cv-task-failure-tools button:where(:not(.btn)):hover { border-color: rgba(255, 255, 255, .24); background: rgba(255, 255, 255, .08); }
 .canvas-studio .cv-properties .cv-task-failure-tools button:where(:not(.btn)):focus-visible { outline: none; box-shadow: var(--ring-focus); }
-.canvas-studio .cv-properties .cv-provider-error-hint { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid rgba(241, 206, 130, .4); border-radius: 6px; background: rgba(44, 34, 10, .45); color: var(--cv-text); }
+.canvas-studio .cv-properties .cv-provider-error-hint { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid rgba(251, 191, 36, .42); border-radius: 6px; background: rgba(44, 30, 8, .48); color: var(--cv-text); }
 .canvas-studio .cv-properties .cv-provider-error-hint-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--cv-warning); }
 .canvas-studio .cv-properties .cv-provider-error-hint-text { margin: 0; font-size: 12px; line-height: 1.45; color: var(--cv-text); }
 .canvas-studio .cv-properties .cv-provider-error-hint-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .canvas-studio .cv-properties .cv-task-failure-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.canvas-studio .cv-properties .cv-video-guardrail { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid rgba(241, 206, 130, .45); border-radius: 8px; background: rgba(44, 34, 10, .4); color: var(--cv-text); font-size: 12px; line-height: 1.45; }
-.canvas-studio .cv-properties .cv-video-guardrail.is-required { border-color: rgba(223, 138, 144, .5); background: var(--danger-soft); }
+.canvas-studio .cv-properties .cv-video-guardrail { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid rgba(251, 191, 36, .45); border-radius: 8px; background: rgba(44, 30, 8, .42); color: var(--cv-text); font-size: 12px; line-height: 1.45; }
+.canvas-studio .cv-properties .cv-video-guardrail.is-required { border-color: rgba(248, 113, 113, .50); background: var(--danger-soft); }
 .canvas-studio .cv-properties .cv-video-guardrail-head { display: flex; align-items: flex-start; gap: 6px; }
 .canvas-studio .cv-properties .cv-video-guardrail-head svg { flex: 0 0 auto; margin-top: 2px; color: var(--cv-warning); }
 .canvas-studio .cv-properties .cv-video-guardrail.is-required .cv-video-guardrail-head svg { color: var(--cv-danger); }
@@ -69,10 +102,30 @@
 .canvas-studio .cv-properties .cv-candidates { display: flex; flex-wrap: wrap; gap: 6px; }
 
 /* "扩大编辑提示词" dialog (portalled, 100% type size at any canvas zoom). */
-.cv-expanded-host .cv-prompt-dialog { position: fixed; z-index: 81; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text, #ebedec); box-shadow: var(--shadow-2); }
+.cv-expanded-host .cv-prompt-dialog { position: fixed; z-index: 81; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border: 1px solid var(--glass-rim); border-radius: 14px; background: var(--glass-modal-bg); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); color: var(--text, #f5f5f7); box-shadow: var(--glass-float-shadow); }
 .cv-expanded-host .cv-prompt-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
 .cv-expanded-host .cv-prompt-dialog .cv-prompt-mention { min-height: 240px; }
 .cv-expanded-host .cv-prompt-dialog .cv-dialog-prompt { width: 100%; min-height: 240px; max-height: 60vh; padding: 8px 12px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--field); color: inherit; font-size: 14px; line-height: 1.5; resize: vertical; }
 .cv-expanded-host .cv-prompt-dialog .cv-dialog-prompt:focus { outline: none; border-color: var(--border-focus); }
 
 /* CANVAS-LAYOUT-2-WIRE: the bottom tool bar is kept clear of the bottom-left cluster in CanvasStudio (spec 3.2). */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .canvas-studio .cv-properties,
+  .cv-expanded-host .cv-prompt-dialog {
+    background: var(--surface-solid, #111116);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .canvas-studio .cv-properties,
+  .cv-expanded-host .cv-prompt-dialog {
+    background: var(--surface-solid, #111116);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .canvas-studio aside.cv-properties .cv-properties-head {
+    background: #0c0c10;
+  }
+  .canvas-studio .cv-properties-footer {
+    background: #09090d;
+  }
+}

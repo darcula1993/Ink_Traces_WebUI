@@ -79,9 +79,9 @@ export const EMPTY_NAVIGATION = {
 }
 
 export const STATUS = {
-  succeeded: { label: '完成', icon: CheckCircle2, tone: 'text-nexus-green border-nexus-green/25 bg-nexus-green/10' },
+  succeeded: { label: '完成', icon: CheckCircle2, tone: 'text-emerald-400 border-emerald-400/25 bg-emerald-400/10' },
   failed: { label: '失败', icon: AlertTriangle, tone: 'text-nexus-red border-nexus-red/25 bg-nexus-red/10' },
-  processing: { label: '生成中', icon: LoaderCircle, spin: true, tone: 'text-nexus-green border-nexus-green/25 bg-nexus-green/10' },
+  processing: { label: '生成中', icon: LoaderCircle, spin: true, tone: 'text-nexus-green border-nexus-green/30 bg-nexus-green/12' },
   preparing: { label: '准备中', icon: LoaderCircle, spin: true, tone: 'text-nexus-cyan border-nexus-cyan/25 bg-nexus-cyan/10' },
   submitting: { label: '提交中', icon: LoaderCircle, spin: true, tone: 'text-nexus-cyan border-nexus-cyan/25 bg-nexus-cyan/10' },
   pending: { label: TASK_STATUS_LABELS.pending, icon: Clock3, tone: 'text-nexus-amber border-nexus-amber/25 bg-nexus-amber/10' },

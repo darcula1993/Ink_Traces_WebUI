@@ -3,13 +3,13 @@
 .art-svg {
   display: block;
   flex-shrink: 0;
-  color: var(--text, #e4e5e7);
+  color: var(--text, #f5f5f7);
   overflow: visible;
 }
 
 /* 45-degree dark subtle hatch for deleted / trashed / unavailable media placeholders */
 .art-hatch-surface {
-  background-color: #0b0c0d;
+  background-color: #08080a;
   background-image: repeating-linear-gradient(
     -45deg,
     rgba(255, 255, 255, 0.024) 0 1px,
@@ -18,10 +18,10 @@
 }
 
 .art-hatch-surface[data-trashed="true"] {
-  background-color: #0c0d0e;
+  background-color: #09090b;
   background-image: repeating-linear-gradient(
     -45deg,
-    rgba(214, 189, 134, 0.032) 0 1px,
+    rgba(251, 191, 36, 0.04) 0 1px,
     transparent 1px 10px
   );
 }
@@ -50,8 +50,8 @@
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(ellipse 68% 62% at 50% 50%, rgba(69, 192, 136, 0.06), transparent 72%),
-    #0a0b0c;
+    radial-gradient(ellipse 68% 62% at 50% 50%, rgba(var(--accent-rgb, 245, 158, 11), 0.06), transparent 72%),
+    #060608;
 }
 
 .audio-waveform-svg {
@@ -77,12 +77,12 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px dashed rgba(69, 192, 136, 0.56);
+  border: 1px dashed rgba(var(--accent-rgb, 245, 158, 11), 0.56);
   border-radius: var(--r-md, 8px);
-  background: rgba(12, 13, 14, 0.76);
+  background: rgba(5, 5, 7, 0.78);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
-  color: var(--text, #e4e5e7);
+  color: var(--text, #f5f5f7);
   padding: 12px;
   text-align: center;
 }
@@ -91,7 +91,7 @@
   position: absolute;
   width: 12px;
   height: 12px;
-  border-color: var(--accent, #45c088);
+  border-color: var(--accent, #f59e0b);
   border-style: solid;
   border-width: 0;
 }
@@ -104,7 +104,7 @@
 .drop-reticle-label {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text, #e4e5e7);
+  color: var(--text, #f5f5f7);
   letter-spacing: 0.01em;
 }
 
@@ -121,15 +121,15 @@
   padding: 24px 28px;
   border: 1px dashed rgba(255, 255, 255, 0.14);
   border-radius: var(--r-lg, 8px);
-  background: rgba(18, 19, 20, 0.65);
-  color: var(--text-2, #a1a4a9);
+  background: rgba(11, 11, 14, 0.68);
+  color: var(--text-2, #a3a3ad);
   transition: border-color var(--dur-fast, 120ms) ease, background-color var(--dur-fast, 120ms) ease, color var(--dur-fast, 120ms) ease;
 }
 
 .png-info-drop-trigger:hover {
-  border-color: rgba(69, 192, 136, 0.48);
-  background: rgba(24, 25, 27, 0.8);
-  color: var(--text, #e4e5e7);
+  border-color: rgba(var(--accent-rgb, 245, 158, 11), 0.48);
+  background: rgba(17, 17, 22, 0.84);
+  color: var(--text, #f5f5f7);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -148,7 +148,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .drop-reticle-overlay {
-    background: #121314;
+    background: #0b0b0e;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

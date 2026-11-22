@@ -28,7 +28,7 @@
   right: 0;
   z-index: 0;
   pointer-events: none;
-  color: var(--text, #e4e5e7);
+  color: var(--text, #f5f5f7);
   opacity: 0.06;
   transition: opacity var(--dur-fast, 120ms) var(--ease-out, ease), color var(--dur-fast, 120ms) var(--ease-out, ease);
 }
@@ -39,8 +39,8 @@
 
 .cv-project-overview .cv-project-tile[aria-current="page"] .cv-project-corner-art,
 .cv-project-overview .cv-project-tile.is-selected .cv-project-corner-art {
-  color: var(--accent, #45c088);
-  opacity: 0.14;
+  color: var(--accent, #f59e0b);
+  opacity: 0.16;
 }
 
 .cv-project-tile-top {
@@ -98,7 +98,7 @@
   border: 2px solid rgba(255, 255, 255, .48);
   border-radius: 5px;
   background: rgba(0, 0, 0, .38);
-  color: #05130b;
+  color: var(--on-accent, #0a0602);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, .35);
 }
 
@@ -108,8 +108,82 @@
 }
 
 .cv-project-overview .cv-project-checkbox.is-checked {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #05130b;
-  box-shadow: 0 0 0 1px rgba(53, 208, 138, .35);
+  background: var(--accent, #f59e0b);
+  border-color: var(--accent, #f59e0b);
+  color: var(--on-accent, #0a0602);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb, 245, 158, 11), .38);
+}
+
+/* LIQUID-GLASS-MODALS-20261122 / POLISH-MODALS-20261122: unified single-layer Liquid Glass shell for ProjectOverview
+ * and its bulk-delete dialog. Compound selectors outrank legacy single-class rules imported later in
+ * sidebarMenus.css / sidebar.css, so explicit backdrop-filter: none keeps backdrops pure dim scrims. */
+div.cv-project-overview-backdrop {
+  background: var(--glass-backdrop, rgba(5, 5, 7, .56));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  padding: clamp(16px, 4vw, 56px);
+}
+
+.cv-project-overview-backdrop > .cv-project-overview {
+  padding: clamp(20px, 3vw, 32px);
+  background: var(--glass-modal-bg, rgba(14, 14, 18, .66));
+  -webkit-backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  border: 1px solid var(--glass-rim, rgba(255, 255, 255, .14));
+  border-radius: var(--glass-radius, 14px);
+  box-shadow: var(--glass-float-shadow, 0 18px 44px rgba(0, 0, 0, .54), inset 0 1px 0 rgba(255, 255, 255, .14));
+}
+
+.cv-project-overview-backdrop .cv-project-bulk-bar {
+  background: rgba(255, 255, 255, .04);
+}
+
+.cv-project-overview .cv-project-overview-grid .cv-project-tile:not(.is-selected) {
+  background: linear-gradient(145deg, rgba(255, 255, 255, .045), rgba(255, 255, 255, .01) 52%, rgba(255, 255, 255, 0)), rgba(10, 10, 14, .34);
+}
+
+.cv-project-overview .cv-project-overview-grid .cv-project-tile:not(.is-selected):hover:not(:disabled) {
+  border-color: var(--glass-rim-strong, rgba(255, 255, 255, .20));
+  background: linear-gradient(145deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .015) 52%, rgba(var(--accent-rgb, 245, 158, 11), .08)), rgba(18, 16, 14, .42);
+}
+
+.cv-project-overview .cv-project-overview-grid .cv-project-tile.is-selected {
+  background: linear-gradient(145deg, rgba(var(--accent-rgb, 245, 158, 11), .16), rgba(255, 255, 255, .015) 52%, rgba(var(--accent-rgb, 245, 158, 11), .07)), rgba(24, 18, 11, .48);
+}
+
+.cv-project-overview-backdrop .cv-project-bulk-confirm-backdrop {
+  background: var(--glass-backdrop, rgba(5, 5, 7, .56));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.cv-project-bulk-confirm-backdrop > .cv-project-bulk-confirm {
+  background: var(--glass-modal-bg, rgba(14, 14, 18, .66));
+  -webkit-backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  backdrop-filter: var(--glass-blur, blur(26px) saturate(190%));
+  border: 1px solid var(--glass-rim, rgba(255, 255, 255, .14));
+  border-radius: var(--glass-radius, 14px);
+  box-shadow: var(--glass-float-shadow, 0 18px 44px rgba(0, 0, 0, .54), inset 0 1px 0 rgba(255, 255, 255, .14));
+}
+
+.cv-project-bulk-confirm .cv-project-bulk-preview-list {
+  background: rgba(10, 10, 14, .34);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  div.cv-project-overview-backdrop,
+  .cv-project-overview-backdrop .cv-project-bulk-confirm-backdrop {
+    background: rgba(5, 5, 7, .84);
+  }
+  .cv-project-overview-backdrop > .cv-project-overview,
+  .cv-project-bulk-confirm-backdrop > .cv-project-bulk-confirm {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--surface-solid, #111116);
+  }
+  .cv-project-overview-backdrop .cv-project-bulk-bar,
+  .cv-project-bulk-confirm .cv-project-bulk-preview-list,
+  .cv-project-overview .cv-project-overview-grid .cv-project-tile:not(.is-selected) {
+    background: var(--surface-1, #0b0b0e);
+  }
 }

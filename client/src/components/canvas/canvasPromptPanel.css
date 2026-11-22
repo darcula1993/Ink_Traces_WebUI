@@ -46,8 +46,8 @@
   font: 12px/1.5 inherit;
 }
 .cv-panel-prompts-editor textarea:focus-visible {
-  outline: 1px solid var(--accent, #3ecf8e);
-  border-color: var(--accent, #3ecf8e);
+  outline: 1px solid var(--accent, #f59e0b);
+  border-color: var(--accent, #f59e0b);
 }
 .cv-panel-prompts-editor-actions {
   display: flex;

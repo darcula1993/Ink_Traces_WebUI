@@ -5,7 +5,7 @@ import PromptMentionTextarea from './PromptMentionTextarea'
 function TextToImage({ prompt, setPrompt, mentionItems, isGenerating, onSavePrompt }) {
   return (
     <div className="flex-grow flex flex-col min-h-0 relative bg-transparent">
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-nexus-border px-4">
+      <div className="prompt-pane-header flex h-11 shrink-0 items-center justify-between px-4">
         <span className="text-xs font-medium text-nexus-text-light">图片提示词</span>
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs text-nexus-muted">{prompt.length}</span>

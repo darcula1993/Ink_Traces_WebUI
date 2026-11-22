@@ -2,9 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 2000;
-  background: rgba(0, 0, 0, .68);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--glass-backdrop, rgba(3, 3, 5, .64));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -17,10 +15,12 @@
   height: min(800px, calc(100dvh - 48px));
   display: flex;
   flex-direction: column;
-  background: var(--surface-2);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-xl);
-  box-shadow: var(--shadow-2);
+  background: var(--glass-modal-bg, var(--surface-2));
+  border: 1px solid var(--glass-rim-strong, var(--border-strong));
+  border-radius: var(--glass-radius, 14px);
+  box-shadow: var(--glass-float-shadow, var(--shadow-2));
+  -webkit-backdrop-filter: var(--glass-blur, blur(24px) saturate(165%));
+  backdrop-filter: var(--glass-blur, blur(24px) saturate(165%));
   overflow: hidden;
   font: var(--fs-control)/var(--lh-control) var(--font-sans, Inter, system-ui, sans-serif);
 }
@@ -132,7 +132,7 @@
 
 .ie-dialog input[type=number]:focus-visible {
   outline: none;
-  border-color: var(--border-focus);
+  border-color: var(--accent, #f59e0b);
   box-shadow: var(--ring-focus);
 }
 
@@ -146,8 +146,8 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background-color: var(--checker-dark, #131416);
-  background-image: var(--checker-pattern, conic-gradient(#1a1c1e 25%, #131416 0 50%, #1a1c1e 0 75%, #131416 0));
+  background-color: var(--checker-dark, #0a0a0d);
+  background-image: var(--checker-pattern, conic-gradient(#131318 25%, #0a0a0d 0 50%, #131318 0 75%, #0a0a0d 0));
   background-size: 14px 14px;
   touch-action: none;
 }
@@ -155,7 +155,7 @@
 .ie-dialog .ie-error {
   color: var(--danger);
   background: var(--danger-soft);
-  border-top: 1px solid rgba(223, 138, 144, .22);
+  border-top: 1px solid rgba(248, 113, 113, .26);
   padding: var(--sp-2) var(--sp-4);
   font-size: var(--fs-caption);
 }

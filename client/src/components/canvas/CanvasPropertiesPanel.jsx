@@ -30,20 +30,21 @@ export {RatioGlyph}
 // always below the node"): one fixed column right of the canvas. Its content follows the selection; generation is
 // only started from buttons (no keyboard shortcut, user decision Q7). Width/collapse are per-browser preferences.
 const WIDTH_KEY='ink-traces.canvas.properties-width.v1',COLLAPSED_KEY='ink-traces.canvas.properties-collapsed.v1'
-export const PANEL_MIN=288,PANEL_MAX=440
+export const PANEL_MIN=288,PANEL_MAX=440,PANEL_FLOOR=260
 export const defaultPanelWidth=viewport=>viewport>=1920?360:viewport>=1440?320:288
-const clamp=value=>Math.max(PANEL_MIN,Math.min(PANEL_MAX,value))
+const clamp=(value,min=PANEL_MIN,max=PANEL_MAX)=>Math.max(min,Math.min(max,value))
 const readStored=(key)=>{try{return localStorage.getItem(key)}catch{return null}}
 const writeStored=(key,value)=>{try{if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,value)}catch{/* storage unavailable: keep the in-memory value */}}
 export function usePropertiesPanelPrefs(){
  const viewport=()=>typeof window==='undefined'?1440:window.innerWidth
- const [saved,setSaved]=useState(()=>{const value=Number(readStored(WIDTH_KEY));return Number.isFinite(value)&&value>=PANEL_MIN&&value<=PANEL_MAX?value:null})
+ const [viewportWidth,setViewportWidth]=useState(viewport)
+ const [saved,setSaved]=useState(()=>{const value=Number(readStored(WIDTH_KEY));return Number.isFinite(value)&&value>=PANEL_FLOOR&&value<=PANEL_MAX?value:null})
  const [collapsed,setCollapsedState]=useState(()=>readStored(COLLAPSED_KEY)==='1')
- const [fallback,setFallback]=useState(()=>defaultPanelWidth(viewport()))
- useEffect(()=>{const resize=()=>setFallback(defaultPanelWidth(viewport()));window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize)},[])
- const setWidth=value=>{if(value===null){setSaved(null);writeStored(WIDTH_KEY,null);return}const next=clamp(Math.round(value));setSaved(next);writeStored(WIDTH_KEY,String(next))}
+ const fallback=defaultPanelWidth(viewportWidth)
+ useEffect(()=>{const resize=()=>setViewportWidth(viewport());window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize)},[])
+ const setWidth=(value,bounds)=>{if(value===null){setSaved(null);writeStored(WIDTH_KEY,null);return}const max=bounds?.max??PANEL_MAX,min=bounds?.min??Math.min(PANEL_MIN,max);const next=clamp(Math.round(value),min,max);setSaved(next);writeStored(WIDTH_KEY,String(next))}
  const setCollapsed=value=>{setCollapsedState(value);writeStored(COLLAPSED_KEY,value?'1':'0')}
- return {width:saved??fallback,collapsed,setWidth,setCollapsed}
+ return {width:saved??fallback,viewportWidth,collapsed,setWidth,setCollapsed}
 }
 
 const KIND_LABEL={text:'文本',image:'画面',video:'视频',audio:'音频'}
@@ -63,20 +64,24 @@ function PropAdvanced(props) {
 }
 const imagePrefix=(name,value)=>name==='model'?<span className="cv-pf-prefix" aria-hidden="true"><Cpu size={14}/></span>:imageRatioPrefix(name,value)
 
-export default function CanvasPropertiesPanel({prefs,content,onFocusCanvas}) {
+export default function CanvasPropertiesPanel({prefs,content,onFocusCanvas,maxWidth=PANEL_MAX}) {
  const asideRef=useRef(null),gesture=useRef(null),[dragging,setDragging]=useState(false)
  const {width,collapsed,setWidth,setCollapsed}=prefs
+ const effectiveMax=Math.max(PANEL_FLOOR,Math.min(PANEL_MAX,Math.round(maxWidth??PANEL_MAX)))
+ const effectiveMin=Math.min(PANEL_MIN,effectiveMax)
+ const effectiveWidth=clamp(width,effectiveMin,effectiveMax)
  const keyDown=event=>{
   if(event.defaultPrevented||(event.ctrlKey||event.metaKey))return
   // Esc: a native select keeps its own list handling; otherwise focus goes back to the selection (never cleared).
   if(event.key==='Escape'&&!event.target.closest?.('[role=dialog],details[open]')){event.preventDefault();onFocusCanvas?.()}
  }
  if(collapsed)return <aside ref={asideRef} className="cv-properties is-collapsed" aria-label="属性面板（已收起）" data-testid="properties-panel"><button type="button" className="btn btn-icon btn-sm" aria-label="展开属性面板" title="展开属性面板" aria-expanded="false" onClick={()=>setCollapsed(false)}><PanelRightOpen size={15}/></button></aside>
- const resizeKey=event=>{const step=event.shiftKey?40:10;if(event.key==='ArrowLeft'){event.preventDefault();setWidth(width+step)}else if(event.key==='ArrowRight'){event.preventDefault();setWidth(width-step)}else if(event.key==='Home'){event.preventDefault();setWidth(PANEL_MAX)}else if(event.key==='End'){event.preventDefault();setWidth(PANEL_MIN)}}
- return <aside ref={asideRef} className={`cv-properties ${dragging?'is-resizing':''}`} style={{width}} aria-label={content.label?`属性面板：${content.label}`:'属性面板'} data-testid="properties-panel" data-panel-node-id={content.nodeId||undefined} data-panel-kind={content.kind} onKeyDown={keyDown}>
-  <div className="cv-properties-resize" role="separator" aria-orientation="vertical" aria-label="调整属性面板宽度" aria-valuemin={PANEL_MIN} aria-valuemax={PANEL_MAX} aria-valuenow={width} tabIndex={0} title="拖动调整宽度，双击复位" onKeyDown={resizeKey} onDoubleClick={()=>setWidth(null)}
-   onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);gesture.current={x:event.clientX,width};setDragging(true)}}
-   onPointerMove={event=>{if(gesture.current)setWidth(gesture.current.width+gesture.current.x-event.clientX)}}
+ const bounds={min:effectiveMin,max:effectiveMax}
+ const resizeKey=event=>{const step=event.shiftKey?40:10;if(event.key==='ArrowLeft'){event.preventDefault();setWidth(effectiveWidth+step,bounds)}else if(event.key==='ArrowRight'){event.preventDefault();setWidth(effectiveWidth-step,bounds)}else if(event.key==='Home'){event.preventDefault();setWidth(effectiveMax,bounds)}else if(event.key==='End'){event.preventDefault();setWidth(effectiveMin,bounds)}}
+ return <aside ref={asideRef} className={`cv-properties ${dragging?'is-resizing':''}`} style={{width:effectiveWidth}} aria-label={content.label?`属性面板：${content.label}`:'属性面板'} data-testid="properties-panel" data-panel-node-id={content.nodeId||undefined} data-panel-kind={content.kind} onKeyDown={keyDown}>
+  <div className="cv-properties-resize" role="separator" aria-orientation="vertical" aria-label="调整属性面板宽度" aria-valuemin={effectiveMin} aria-valuemax={effectiveMax} aria-valuenow={effectiveWidth} tabIndex={0} title="拖动调整宽度，双击复位" onKeyDown={resizeKey} onDoubleClick={()=>setWidth(null)}
+   onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);gesture.current={x:event.clientX,width:effectiveWidth};setDragging(true)}}
+   onPointerMove={event=>{if(gesture.current)setWidth(gesture.current.width+gesture.current.x-event.clientX,bounds)}}
    onPointerUp={()=>{gesture.current=null;setDragging(false)}} onPointerCancel={()=>{gesture.current=null;setDragging(false)}}/>
   <header className="cv-properties-head">{content.head}<button type="button" className="btn btn-icon btn-sm cv-properties-collapse" aria-label="收起属性面板" title="收起属性面板" aria-expanded="true" onClick={()=>setCollapsed(true)}><PanelRightClose size={15}/></button></header>
   <div className="cv-properties-body">{content.body}</div>

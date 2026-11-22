@@ -26,7 +26,7 @@ export default function GlobalTaskCenter({
     >
       <div className="global-task-center-bar" data-testid="global-task-center-bar">
         <div className="global-task-center-heading">
-          <ListTodo size={15} className="shrink-0 text-nexus-green" aria-hidden="true" />
+          <ListTodo size={14} className="shrink-0 text-nexus-green" aria-hidden="true" />
           <span>全局任务中心</span>
         </div>
         <div className="global-task-type-tabs" role="tablist" aria-label="任务类型">

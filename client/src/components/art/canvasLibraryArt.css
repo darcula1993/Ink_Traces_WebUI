@@ -1,25 +1,25 @@
-/* UI-ART-CANVAS-LIBRARY-20261121: Micro-Ink Precision vector styling & dark subtle surfaces.
- * Palette: neutral near-black (#0c0d0e / #121314 / #18191b), structure lines rgba(228,229,231,0.18-0.32),
- * brand green #45c088 strictly <= 15% visual area per graphic. Respects prefers-reduced-motion / contrast / forced-colors.
+/* OBSIDIAN-AMBER-20261122: Micro-Ink Precision vector styling & dark subtle surfaces.
+ * Palette: pitch obsidian (#050507 / #0b0b0e / #111116), structure lines rgba(245,245,247,0.14-0.34),
+ * molten amber #f59e0b strictly <= 15% visual area per graphic. Respects prefers-reduced-motion / contrast / forced-colors.
  */
 
 .ila-svg {
   display: block;
   flex-shrink: 0;
-  color: var(--text, #e4e5e7);
-  --ila-stroke-soft: rgba(228, 229, 231, 0.14);
-  --ila-stroke-mid: rgba(228, 229, 231, 0.24);
-  --ila-stroke-strong: rgba(228, 229, 231, 0.34);
+  color: var(--text, #f5f5f7);
+  --ila-stroke-soft: rgba(245, 245, 247, 0.14);
+  --ila-stroke-mid: rgba(245, 245, 247, 0.24);
+  --ila-stroke-strong: rgba(245, 245, 247, 0.34);
   --ila-fill-xs: rgba(255, 255, 255, 0.02);
   --ila-fill-sm: rgba(255, 255, 255, 0.032);
   --ila-fill-md: rgba(255, 255, 255, 0.048);
-  --ila-surface: var(--surface-1, #121314);
-  --ila-accent: var(--accent, #45c088);
-  --ila-accent-soft: rgba(69, 192, 136, 0.12);
-  --ila-accent-halo: rgba(69, 192, 136, 0.14);
+  --ila-surface: var(--surface-1, #0b0b0e);
+  --ila-accent: var(--accent, #f59e0b);
+  --ila-accent-soft: rgba(var(--accent-rgb, 245, 158, 11), 0.14);
+  --ila-accent-halo: rgba(var(--accent-rgb, 245, 158, 11), 0.16);
   --ila-audio-violet: var(--cv-port-audio, #a47cf3);
-  --ila-warn: var(--warning, #d6bd86);
-  --ila-danger: var(--danger, #df8a90);
+  --ila-warn: var(--warning, #fbbf24);
+  --ila-danger: var(--danger, #f87171);
 }
 
 .ila-svg .ila-guide { stroke: var(--ila-stroke-soft); }
@@ -68,29 +68,29 @@
   fill: rgba(164, 124, 243, 0.065);
 }
 .ila-waveform.is-card .ila-wave-halo {
-  fill: rgba(69, 192, 136, 0.06);
+  fill: rgba(var(--accent-rgb, 245, 158, 11), 0.07);
 }
 .ila-waveform .ila-wave-arcs {
-  stroke: rgba(228, 229, 231, 0.085);
+  stroke: rgba(245, 245, 247, 0.085);
 }
 .ila-waveform .ila-wave-baseline {
-  stroke: rgba(228, 229, 231, 0.12);
+  stroke: rgba(245, 245, 247, 0.12);
 }
 .ila-waveform .ila-wave-bar {
-  fill: rgba(228, 229, 231, 0.22);
+  fill: rgba(245, 245, 247, 0.22);
   transition: fill 120ms ease, opacity 120ms ease;
 }
 .ila-waveform .ila-wave-bar.is-violet {
   fill: rgba(164, 124, 243, 0.44);
 }
 .ila-waveform .ila-wave-bar.is-peak {
-  fill: rgba(69, 192, 136, 0.66);
+  fill: rgba(var(--accent-rgb, 245, 158, 11), 0.68);
 }
 .ila-waveform .ila-wave-bar.is-played {
-  fill: rgba(69, 192, 136, 0.88);
+  fill: rgba(var(--accent-rgb, 245, 158, 11), 0.90);
 }
 .ila-waveform .ila-wave-playhead {
-  stroke: rgba(69, 192, 136, 0.55);
+  stroke: rgba(var(--accent-rgb, 245, 158, 11), 0.60);
 }
 .ila-waveform.is-playing .ila-wave-bar.is-played,
 .ila-waveform.is-playing .ila-wave-bar.is-peak {
@@ -118,7 +118,7 @@
   padding: 0 2px;
   overflow: hidden;
   border-radius: 4px;
-  background: rgba(12, 13, 14, 0.36);
+  background: rgba(6, 6, 8, 0.44);
 }
 
 /* Asset library audio card waveform container */
@@ -126,7 +126,7 @@
   position: relative;
   padding: 8px 10px 22px;
   gap: 0;
-  background: radial-gradient(circle at 50% 48%, rgba(164, 124, 243, 0.055), rgba(12, 13, 14, 0.55) 75%);
+  background: radial-gradient(circle at 50% 48%, rgba(164, 124, 243, 0.055), rgba(6, 6, 8, 0.65) 75%);
   overflow: hidden;
 }
 .ul-audio.ul-audio-art .ila-waveform {
@@ -142,8 +142,8 @@
   line-height: 16px;
   padding: 0 5px;
   border-radius: 4px;
-  color: var(--text-2, #a1a4a9);
-  background: rgba(12, 13, 14, 0.72);
+  color: var(--text-2, #a3a3ad);
+  background: rgba(6, 6, 8, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.08);
   pointer-events: none;
 }
@@ -158,7 +158,7 @@
   gap: 6px;
   border-style: dashed;
   border-color: rgba(255, 255, 255, 0.09);
-  background: radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.022), rgba(0, 0, 0, 0.24) 76%);
+  background: radial-gradient(circle at 50% 46%, rgba(255, 255, 255, 0.022), rgba(0, 0, 0, 0.24) 76%), #060608;
 }
 .ila-vf-corners {
   position: absolute;
@@ -191,7 +191,7 @@
 /* T1-7: 45-degree subtle dark hatched placeholder for deleted / trashed items */
 .canvas-studio .cv-media-state.is-deleted,
 .ul-deleted .ul-deleted-mark {
-  background-color: rgba(12, 13, 14, 0.54);
+  background-color: rgba(6, 6, 8, 0.62);
   background-image: repeating-linear-gradient(
     -45deg,
     rgba(255, 255, 255, 0.025) 0 1px,
@@ -199,16 +199,16 @@
   );
 }
 .canvas-studio .cv-media-state.is-deleted:not(.is-trashed) {
-  border-color: rgba(223, 138, 144, 0.24);
+  border-color: rgba(248, 113, 113, 0.28);
 }
 .canvas-studio .cv-media-state.is-deleted.is-trashed {
-  border-color: rgba(214, 189, 134, 0.26);
+  border-color: rgba(251, 191, 36, 0.28);
 }
 .ul-deleted.is-trashed .ul-deleted-card {
-  border-color: rgba(214, 189, 134, 0.3);
+  border-color: rgba(251, 191, 36, 0.32);
 }
 .ul-deleted.is-trashed .ul-info {
-  color: var(--warning, #d6bd86);
+  color: var(--warning, #fbbf24);
 }
 
 /* T2-3 & T2-4: Centered empty state blocks across library, character cards, and narrow task sidebar */
@@ -227,7 +227,7 @@
 }
 .ila-empty-sub {
   font-size: 12px;
-  color: var(--text-3, #6d7177);
+  color: var(--text-3, #686873);
   max-width: 340px;
   line-height: 1.5;
 }
@@ -261,21 +261,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(12, 13, 14, 0.72);
+  background: rgba(5, 5, 7, 0.74);
   -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
 .cv-file-drop-frame {
   position: absolute;
   inset: 14px;
-  border: 1px dashed rgba(69, 192, 136, 0.55);
+  border: 1px dashed rgba(var(--accent-rgb, 245, 158, 11), 0.56);
   border-radius: 10px;
 }
 .cv-file-drop-corner {
   position: absolute;
   width: 22px;
   height: 22px;
-  border-color: var(--accent, #45c088);
+  border-color: var(--accent, #f59e0b);
   border-style: solid;
   border-width: 0;
 }
@@ -290,19 +290,19 @@
   gap: 8px;
   padding: 20px 28px;
   border-radius: 10px;
-  background: rgba(24, 25, 27, 0.92);
-  border: 1px solid rgba(69, 192, 136, 0.36);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  background: rgba(17, 17, 22, 0.92);
+  border: 1px solid rgba(var(--accent-rgb, 245, 158, 11), 0.38);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.52);
   text-align: center;
 }
 .cv-file-drop-card strong {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text, #e4e5e7);
+  color: var(--text, #f5f5f7);
 }
 .cv-file-drop-card span {
   font-size: 12px;
-  color: var(--text-2, #a1a4a9);
+  color: var(--text-2, #a3a3ad);
 }
 
 /* Accessibility: reduced motion, reduced transparency, higher contrast, forced colors */
@@ -321,7 +321,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .cv-file-drop-overlay {
-    background: rgba(12, 13, 14, 0.92);
+    background: rgba(5, 5, 7, 0.92);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -329,9 +329,9 @@
 
 @media (prefers-contrast: more) {
   .ila-svg {
-    --ila-stroke-soft: rgba(228, 229, 231, 0.32);
-    --ila-stroke-mid: rgba(228, 229, 231, 0.48);
-    --ila-stroke-strong: rgba(228, 229, 231, 0.68);
+    --ila-stroke-soft: rgba(245, 245, 247, 0.32);
+    --ila-stroke-mid: rgba(245, 245, 247, 0.48);
+    --ila-stroke-strong: rgba(245, 245, 247, 0.68);
   }
   .ila-vf-corner {
     border-color: rgba(255, 255, 255, 0.34);

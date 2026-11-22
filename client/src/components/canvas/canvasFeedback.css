@@ -39,22 +39,22 @@
 
 /* Video result still loading after write-back (instead of a silent black frame). */
 .cv-media-player:has(> .cv-media-player-loading){position:relative}
-.cv-media-player-loading{position:absolute;z-index:3;left:50%;top:12px;transform:translateX(-50%);padding:2px 8px;border-radius:6px;background:rgba(0,0,0,.55);color:var(--cv-secondary,#b5bbb8);font-size:12px;pointer-events:none;white-space:nowrap}
+.cv-media-player-loading{position:absolute;z-index:3;left:50%;top:12px;transform:translateX(-50%);padding:2px 8px;border-radius:6px;background:rgba(0,0,0,.55);color:var(--cv-secondary,#a3a3ad);font-size:12px;pointer-events:none;white-space:nowrap}
 
 /* Media preview: fit / original size controls. */
 .cv-preview-zoom{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
-.cv-preview-zoom button{min-height:28px;padding:2px 10px;border:1px solid var(--cv-border,#b5bbb833);border-radius:6px;background:transparent;color:inherit;font-size:12px;cursor:pointer}
-.cv-preview-zoom button[aria-pressed=true]{border-color:var(--cv-focus,#5ca07e);color:var(--cv-text,#ebedec);background:var(--cv-green-hover,#5ca07e22)}
-.cv-preview-zoom button:focus-visible{outline:2px solid var(--cv-focus,#5ca07e);outline-offset:1px}
+.cv-preview-zoom button{min-height:28px;padding:2px 10px;border:1px solid var(--cv-border,rgba(255,255,255,.1));border-radius:6px;background:transparent;color:inherit;font-size:12px;cursor:pointer}
+.cv-preview-zoom button[aria-pressed=true]{border-color:var(--cv-focus,#f59e0b);color:var(--cv-text,#f5f5f7);background:var(--accent-soft,rgba(245,158,11,.14))}
+.cv-preview-zoom button:focus-visible{outline:2px solid var(--cv-focus,#f59e0b);outline-offset:1px}
 .cv-preview-zoom label{display:flex;align-items:center;gap:8px;margin-left:auto}
-.cv-preview-zoom input[type=range]{accent-color:var(--cv-focus,#5ca07e)}
+.cv-preview-zoom input[type=range]{accent-color:var(--cv-focus,#f59e0b)}
 .cv-preview-zoom output{min-width:40px;font-variant-numeric:tabular-nums;font-size:12px}
 /* FIX-B2B-20261114 ada: busy state text sits on a dark backing so code rain never crosses it; timer lives only in the status row. */
-.canvas-studio .cv-media-state.is-busy>:is(strong,.cv-task-stages){background:rgba(8,10,9,.78);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:2px 8px}
-.canvas-studio .cv-media-state.is-busy>.cv-task-stages{background:rgba(8,10,9,.82)}
+.canvas-studio .cv-media-state.is-busy>:is(strong,.cv-task-stages){background:rgba(5,5,7,.82);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:2px 8px}
+.canvas-studio .cv-media-state.is-busy>.cv-task-stages{background:rgba(5,5,7,.86)}
 
 /* P1-TASK-LIBRARY-FLOW-20261120: brief node locate highlight ring + expanded prompt dialog tool row. */
-@keyframes cv-locate-pulse{0%{box-shadow:0 0 0 0 rgba(79,196,140,.75)}50%{box-shadow:0 0 0 8px rgba(79,196,140,.22)}100%{box-shadow:0 0 0 2px var(--accent,#4fc48c)}}
-.canvas-studio .cv-node.is-locate-highlight{border-color:var(--accent,#4fc48c);animation:cv-locate-pulse .85s ease-out 2;box-shadow:0 0 0 2px var(--accent,#4fc48c)}
-@media(prefers-reduced-motion:reduce){.canvas-studio .cv-node.is-locate-highlight{animation:none;box-shadow:0 0 0 3px var(--accent,#4fc48c)}}
+@keyframes cv-locate-pulse{0%{box-shadow:0 0 0 0 rgba(245,158,11,.75)}50%{box-shadow:0 0 0 8px rgba(245,158,11,.22)}100%{box-shadow:0 0 0 2px var(--accent,#f59e0b)}}
+.canvas-studio .cv-node.is-locate-highlight{border-color:var(--accent,#f59e0b);animation:cv-locate-pulse .85s ease-out 2;box-shadow:0 0 0 2px var(--accent,#f59e0b)}
+@media(prefers-reduced-motion:reduce){.canvas-studio .cv-node.is-locate-highlight{animation:none;box-shadow:0 0 0 3px var(--accent,#f59e0b)}}
 .cv-expanded-host .cv-dialog-prompt-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}

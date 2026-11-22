@@ -1,7 +1,7 @@
-/* PROPS-PANEL-REDESIGN-20261118 (user 11-18): right Properties column in the ImagineArt layout, Linear-style tokens.
+/* PROPS-PANEL-REDESIGN-20261118 / OBSIDIAN-AMBER-20261122: right Properties column in the ImagineArt layout.
  * One column; label above a full-width 36px control; sections separated by one 1px rim and a 16px rhythm.
  * Type: 14 (title) / 13 (controls, toggles) / 12 (labels, captions). Radius 8 (controls) / 6 (chips, glyph boxes).
- * Green only for focus, checked switch, selected version and the primary 生成 button. Presentation only. */
+ * Amber gold only for focus, checked switch, selected version and the primary 生成 button. Presentation only. */
 .canvas-studio .cv-properties {
   --pf-h: 36px;
   --pf-gap: 12px;
@@ -10,7 +10,7 @@
   --pf-rim-hover: rgba(255, 255, 255, .16);
   --pf-fill: rgba(255, 255, 255, .03);
   --pf-fill-hover: rgba(255, 255, 255, .05);
-  --pf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a4a9' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --pf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a3a3ad' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 /* ---- head: kind glyph + editable name + collapse */
@@ -147,11 +147,11 @@
 .canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-remove {
   position: absolute; top: -6px; right: -6px; z-index: 3; width: 18px; height: 18px; min-height: 0; min-width: 0;
   padding: 0; display: grid; place-items: center; border-radius: 999px;
-  border: 1px solid var(--cv-border-strong); background: var(--surface-solid, #18191b); color: var(--text-2);
+  border: 1px solid var(--cv-border-strong); background: var(--surface-solid, #111116); color: var(--text-2);
   cursor: pointer; transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
 .canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-remove:hover {
-  color: var(--cv-text); border-color: var(--danger); background: var(--surface-2, #222528);
+  color: var(--cv-text); border-color: var(--danger); background: var(--surface-raised, #18181f);
 }
 .canvas-studio .cv-properties .cv-pf-refs .cv-reference-thumb .cv-reference-remove:focus-visible {
   outline: none; box-shadow: var(--ring-focus); color: var(--cv-text);
