@@ -1,11 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import axios from 'axios'
 import { Maximize2, UploadCloud, X, Plus, RotateCw } from 'lucide-react'
 import SortableReferenceItem, { moveArrayItem } from './SortableReferenceItem'
 import { persistWorkspaceBlob, workspaceImageFields } from '../lib/useWorkspaceState'
+import { LIBRARY_MEDIA_URL_PATTERN } from '../lib/referenceMedia'
 import { DropTargetReticle } from './art/ShellEmptyArt'
 
 const IMAGE_EXTENSION = /\.(avif|bmp|gif|heic|heif|jpe?g|png|webp)$/i
+const MAX_METADATA_CACHE_ENTRIES = 256
+const libraryImageMetadataCache = new Map()
 let nextReferenceId = 0
+
+function rememberLibraryMetadata(url, meta) {
+  if (libraryImageMetadataCache.size >= MAX_METADATA_CACHE_ENTRIES) {
+    const oldest = libraryImageMetadataCache.keys().next().value
+    if (oldest !== undefined) libraryImageMetadataCache.delete(oldest)
+  }
+  libraryImageMetadataCache.set(url, meta)
+}
 
 function isImageFile(file) {
   return file && (file.type?.startsWith('image/') || IMAGE_EXTENSION.test(file.name || ''))
@@ -17,6 +29,13 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, createPrev
   const dragDepthRef = useRef(0)
   const [isDragging, setIsDragging] = useState(false)
   const attemptedFiles = useRef(new WeakSet())
+  const attemptedMetadata = useRef(new Set())
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   const uploadImage = useCallback(image => {
     attemptedFiles.current.add(image.file)
@@ -36,6 +55,51 @@ const ImageToImage = ({ uploadedImages: rawImages, setUploadedImages, createPrev
       if (image.file instanceof Blob && !image.uploadError && !attemptedFiles.current.has(image.file)) uploadImage(image)
     })
   }, [uploadedImages, uploadImage])
+
+  useEffect(() => {
+    uploadedImages.forEach(image => {
+      if (image.file || typeof image.hasAlpha === 'boolean') return
+      const url = typeof image.preview === 'string' ? image.preview : ''
+      if (!LIBRARY_MEDIA_URL_PATTERN.test(url)) return
+      const cached = libraryImageMetadataCache.get(url)
+      if (cached) {
+        setUploadedImages(current => current.map(item => (
+          item.preview === url && typeof item.hasAlpha !== 'boolean'
+            ? {
+                ...item,
+                hasAlpha: cached.hasAlpha,
+                ...(item.width > 0 ? {} : cached.width > 0 ? { width: cached.width } : {}),
+                ...(item.height > 0 ? {} : cached.height > 0 ? { height: cached.height } : {}),
+              }
+            : item
+        )))
+        return
+      }
+      if (attemptedMetadata.current.has(url)) return
+      attemptedMetadata.current.add(url)
+      axios.get(`${url}/metadata`).then(response => {
+        const meta = response.data?.metadata
+        if (!meta || typeof meta.has_alpha !== 'boolean') return
+        const resolved = {
+          hasAlpha: meta.has_alpha,
+          width: Number(meta.width) > 0 ? Number(meta.width) : undefined,
+          height: Number(meta.height) > 0 ? Number(meta.height) : undefined,
+        }
+        rememberLibraryMetadata(url, resolved)
+        if (!mountedRef.current) return
+        setUploadedImages(current => current.map(item => (
+          item.preview === url && typeof item.hasAlpha !== 'boolean'
+            ? {
+                ...item,
+                hasAlpha: resolved.hasAlpha,
+                ...(item.width > 0 ? {} : resolved.width ? { width: resolved.width } : {}),
+                ...(item.height > 0 ? {} : resolved.height ? { height: resolved.height } : {}),
+              }
+            : item
+        )))
+      }).catch(() => {})
+    })
+  }, [uploadedImages, setUploadedImages])
 
   const processFiles = useCallback((files) => {
     const imageFiles = Array.from(files || []).filter(isImageFile)

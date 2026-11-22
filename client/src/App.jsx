@@ -26,7 +26,12 @@ import { estimateBytePlusVideoCost, estimateImageParamsCost, formatUsdEstimate, 
 import { persistWorkspaceBlob, useWorkspaceObjectUrls, useWorkspaceState, workspaceImageFields } from './lib/useWorkspaceState'
 import { initialTabMode, writeTabMode } from './lib/canvasLastLocation'
 import { SEEDANCE_20, SEEDANCE_25, SEEDANCE_25_MODERATED, CUPSY_VIDEO_MODELS, CUPSY_AUDIO_MODEL, AUDIO_OUTPUT_FORMATS, AUDIO_SAMPLE_RATES, AUDIO_SPEAKERS, VIDEO_MODEL_CAPABILITIES } from './lib/generationSettings.js'
-import { currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile, readFileDataUrl, videoDropZoneHandlers } from './lib/referenceMedia.js'
+import {
+  currentPromptMentionItems, restoredTaskReferences, isImageFile, isVideoFile, isAudioFile,
+  readFileDataUrl, videoDropZoneHandlers, isDirectImageReferenceUrl, libraryItemToImageReference,
+  libraryItemToVideoImageReference, libraryItemToVideoReference, libraryItemToVideoAudioReference,
+  libraryItemToAudioToolReference, buildVideoGenerateSubmission, buildAudioReferencePayload,
+} from './lib/referenceMedia.js'
 import { makeImgTab, makeVideoTab, DEFAULT_AUDIO_FORM, IMAGE_WORKSPACE_OPTIONS, VIDEO_WORKSPACE_OPTIONS } from './lib/workspaceTabs.js'
 import { TASK_CENTER_EVENT, TASK_CENTER_MODES } from './lib/taskCenterLink.js'
 import { getToolCapabilities } from './lib/canvasApi.js'
@@ -329,12 +334,80 @@ function App({ onLogout }) {
   }
   async function useLocalLibraryItems(items){
     const owner=libraryOwner.current,issue=validateLibraryReferences(items);if(issue)throw new Error(issue)
-    const files=await Promise.all(items.map(async item=>{const response=await fetch(item.asset.url);if(!response.ok)throw new Error('素材读取失败，请重新选择');return new File([await response.blob()],item.asset.name,{type:item.asset.mime_type||`${item.asset.kind}/*`})}))
     if(!owner||Object.keys(owner).some(key=>owner[key]!==libraryContext.current[key]))throw new Error('原工具或表单已切换，请重新选择素材')
-    if(owner.mode==='image'){const additions=files.map(file=>({uid:`library-${Date.now()}-${Math.random()}`,file,preview:createReferencePreview(file),name:file.name,hasAlpha:null}));updateImgTab(owner.imageId,tab=>({uploadedImages:[...(tab.uploadedImages||[]),...additions]}))}
-    else if(owner.mode==='audio'){if(!await addAudioReferences(files))throw new Error('参考素材上传失败，选择已保留，请重试')}
-    else if(activeTab.mode==='keyframe')addPastedKeyframes(owner.videoId,files)
-    else{const images=files.filter(isImageFile),videos=files.filter(isVideoFile),audios=files.filter(isAudioFile);if(images.length)addVideoReferenceImages(owner.videoId,images);if(videos.length)addVideoReferenceVideos(owner.videoId,videos);if(audios.length)addVideoReferenceAudios(owner.videoId,audios)}
+    const fetchAsFile=async item=>{const response=await fetch(item.asset.url);if(!response.ok)throw new Error('素材读取失败，请重新选择');return new File([await response.blob()],item.asset.name,{type:item.asset.mime_type||`${item.asset.kind}/*`})}
+    if(owner.mode==='image'){
+      const direct=items.map(item=>libraryItemToImageReference(item))
+      const additions=direct.every(Boolean)
+        ? direct
+        : await Promise.all(items.map(async(item,index)=>{
+            if(direct[index])return direct[index]
+            const file=await fetchAsFile(item)
+            return {uid:`library-${Date.now()}-${Math.random()}`,file,preview:createReferencePreview(file),name:file.name,hasAlpha:null}
+          }))
+      if(Object.keys(owner).some(key=>owner[key]!==libraryContext.current[key]))throw new Error('原工具或表单已切换，请重新选择素材')
+      updateImgTab(owner.imageId,tab=>({uploadedImages:[...(tab.uploadedImages||[]),...additions]}))
+      setShowCupsyAssets(false)
+      return
+    }
+    if(owner.mode==='audio'){
+      const direct=items.map(item=>libraryItemToAudioToolReference(item))
+      if(direct.length&&direct.every(Boolean)){
+        const kind=direct[0].kind
+        updateAudioForm(form=>({referenceMode:kind,references:[...form.references,...direct]}))
+        setShowCupsyAssets(false)
+        return
+      }
+      const files=await Promise.all(items.map(fetchAsFile))
+      if(Object.keys(owner).some(key=>owner[key]!==libraryContext.current[key]))throw new Error('原工具或表单已切换，请重新选择素材')
+      if(!await addAudioReferences(files))throw new Error('参考素材上传失败，选择已保留，请重试')
+      setShowCupsyAssets(false)
+      return
+    }
+    if(activeTab.mode==='keyframe'){
+      const direct=items.map(item=>libraryItemToVideoImageReference(item))
+      if(direct.every(Boolean)){
+        setVideoTabs(previous=>previous.map(tab=>{
+          if(tab.id!==owner.videoId)return tab
+          const available=[...direct]
+          const firstFrame=tab.firstFrame||available.shift()||null
+          const lastFrame=tab.lastFrame||available.shift()||null
+          if(firstFrame===tab.firstFrame&&lastFrame===tab.lastFrame)return tab
+          return {...tab,firstFrame,lastFrame,...(CUPSY_VIDEO_MODELS.includes(tab.model)?{ratio:'adaptive'}:{})}
+        }))
+        setShowCupsyAssets(false)
+        return
+      }
+      const files=await Promise.all(items.map(fetchAsFile))
+      if(Object.keys(owner).some(key=>owner[key]!==libraryContext.current[key]))throw new Error('原工具或表单已切换，请重新选择素材')
+      addPastedKeyframes(owner.videoId,files)
+      setShowCupsyAssets(false)
+      return
+    }
+    const directMapped=items.map(item=>{
+      if(item.asset?.kind==='image')return {kind:'image',ref:libraryItemToVideoImageReference(item)}
+      if(item.asset?.kind==='video')return {kind:'video',ref:libraryItemToVideoReference(item)}
+      if(item.asset?.kind==='audio')return {kind:'audio',ref:libraryItemToVideoAudioReference(item)}
+      return {kind:item.asset?.kind,ref:null}
+    })
+    if(directMapped.every(entry=>entry.ref)){
+      const directImages=directMapped.filter(e=>e.kind==='image').map(e=>e.ref)
+      const directVideos=directMapped.filter(e=>e.kind==='video').map(e=>e.ref)
+      const directAudios=directMapped.filter(e=>e.kind==='audio').map(e=>e.ref)
+      setVideoTabs(previous=>previous.map(tab=>{
+        if(tab.id!==owner.videoId)return tab
+        const caps=getVideoCapabilities(tab.model)||VIDEO_MODEL_CAPABILITIES[SEEDANCE_20]
+        const nextImages=directImages.length?[...tab.refImages,...directImages.slice(0,Math.max(0,caps.maxRefImages-tab.refImages.length))]:tab.refImages
+        const nextVideos=directVideos.length?[...tab.refVideos,...directVideos.slice(0,Math.max(0,caps.maxRefVideos-tab.refVideos.length))]:tab.refVideos
+        const nextAudios=directAudios.length?[...tab.refAudios,...directAudios.slice(0,Math.max(0,caps.maxRefAudios-tab.refAudios.length))]:tab.refAudios
+        return {...tab,refImages:nextImages,refVideos:nextVideos,refAudios:nextAudios}
+      }))
+      setShowCupsyAssets(false)
+      return
+    }
+    const files=await Promise.all(items.map(fetchAsFile))
+    if(Object.keys(owner).some(key=>owner[key]!==libraryContext.current[key]))throw new Error('原工具或表单已切换，请重新选择素材')
+    const images=files.filter(isImageFile),videos=files.filter(isVideoFile),audios=files.filter(isAudioFile);if(images.length)addVideoReferenceImages(owner.videoId,images);if(videos.length)addVideoReferenceVideos(owner.videoId,videos);if(audios.length)addVideoReferenceAudios(owner.videoId,audios)
     setShowCupsyAssets(false)
   }
 
@@ -918,7 +991,7 @@ function App({ onLogout }) {
         })
       } else {
         const imageUrls = await Promise.all(tab.uploadedImages.map(async image => {
-          if (image.preview?.startsWith('/api/workspace/assets/img_tabs/') && !image.file) {
+          if (isDirectImageReferenceUrl(image.preview) && !image.file) {
             return image.preview
           }
           const blob = image.file || await ensureFetchOk(image.preview)
@@ -1056,83 +1129,39 @@ function App({ onLogout }) {
 
     try {
       let resp
-      const hasFiles = Boolean(tab.firstFrame || tab.lastFrame || tab.refImages.length > 0 || tab.refAudios.length > 0)
+      const submission = buildVideoGenerateSubmission(tab, {
+        prompt: tab.prompt,
+        ratio: effectiveVideoRatio,
+        duration: effectiveVideoDuration,
+        resolution: tab.resolution,
+        model: effectiveVideoModel,
+        output_format: tab.outputFormat || 'mp4',
+        fast: tab.fast,
+        generate_audio: tab.audio,
+        return_last_frame: tab.returnLastFrame,
+        video_mode: tab.mode,
+        ...submitProfile,
+      })
 
-      const cupsyAssets = tab.mode === 'keyframe'
-        ? [
-            tab.firstFrame?.cupsyAssetId && { id: tab.firstFrame.cupsyAssetId, role: 'first_frame' },
-            tab.lastFrame?.cupsyAssetId && { id: tab.lastFrame.cupsyAssetId, role: 'last_frame' },
-          ].filter(Boolean)
-        : [
-            ...tab.refImages.filter(item => item.cupsyAssetId).map(item => ({ id: item.cupsyAssetId, role: 'reference_image' })),
-            ...readyRefVideos.filter(item => item.cupsyAssetId).map(item => ({ id: item.cupsyAssetId, role: 'reference_video' })),
-            ...tab.refAudios.filter(item => item.cupsyAssetId).map(item => ({ id: item.cupsyAssetId, role: 'reference_audio' })),
-          ]
-
-      // 收集已上传的视频 URL
-      const videoUrls = readyRefVideos.filter(v => !v.cupsyAssetId).map(v => v.url)
-
-      if (hasFiles) {
-        const formData = new FormData()
-        formData.append('prompt', tab.prompt)
-        formData.append('ratio', effectiveVideoRatio)
-        formData.append('duration', effectiveVideoDuration)
-        formData.append('resolution', tab.resolution)
-        formData.append('model', effectiveVideoModel)
-        formData.append('output_format', tab.outputFormat || 'mp4')
-        formData.append('fast', tab.fast)
-        formData.append('generate_audio', tab.audio)
-        formData.append('return_last_frame', tab.returnLastFrame)
-        formData.append('video_mode', tab.mode)
-        formData.append('provider', submitProfile.provider)
-        if (submitProfile.profile_id) formData.append('profile_id', submitProfile.profile_id)
-        if (cupsyAssets.length) formData.append('cupsy_assets', JSON.stringify(cupsyAssets))
-        const pendingFetches = []
-        if (tab.mode === 'keyframe') {
-          if (tab.firstFrame && !tab.firstFrame.cupsyAssetId) {
-            if (tab.firstFrame.file) formData.append('image', tab.firstFrame.file)
-            else if (tab.firstFrame.preview) pendingFetches.push(
-              ensureFetchOk(tab.firstFrame.preview).then(blob => formData.append('image', blob, 'first_frame.png'))
-            )
-          }
-          if (tab.lastFrame && !tab.lastFrame.cupsyAssetId) {
-            if (tab.lastFrame.file) formData.append('last_image', tab.lastFrame.file)
-            else if (tab.lastFrame.preview) pendingFetches.push(
-              ensureFetchOk(tab.lastFrame.preview).then(blob => formData.append('last_image', blob, 'last_frame.png'))
-            )
-          }
-        } else {
-          const [resolvedRefImages, resolvedRefAudios] = await Promise.all([
-            Promise.all(tab.refImages.map(async (img, index) => {
-              if (img.cupsyAssetId) return null
-              if (img.file) return { blob: img.file, name: img.name || img.file.name || `ref_${index}.png` }
-              if (!img.preview) return null
-              return { blob: await ensureFetchOk(img.preview), name: img.name || `ref_${index}.png` }
-            })),
-            Promise.all(tab.refAudios.map(async (aud, index) => {
-              if (aud.cupsyAssetId) return null
-              if (aud.file) return { blob: aud.file, name: aud.name || aud.file.name || `audio_${index}.wav` }
-              if (!aud.preview) return null
-              return { blob: await ensureFetchOk(aud.preview), name: aud.name || `audio_${index}.wav` }
-            })),
-          ])
-          resolvedRefImages.filter(Boolean).forEach(({ blob, name }) => formData.append('ref_images', blob, name))
-          resolvedRefAudios.filter(Boolean).forEach(({ blob, name }) => formData.append('ref_audios', blob, name))
-        }
-        if (videoUrls.length) formData.append('ref_video_urls', JSON.stringify(videoUrls))
-        if (pendingFetches.length) await Promise.all(pendingFetches)
-        resp = await axios.post('/api/video/generate', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 })
+      if (submission.mode === 'json') {
+        resp = await axios.post('/api/video/generate', submission.body, { timeout: 300000 })
       } else {
-        resp = await axios.post('/api/video/generate', {
-          prompt: tab.prompt, ratio: effectiveVideoRatio, duration: effectiveVideoDuration,
-          resolution: tab.resolution, model: effectiveVideoModel,
-          output_format: tab.outputFormat || 'mp4', fast: tab.fast, generate_audio: tab.audio,
-          return_last_frame: tab.returnLastFrame,
-          video_mode: tab.mode,
-          ...submitProfile,
-          ref_video_urls: videoUrls.length ? videoUrls : undefined,
-          cupsy_assets: cupsyAssets.length ? cupsyAssets : undefined,
-        }, { timeout: 300000 })
+        const formData = new FormData()
+        Object.entries(submission.fields).forEach(([key, value]) => {
+          if (value === undefined || value === null) return
+          formData.append(key, Array.isArray(value) || typeof value === 'object' ? JSON.stringify(value) : value)
+        })
+        const resolvedUploads = await Promise.all(
+          submission.uploadsToAppend.map(async item => ({
+            field: item.field,
+            name: item.name,
+            blob: item.file || await ensureFetchOk(item.url),
+          })),
+        )
+        resolvedUploads.forEach(({ field, blob, name }) => {
+          formData.append(field, blob, name)
+        })
+        resp = await axios.post('/api/video/generate', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 })
       }
 
       if (resp.data.success && (resp.data.db_task_id || resp.data.task_id)) {
@@ -1179,7 +1208,7 @@ function App({ onLogout }) {
         watermark: Boolean(audioForm.watermark),
         reference_mode: audioForm.referenceMode,
         speaker: audioForm.referenceMode === 'audio' ? audioForm.speaker : '',
-        cupsy_assets: audioForm.references.map(reference => ({ id: reference.cupsyAssetId })),
+        ...buildAudioReferencePayload(audioForm.references),
       })
       notify(`音频任务 #${response.data.task_id} 已创建`)
     } catch (error) {
@@ -1995,7 +2024,7 @@ function App({ onLogout }) {
                                 onClick={() => setReferenceMedia({ type: 'image', src: activeTab.firstFrame.preview, name: activeTab.firstFrame.file?.name || '首帧' })}
                                 className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
                               >
-                                <img src={activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
+                                <img src={activeTab.firstFrame.thumbnail || activeTab.firstFrame.preview} className="w-full h-full object-cover" alt="首帧" />
                                 <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
                               </button>
                               <button type="button" aria-label="删除首帧" title="删除首帧" onClick={() => updateTab(activeTab.id, { firstFrame: null })}
@@ -2029,7 +2058,7 @@ function App({ onLogout }) {
                                 onClick={() => setReferenceMedia({ type: 'image', src: activeTab.lastFrame.preview, name: activeTab.lastFrame.file?.name || '尾帧' })}
                                 className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
                               >
-                                <img src={activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
+                                <img src={activeTab.lastFrame.thumbnail || activeTab.lastFrame.preview} className="w-full h-full object-cover" alt="尾帧" />
                                 <Maximize2 size={13} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
                               </button>
                               <button type="button" aria-label="删除尾帧" title="删除尾帧" onClick={() => updateTab(activeTab.id, { lastFrame: null })}
@@ -2077,7 +2106,7 @@ function App({ onLogout }) {
                                   onClick={() => setReferenceMedia({ type: 'image', src: img.preview, name: img.name || `参考图片 ${i + 1}` })}
                                   className="absolute inset-0 cursor-zoom-in outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-nexus-green"
                                 >
-                                  <img src={img.preview} className="w-full h-full object-cover" alt={`视频参考图片 ${i + 1}`} />
+                                  <img src={img.thumbnail || img.preview} className="w-full h-full object-cover" alt={`视频参考图片 ${i + 1}`} />
                                   <Maximize2 size={10} className="absolute bottom-1 left-1 text-white opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
                                 </button>
                                 <button type="button" aria-label={`删除参考图片 ${i + 1}`} title="删除" onClick={() => updateTab(activeTab.id, { refImages: activeTab.refImages.filter((_, j) => j !== i) })}
@@ -2139,7 +2168,7 @@ function App({ onLogout }) {
                                   <span className="absolute bottom-0.5 w-full truncate text-center font-mono text-[8px] text-nexus-text">{vid.name?.slice(0, 6)}</span>
                                 </button>
                                 <button type="button" aria-label={`删除参考视频 ${i + 1}`} title="删除" onClick={() => {
-                                  if (vid.url && !vid.cupsyAssetId) {
+                                  if (vid.url && !vid.cupsyAssetId && vid.url.includes('/api/upload_video/')) {
                                     axios.delete('/api/upload_video', { data: { url: vid.url } }).catch(() => {})
                                   }
                                   updateTab(activeTab.id, { refVideos: activeTab.refVideos.filter((_, j) => j !== i) })
@@ -2442,9 +2471,9 @@ function App({ onLogout }) {
                       >
                         <div className="grid grid-cols-3 gap-2">
                           {audioForm.references.map((reference, index) => (
-                            <div key={`${reference.cupsyAssetId}-${index}`} className="audio-reference-card group relative">
+                            <div key={reference.uid || `${reference.cupsyAssetId || reference.mediaId || 'ref'}-${index}`} className="audio-reference-card group relative">
                               <button type="button" className="absolute inset-0 flex flex-col items-center justify-center gap-1 p-2" onClick={() => setReferenceMedia({ type: reference.kind, src: reference.preview, name: reference.name })}>
-                                {reference.kind === 'image' ? <img src={reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
+                                {reference.kind === 'image' ? <img src={reference.thumbnail || reference.preview} alt={reference.name} className="size-full object-cover" /> : <AudioLines size={22} className="text-nexus-cyan" />}
                                 {reference.kind === 'audio' && <span className="w-full truncate text-center text-xs text-nexus-muted">[Audio{index + (audioForm.speaker ? 2 : 1)}]</span>}
                               </button>
                               <button type="button" aria-label={`删除参考素材 ${index + 1}`} onClick={() => updateAudioForm(form => ({ references: form.references.filter((_, itemIndex) => itemIndex !== index) }))} className="absolute right-1 top-1 z-10 rounded bg-black/75 p-1 text-white opacity-0 group-hover:opacity-100 hover:bg-nexus-red"><X size={10} /></button>

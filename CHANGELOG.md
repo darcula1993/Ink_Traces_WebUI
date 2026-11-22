@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.5.3 - 2026-11-23
+
+Zero-copy direct global library references across standalone Image, Video, and Audio subpages — eliminating full-file downloads, duplicate uploads, and server-side PNG re-encoding when inserting library assets as references.
+
+- **Instant Library Reference Insertion Across All Standalone Tools**:
+  - Updated Image, Video (Keyframe & Omni Reference for images, videos, and audio), and Audio standalone subpages to insert canonical `/api/canvas/media/<id>` references synchronously from the Global Asset Library without downloading original files or re-uploading through `/api/workspace/assets/*`, `/api/upload_video`, or `/api/cupsy/assets`.
+  - Switched reference cards and `@` mention menus to reuse cached server-generated `/thumbnail` previews instead of decoding full-resolution originals; guarded library video reference removal so it never triggers `DELETE /api/upload_video`.
+- **Direct Server-Side Media Resolution, Hard-Linking & Lightweight Metadata**:
+  - Extended `POST /api/generate`, `POST /api/video/generate` (BytePlus Ark and Cupsy), and `POST /api/audio/generate` to resolve canonical `/api/canvas/media/<id>` URLs directly on disk—using zero-copy hard links (`os.link`) for PNGs, staged reference videos, and Cupsy `provider_assets`, preserving exact mixed ordering with local uploads via `upload:<idx>` and `cupsy:<id>` slots, and cleaning up staged files or leaving zero orphaned `provider_assets` on validation errors.
+  - Added `GET /api/canvas/media/<media_id>/metadata` backed by header-only LRU caching to populate non-blocking Alpha (`α`) and dimension metadata for Image tool references without downloading image bytes.
+  - Enforced strict canonical URL, media kind, MIME, deleted (`410`), trashed (`409`), and missing (`404`) guards across all direct library reference paths.
+
 ## 2.5.2 - 2026-11-23
 
 Automatic prompt, generation-parameter, and interface-binding restoration when switching historical versions on canvas generation nodes, with legacy task fallback and snapshot security hardening.

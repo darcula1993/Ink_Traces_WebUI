@@ -109,6 +109,23 @@ def info(media_id):
     return jsonify(success=True, media=media.public(media.get_media(media_id)))
 
 
+@media_api.get(PREFIX + '/<media_id>/metadata')
+def read_metadata(media_id):
+    import canvas_image_params
+    from PIL import Image
+
+    row = media.get_media(media_id)
+    if row['kind'] != 'image':
+        raise media.MediaError('只能读取图像素材元数据', 400, 'unsupported_media')
+    path = media.media_path(row)
+    try:
+        stat = path.stat()
+        data = canvas_image_params._metadata(str(path), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
+        raise media.MediaError('图像元数据不可读取', 409, 'file_missing') from error
+    return jsonify(success=True, metadata={**data, 'mime_type': row['mime_type']})
+
+
 @media_api.get(PREFIX + '/<media_id>/references')
 def references(media_id):
     return jsonify(success=True, **media.media_references(media_id))

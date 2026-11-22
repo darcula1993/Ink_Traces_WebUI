@@ -1548,6 +1548,58 @@ def _group_run_conflict(workflow_id, node_id):
                    error='该节点正在“运行组内全部”中，请等待组运行完成或取消整组后再单独生成'), 409
 
 
+_LIBRARY_IMAGE_REF_URL_RE = re.compile(r'^/api/canvas/media/([0-9a-f]{32})$')
+_UPLOAD_SLOT_REF_RE = re.compile(r'^upload:(\d+)$')
+_CUPSY_REF_TOKEN_RE = re.compile(r'^cupsy:([1-9]\d*)$')
+
+
+class _ReferenceMediaError(ValueError):
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.status = status
+
+
+def _resolve_library_media_url(url, expected_kinds, label='参考素材'):
+    """Resolve a canonical /api/canvas/media/<32-hex> URL to (row, path, error, status)."""
+    if not isinstance(url, str):
+        return None, None, f'{label}地址无效', 400
+    match = _LIBRARY_IMAGE_REF_URL_RE.fullmatch(url)
+    if not match:
+        return None, None, f'{label}地址无效', 400
+    import media_library
+    try:
+        row = media_library.get_media(match.group(1))
+        if row['kind'] not in expected_kinds:
+            if expected_kinds == {'image'}:
+                return None, None, '参考素材仅支持图片类型', 400
+            if expected_kinds == {'video'}:
+                return None, None, '参考素材仅支持视频类型', 400
+            if expected_kinds == {'audio'}:
+                return None, None, '参考素材仅支持音频类型', 400
+            return None, None, f'{label}类型不匹配', 400
+        return row, str(media_library.media_path(row)), None, None
+    except media_library.MediaError as error:
+        code = getattr(error, 'code', None)
+        if code == 'media_deleted':
+            return None, None, f'{label}已从素材库删除，请移除或重新选择', 410
+        if code == 'media_trashed':
+            return None, None, f'{label}所在任务在回收站中，请恢复任务或重新选择', 409
+        if code == 'media_not_found':
+            return None, None, f'{label}不存在或已移除', 404
+        return None, None, str(error), error.status
+
+
+def _resolve_image_reference_url(image_url):
+    """Resolve an img_tabs workspace asset URL or global library image URL to a verified local path."""
+    workspace_path = storage.resolve_workspace_asset_url('img_tabs', image_url)
+    if workspace_path:
+        return workspace_path, None, None
+    if isinstance(image_url, str) and _LIBRARY_IMAGE_REF_URL_RE.fullmatch(image_url):
+        _row, path, err, status = _resolve_library_media_url(image_url, {'image'}, label='参考图片')
+        return path, err, status
+    return None, '参考图片不存在或不属于当前工作区', 400
+
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     """Queue single-shot image jobs (Ark / Cupsy)."""
@@ -1638,9 +1690,9 @@ def generate():
         images_files = request.files.getlist('images') if is_form_request else []
         workspace_image_paths = []
         for image_url in image_urls:
-            image_path = storage.resolve_workspace_asset_url('img_tabs', image_url)
+            image_path, ref_error, ref_status = _resolve_image_reference_url(image_url)
             if not image_path:
-                return jsonify({'success': False, 'error': '参考图片不存在或不属于当前工作区'}), 400
+                return jsonify({'success': False, 'error': ref_error}), ref_status or 400
             workspace_image_paths.append(image_path)
         if images_files or workspace_image_paths:
             max_reference_images = ARK_SEEDREAM_PRO_MAX_REFERENCES
@@ -2455,11 +2507,13 @@ def generate_audio():
 
     try:
         raw_assets = _parse_audio_list(data.get('cupsy_assets', []), 'cupsy_assets')
+        raw_media_refs = _parse_audio_list(data.get('reference_media_urls', []), 'reference_media_urls')
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
 
     pending_links = []
     expected_kind = 'image' if reference_mode == 'image' else 'audio'
+    explicit_profile = bool(data.get('profile_id'))
     for position, raw_asset in enumerate(raw_assets):
         raw_id = raw_asset.get('id') if isinstance(raw_asset, dict) else raw_asset
         try:
@@ -2468,11 +2522,37 @@ def generate_audio():
             asset = None
         if (
             reference_mode == 'none' or not asset or asset.get('deleted_at')
-            or not profile_runtime.asset_provider_matches(asset.get('provider'), explicit_profile=bool(data.get('profile_id')))
+            or not profile_runtime.asset_provider_matches(asset.get('provider'), explicit_profile=explicit_profile)
             or asset.get('kind') != expected_kind
         ):
             return jsonify({'success': False, 'error': 'Cupsy 音频参考素材无效或类型不匹配'}), 400
         pending_links.append((asset, f'reference_{expected_kind}', position))
+
+    resolved_media_refs = []
+    has_library_media_ref = False
+    for raw_ref in raw_media_refs:
+        if not isinstance(raw_ref, str) or not raw_ref:
+            return jsonify({'success': False, 'error': '音频参考素材地址无效'}), 400
+        if reference_mode == 'none':
+            return jsonify({'success': False, 'error': '纯文本模式不能包含参考素材'}), 400
+        cupsy_match = _CUPSY_REF_TOKEN_RE.fullmatch(raw_ref)
+        if cupsy_match:
+            asset = task_db.get_provider_asset(int(cupsy_match.group(1)))
+            if (
+                not asset or asset.get('deleted_at')
+                or not profile_runtime.asset_provider_matches(asset.get('provider'), explicit_profile=explicit_profile)
+                or asset.get('kind') != expected_kind
+            ):
+                return jsonify({'success': False, 'error': 'Cupsy 音频参考素材无效或类型不匹配'}), 400
+            resolved_media_refs.append(('cupsy', asset))
+        else:
+            row, path, err, status = _resolve_library_media_url(raw_ref, {expected_kind}, label='音频参考素材')
+            if not path:
+                return jsonify({'success': False, 'error': err}), status or 400
+            if expected_kind == 'audio' and os.path.splitext(path)[1].lower() not in {'.wav', '.mp3'}:
+                return jsonify({'success': False, 'error': '参考音频仅支持 WAV 或 MP3'}), 400
+            resolved_media_refs.append(('library', (row, path)))
+            has_library_media_ref = True
 
     uploads = request.files.getlist('references') if has_files else []
     enable_subtitle = as_bool(data.get('enable_subtitle', True), default=True)
@@ -2507,11 +2587,33 @@ def generate_audio():
         # canvasApi.js derives it; the effective mode (after the voice upgrade) must match.
         # Runs before uploads are persisted, so a 409 leaves no pending provider asset for the
         # asset worker to send to Cupsy; only the uploaded file count is needed here.
-        derived_mode = expected_kind if (pending_links or uploads) else ('audio' if saved_speaker else 'none')
+        derived_mode = expected_kind if (pending_links or resolved_media_refs or uploads) else ('audio' if saved_speaker else 'none')
         if actual != expected or reference_mode != derived_mode:
             return jsonify({'success': False, 'error': '音频参数与已保存节点不一致，请重新载入画布后再生成'}), 409
 
+    planned_count = len(pending_links) + len(resolved_media_refs) + len(uploads) + (1 if speaker else 0)
+    if reference_mode == 'audio' and planned_count > 3:
+        return jsonify({'success': False, 'error': 'Seed Audio 1.0 最多支持 3 个音频或声线参考'}), 400
+    if reference_mode == 'image' and planned_count != 1:
+        return jsonify({'success': False, 'error': '图片参考模式必须且只能使用 1 张图片'}), 400
+    if reference_mode == 'none' and planned_count:
+        return jsonify({'success': False, 'error': '纯文本模式不能包含参考素材'}), 400
+
+    for upload in uploads:
+        inferred_kind = (upload.mimetype or 'application/octet-stream').split('/', 1)[0]
+        if inferred_kind != expected_kind:
+            return jsonify({'success': False, 'error': '素材类型与文件 MIME 类型不一致'}), 400
+
     try:
+        if has_library_media_ref or uploads:
+            _cupsy_source_url({'id': 0, 'sha256': 'configuration-check'})
+        for ref_kind, payload in resolved_media_refs:
+            if ref_kind == 'cupsy':
+                asset = payload
+            else:
+                row, path = payload
+                asset = create_cupsy_asset_from_path(path, expected_kind, row['name'])
+            pending_links.append((asset, f'reference_{expected_kind}', len(pending_links)))
         for upload in uploads:
             if reference_mode == 'none':
                 raise ValueError('添加参考文件前请选择音频或图片参考模式')
@@ -2622,56 +2724,214 @@ def _reference_audio_data_url(file_storage):
     return f'data:{mime};base64,{base64.b64encode(raw).decode("utf-8")}'
 
 
-def _parse_files(has_files, video_mode, model_spec=None):
-    """从请求中提取文件数据，统一为 base64 data URI"""
+def _reference_image_data_url_from_path(path):
+    if os.path.getsize(path) >= ARK_VIDEO_MAX_IMAGE_BYTES:
+        raise _ReferenceMediaError('单张参考图片必须小于 30 MB', 400)
+    with Image.open(path) as image:
+        width, height = image.size
+        if not 300 <= width <= 6000 or not 300 <= height <= 6000:
+            raise _ReferenceMediaError('参考图片宽高必须在 300 到 6000 像素之间', 400)
+        ratio = width / height
+        if not 0.4 <= ratio <= 2.5:
+            raise _ReferenceMediaError('参考图片宽高比必须在 0.4 到 2.5 之间', 400)
+        rgb = image.convert('RGB')
+        return f'data:image/png;base64,{image_to_base64(rgb)}'
+
+
+def _reference_audio_data_url_from_path(path, filename=''):
+    ext = os.path.splitext(path)[1].lower() or os.path.splitext(filename or '')[1].lower()
+    if ext not in {'.wav', '.mp3'}:
+        raise _ReferenceMediaError('参考音频仅支持 WAV 或 MP3', 400)
+    if os.path.getsize(path) >= ARK_VIDEO_MAX_AUDIO_BYTES:
+        raise _ReferenceMediaError('单个参考音频必须小于 15 MB', 400)
+    with open(path, 'rb') as handle:
+        raw = handle.read()
+    mime = 'audio/wav' if ext == '.wav' else 'audio/mp3'
+    return f'data:{mime};base64,{base64.b64encode(raw).decode("utf-8")}'
+
+
+def _stage_library_video_for_ark(path, row):
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in ALLOWED_VIDEO_EXTENSIONS:
+        raise _ReferenceMediaError('不支持的视频文件类型', 400)
+    fname = f'{uuid.uuid4()}{ext}'
+    public_url = build_public_url(f'/api/upload_video/{fname}')
+    if not public_url:
+        raise _ReferenceMediaError('视频参考需要在 config.json 中配置 deployment.public_base_url', 400)
+    os.makedirs(UPLOAD_VIDEO_DIR, exist_ok=True)
+    filepath = os.path.join(UPLOAD_VIDEO_DIR, fname)
+    temp_path = f'{filepath}.tmp'
+    try:
+        try:
+            os.link(path, temp_path)
+        except OSError:
+            shutil.copyfile(path, temp_path)
+        os.replace(temp_path, filepath)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    storage.register_file(None, 'video_upload', filepath, row.get('mime_type') or 'video/mp4', storage.upload_expiry())
+    return filepath, public_url
+
+
+def _cleanup_staged_videos(paths):
+    for filepath in paths or ():
+        if filepath and os.path.isfile(filepath):
+            try:
+                os.remove(filepath)
+                task_db.delete_asset(filepath)
+            except OSError:
+                pass
+
+
+def _read_video_optional_url(has_files, data, field_name):
+    raw = request.form.get(field_name) if has_files else (data or {}).get(field_name)
+    if raw is None or raw == '':
+        return None
+    if not isinstance(raw, str):
+        raise _ReferenceMediaError(f'{field_name} 必须是字符串', 400)
+    return raw
+
+
+def _read_video_url_list(has_files, data, field_name):
+    raw = request.form.get(field_name) if has_files else (data or {}).get(field_name)
+    if raw is None or raw == '':
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raise _ReferenceMediaError(f'{field_name} 必须是数组', 400) from None
+    if not isinstance(raw, list):
+        raise _ReferenceMediaError(f'{field_name} 必须是数组', 400)
+    if any(not isinstance(item, str) or not item.strip() for item in raw):
+        raise _ReferenceMediaError(f'{field_name} 包含无效地址', 400)
+    return raw
+
+
+def _resolve_ordered_media_slots(uploads, raw_urls, expected_kind, label):
+    """Merge multipart uploads and canonical library URLs in exact client-declared order."""
+    if not raw_urls:
+        return [('upload', item) for item in uploads]
+    slots = []
+    used_indices = set()
+    for entry in raw_urls:
+        upload_match = _UPLOAD_SLOT_REF_RE.fullmatch(entry)
+        if upload_match:
+            idx = int(upload_match.group(1))
+            if idx < 0 or idx >= len(uploads) or idx in used_indices:
+                raise _ReferenceMediaError(f'{label}上传索引无效', 400)
+            used_indices.add(idx)
+            slots.append(('upload', uploads[idx]))
+        else:
+            row, path, err, status = _resolve_library_media_url(entry, {expected_kind}, label=label)
+            if not path:
+                raise _ReferenceMediaError(err, status or 400)
+            slots.append(('library', (row, path)))
+    if len(used_indices) != len(uploads):
+        raise _ReferenceMediaError(f'{label}上传文件与引用列表数量不匹配', 400)
+    return slots
+
+
+def _parse_files(has_files, video_mode, model_spec=None, data=None):
+    """从请求中提取文件数据与素材库直连引用，统一为 Ark 请求结构"""
     files_data = {}
-    if not has_files:
-        return files_data
     spec = model_spec or VIDEO_MODEL_SPECS[SEEDANCE_20]
+    first_frame_url = _read_video_optional_url(has_files, data, 'first_frame_url')
+    last_frame_url = _read_video_optional_url(has_files, data, 'last_frame_url')
+    ref_image_urls = _read_video_url_list(has_files, data, 'ref_image_urls')
+    ref_video_urls = _read_video_url_list(has_files, data, 'ref_video_urls')
+    ref_audio_urls = _read_video_url_list(has_files, data, 'ref_audio_urls')
 
     if video_mode == 'keyframe':
-        img_files = request.files.getlist('image')
+        if ref_image_urls or ref_video_urls or ref_audio_urls:
+            raise _ReferenceMediaError('首尾帧模式不接受参考素材列表', 400)
+        img_files = request.files.getlist('image') if has_files else []
+        last_files = request.files.getlist('last_image') if has_files else []
+        if img_files and first_frame_url:
+            raise _ReferenceMediaError('首尾帧各限一张，不能重复提供首帧', 400)
+        if last_files and last_frame_url:
+            raise _ReferenceMediaError('首尾帧各限一张，不能重复提供尾帧', 400)
         if img_files:
             files_data['first_frame'] = _reference_image_data_url(img_files[0])
-        last_files = request.files.getlist('last_image')
+        elif first_frame_url:
+            _row, path, err, status = _resolve_library_media_url(first_frame_url, {'image'}, label='首帧参考图片')
+            if not path:
+                raise _ReferenceMediaError(err, status or 400)
+            files_data['first_frame'] = _reference_image_data_url_from_path(path)
         if last_files:
             files_data['last_frame'] = _reference_image_data_url(last_files[0])
-    else:
-        ref_imgs = request.files.getlist('ref_images')
-        if ref_imgs:
-            if len(ref_imgs) > spec['max_ref_images']:
-                raise ValueError(f'最多支持 {spec["max_ref_images"]} 张参考图片')
-            files_data['ref_images'] = [_reference_image_data_url(f) for f in ref_imgs]
-        ref_vids = request.files.getlist('ref_videos')
-        if ref_vids:
-            if len(ref_vids) > spec['max_ref_videos']:
-                raise ValueError(f'最多支持 {spec["max_ref_videos"]} 个参考视频')
+        elif last_frame_url:
+            _row, path, err, status = _resolve_library_media_url(last_frame_url, {'image'}, label='尾帧参考图片')
+            if not path:
+                raise _ReferenceMediaError(err, status or 400)
+            files_data['last_frame'] = _reference_image_data_url_from_path(path)
+        return files_data
+
+    if first_frame_url or last_frame_url:
+        raise _ReferenceMediaError('全能参考模式不接受首尾帧引用', 400)
+
+    ref_imgs = request.files.getlist('ref_images') if has_files else []
+    image_slots = _resolve_ordered_media_slots(ref_imgs, ref_image_urls, 'image', '参考图片')
+    if image_slots:
+        if len(image_slots) > spec['max_ref_images']:
+            raise _ReferenceMediaError(f'最多支持 {spec["max_ref_images"]} 张参考图片', 400)
+        files_data['ref_images'] = [
+            _reference_image_data_url(payload) if kind == 'upload' else _reference_image_data_url_from_path(payload[1])
+            for kind, payload in image_slots
+        ]
+
+    ref_auds = request.files.getlist('ref_audios') if has_files else []
+    audio_slots = _resolve_ordered_media_slots(ref_auds, ref_audio_urls, 'audio', '参考音频')
+    if audio_slots:
+        if len(audio_slots) > spec['max_ref_audios']:
+            raise _ReferenceMediaError(f'最多支持 {spec["max_ref_audios"]} 个参考音频', 400)
+        files_data['ref_audios'] = [
+            _reference_audio_data_url(payload) if kind == 'upload' else _reference_audio_data_url_from_path(payload[1], payload[0].get('name', ''))
+            for kind, payload in audio_slots
+        ]
+
+    ref_vids = request.files.getlist('ref_videos') if has_files else []
+    if len(ref_vids) + len(ref_video_urls) > spec['max_ref_videos']:
+        raise _ReferenceMediaError(f'最多支持 {spec["max_ref_videos"]} 个参考视频', 400)
+
+    # Validate all library video URLs before staging any file on disk.
+    resolved_video_entries = []
+    for url in ref_video_urls:
+        if url.strip().startswith('/api/canvas/media'):
+            row, path, err, status = _resolve_library_media_url(url, {'video'}, label='参考视频')
+            if not path:
+                raise _ReferenceMediaError(err, status or 400)
+            resolved_video_entries.append(('library', (row, path)))
+        else:
+            resolved_video_entries.append(('url', url))
+
+    staged_video_paths = []
+    try:
+        if ref_vids or resolved_video_entries:
             files_data['ref_videos'] = []
             files_data['ref_video_paths'] = []
             for f in ref_vids:
                 filepath, public_url = save_temp_file(f, suffix='.mp4')
                 if not public_url:
-                    raise ValueError('视频参考需要在 config.json 中配置 deployment.public_base_url')
+                    raise _ReferenceMediaError('视频参考需要在 config.json 中配置 deployment.public_base_url', 400)
+                staged_video_paths.append(filepath)
                 files_data['ref_videos'].append(public_url)
                 files_data['ref_video_paths'].append(filepath)
-        # 支持前端预上传的视频 URL
-        ref_video_urls_raw = request.form.get('ref_video_urls')
-        if ref_video_urls_raw:
-            urls = json.loads(ref_video_urls_raw)
-            if not isinstance(urls, list):
-                raise ValueError('ref_video_urls 必须是数组')
-            if any(not isinstance(url, str) or not url.strip() for url in urls):
-                raise ValueError('ref_video_urls 包含无效地址')
-            existing_count = len(files_data.get('ref_videos', []))
-            if existing_count + len(urls) > spec['max_ref_videos']:
-                raise ValueError(f'最多支持 {spec["max_ref_videos"]} 个参考视频')
-            if urls:
-                files_data.setdefault('ref_videos', []).extend(urls)
-        ref_auds = request.files.getlist('ref_audios')
-        if ref_auds:
-            if len(ref_auds) > spec['max_ref_audios']:
-                raise ValueError(f'最多支持 {spec["max_ref_audios"]} 个参考音频')
-            files_data['ref_audios'] = [_reference_audio_data_url(f) for f in ref_auds]
+            for entry_kind, payload in resolved_video_entries:
+                if entry_kind == 'library':
+                    row, path = payload
+                    filepath, public_url = _stage_library_video_for_ark(path, row)
+                    staged_video_paths.append(filepath)
+                    files_data['ref_videos'].append(public_url)
+                    files_data['ref_video_paths'].append(filepath)
+                else:
+                    files_data['ref_videos'].append(payload)
+    except Exception:
+        _cleanup_staged_videos(staged_video_paths)
+        raise
+    if staged_video_paths:
+        files_data['_staged_video_paths'] = staged_video_paths
     return files_data
 
 
@@ -2767,70 +3027,113 @@ def _queue_cupsy_video(
         pending_links.append((asset, role, position))
         position += 1
 
-    if video_mode == 'keyframe':
-        roles = [link[1] for link in pending_links]
-        if any(role not in ('first_frame', 'last_frame') for role in roles):
-            return jsonify({'success': False, 'error': '首尾帧模式不接受参考素材角色'}), 400
-        first_count = roles.count('first_frame') + (len(request.files.getlist('image')) if has_files else 0)
-        last_count = roles.count('last_frame') + (len(request.files.getlist('last_image')) if has_files else 0)
-        if (request.form.get('canvas_workflow_id') if has_files else data.get('canvas_workflow_id')) and not first_count:
-            return jsonify({'success': False, 'error': '画布首尾帧模式必须提供首帧；无图片时请选择全能参考'}), 400
-        if first_count > 1 or last_count > 1 or (last_count and not first_count):
-            return jsonify({'success': False, 'error': '首尾帧各限一张，尾帧必须同时提供首帧'}), 400
-        if has_files and any(request.files.getlist(key) for key in ('ref_images', 'ref_videos', 'ref_audios')):
-            return jsonify({'success': False, 'error': '首尾帧模式不接受参考素材上传'}), 400
-        if (request.form.get('ref_video_urls') if has_files else data.get('ref_video_urls')):
-            return jsonify({'success': False, 'error': '首尾帧模式不接受视频参考'}), 400
-    elif any(link[1] in ('first_frame', 'last_frame') for link in pending_links) or (has_files and (request.files.getlist('image') or request.files.getlist('last_image'))):
-        return jsonify({'success': False, 'error': '全能参考模式不接受首尾帧角色'}), 400
+    try:
+        first_frame_url = _read_video_optional_url(has_files, data, 'first_frame_url')
+        last_frame_url = _read_video_optional_url(has_files, data, 'last_frame_url')
+        ref_image_urls = _read_video_url_list(has_files, data, 'ref_image_urls')
+        ref_video_urls = _read_video_url_list(has_files, data, 'ref_video_urls')
+        ref_audio_urls = _read_video_url_list(has_files, data, 'ref_audio_urls')
+    except _ReferenceMediaError as error:
+        return jsonify({'success': False, 'error': str(error)}), error.status
 
-    if has_files:
-        upload_groups = []
+    planned_inputs = []  # list of ('upload'|'library'|'upload_video_path', payload, kind, role)
+    try:
         if video_mode == 'keyframe':
-            images = request.files.getlist('image')
-            last_images = request.files.getlist('last_image')
-            if last_images and not images and not any(link[1] == 'first_frame' for link in pending_links):
-                return jsonify({'success': False, 'error': '设置尾帧时必须同时提供首帧'}), 400
-            upload_groups.extend((upload, 'image', 'first_frame') for upload in images[:1])
-            upload_groups.extend((upload, 'image', 'last_frame') for upload in last_images[:1])
+            roles = [link[1] for link in pending_links]
+            if any(role not in ('first_frame', 'last_frame') for role in roles):
+                return jsonify({'success': False, 'error': '首尾帧模式不接受参考素材角色'}), 400
+            if ref_image_urls or ref_video_urls or ref_audio_urls:
+                return jsonify({'success': False, 'error': '首尾帧模式不接受视频参考' if ref_video_urls else '首尾帧模式不接受参考素材列表'}), 400
+            if has_files and any(request.files.getlist(key) for key in ('ref_images', 'ref_videos', 'ref_audios')):
+                return jsonify({'success': False, 'error': '首尾帧模式不接受参考素材上传'}), 400
+            images = request.files.getlist('image') if has_files else []
+            last_images = request.files.getlist('last_image') if has_files else []
+            first_count = roles.count('first_frame') + len(images) + (1 if first_frame_url else 0)
+            last_count = roles.count('last_frame') + len(last_images) + (1 if last_frame_url else 0)
+            if (request.form.get('canvas_workflow_id') if has_files else data.get('canvas_workflow_id')) and not first_count:
+                return jsonify({'success': False, 'error': '画布首尾帧模式必须提供首帧；无图片时请选择全能参考'}), 400
+            if first_count > 1 or last_count > 1 or (last_count and not first_count):
+                return jsonify({'success': False, 'error': '首尾帧各限一张，尾帧必须同时提供首帧'}), 400
+            for upload in images[:1]:
+                planned_inputs.append(('upload', upload, 'image', 'first_frame'))
+            if first_frame_url:
+                row, path, err, status = _resolve_library_media_url(first_frame_url, {'image'}, label='首帧参考图片')
+                if not path:
+                    raise _ReferenceMediaError(err, status or 400)
+                planned_inputs.append(('library', (row, path), 'image', 'first_frame'))
+            for upload in last_images[:1]:
+                planned_inputs.append(('upload', upload, 'image', 'last_frame'))
+            if last_frame_url:
+                row, path, err, status = _resolve_library_media_url(last_frame_url, {'image'}, label='尾帧参考图片')
+                if not path:
+                    raise _ReferenceMediaError(err, status or 400)
+                planned_inputs.append(('library', (row, path), 'image', 'last_frame'))
         else:
-            upload_groups.extend((upload, 'image', 'reference_image') for upload in request.files.getlist('ref_images'))
-            upload_groups.extend((upload, 'video', 'reference_video') for upload in request.files.getlist('ref_videos'))
-            upload_groups.extend((upload, 'audio', 'reference_audio') for upload in request.files.getlist('ref_audios'))
-        try:
-            for upload, kind, role in upload_groups:
-                asset = create_cupsy_asset_from_upload(upload, kind)
-                pending_links.append((asset, role, position))
-                position += 1
-        except ValueError as error:
-            return jsonify({'success': False, 'error': str(error)}), 400
+            if (
+                any(link[1] in ('first_frame', 'last_frame') for link in pending_links)
+                or first_frame_url or last_frame_url
+                or (has_files and (request.files.getlist('image') or request.files.getlist('last_image')))
+            ):
+                return jsonify({'success': False, 'error': '全能参考模式不接受首尾帧角色'}), 400
+            ref_imgs = request.files.getlist('ref_images') if has_files else []
+            for slot_kind, payload in _resolve_ordered_media_slots(ref_imgs, ref_image_urls, 'image', '参考图片'):
+                planned_inputs.append((slot_kind, payload, 'image', 'reference_image'))
+            ref_vids = request.files.getlist('ref_videos') if has_files else []
+            for upload in ref_vids:
+                planned_inputs.append(('upload', upload, 'video', 'reference_video'))
+            for url in ref_video_urls:
+                if url.strip().startswith('/api/canvas/media'):
+                    row, path, err, status = _resolve_library_media_url(url, {'video'}, label='参考视频')
+                    if not path:
+                        raise _ReferenceMediaError(err, status or 400)
+                    planned_inputs.append(('library', (row, path), 'video', 'reference_video'))
+                elif '/api/upload_video/' in url:
+                    filename = os.path.basename(url.rsplit('/api/upload_video/', 1)[-1])
+                    path = os.path.join(UPLOAD_VIDEO_DIR, filename)
+                    if not os.path.isfile(path):
+                        raise _ReferenceMediaError('Cupsy 本地素材无效', 400)
+                    planned_inputs.append(('upload_video_path', (path, filename), 'video', 'reference_video'))
+                else:
+                    raise _ReferenceMediaError('Cupsy 参考视频必须是本项目上传的文件或 Assets 素材', 400)
+            ref_auds = request.files.getlist('ref_audios') if has_files else []
+            for slot_kind, payload in _resolve_ordered_media_slots(ref_auds, ref_audio_urls, 'audio', '参考音频'):
+                planned_inputs.append((slot_kind, payload, 'audio', 'reference_audio'))
 
-    ref_video_urls = request.form.get('ref_video_urls') if has_files else data.get('ref_video_urls', [])
-    if isinstance(ref_video_urls, str):
-        try:
-            ref_video_urls = json.loads(ref_video_urls)
-        except ValueError:
-            return jsonify({'success': False, 'error': 'ref_video_urls 必须是数组'}), 400
-    for url in ref_video_urls or []:
-        if not isinstance(url, str) or '/api/upload_video/' not in url:
-            return jsonify({'success': False, 'error': 'Cupsy 参考视频必须是本项目上传的文件或 Assets 素材'}), 400
-        filename = os.path.basename(url.rsplit('/api/upload_video/', 1)[-1])
-        path = os.path.join(UPLOAD_VIDEO_DIR, filename)
-        try:
-            asset = create_cupsy_asset_from_path(path, 'video', filename)
-            _cupsy_source_url(asset)
-        except ValueError as error:
-            return jsonify({'success': False, 'error': str(error)}), 400
-        pending_links.append((asset, 'reference_video', position))
-        position += 1
+        # Pre-validate all multipart uploads before creating any provider_assets row.
+        for src, payload, kind, _role in planned_inputs:
+            if src == 'upload':
+                inferred_kind = (payload.mimetype or 'application/octet-stream').split('/', 1)[0]
+                if inferred_kind != kind:
+                    raise _ReferenceMediaError('素材类型与文件 MIME 类型不一致', 400)
+    except _ReferenceMediaError as error:
+        return jsonify({'success': False, 'error': str(error)}), error.status
 
     role_counts = {}
     for _asset, role, _position in pending_links:
         role_counts[role] = role_counts.get(role, 0) + 1
+    for _src, _payload, _kind, role in planned_inputs:
+        role_counts[role] = role_counts.get(role, 0) + 1
     if role_counts.get('reference_image', 0) > 30 or role_counts.get('reference_video', 0) > 10 or role_counts.get('reference_audio', 0) > 10:
         return jsonify({'success': False, 'error': '参考素材数量超过 Cupsy Seedance 2.5 上限'}), 400
-    if not prompt.strip() and not pending_links:
+    if not prompt.strip() and not pending_links and not planned_inputs:
         return jsonify({'success': False, 'error': '请提供 prompt 或参考素材'}), 400
+
+    try:
+        if planned_inputs:
+            _cupsy_source_url({'id': 0, 'sha256': 'configuration-check'})
+        for src, payload, kind, role in planned_inputs:
+            if src == 'upload':
+                asset = create_cupsy_asset_from_upload(payload, kind)
+            elif src == 'library':
+                row, path = payload
+                asset = create_cupsy_asset_from_path(path, kind, row['name'])
+            else:
+                path, filename = payload
+                asset = create_cupsy_asset_from_path(path, kind, filename)
+            pending_links.append((asset, role, position))
+            position += 1
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
 
     params = {
         'model': requested_model,
@@ -2985,22 +3288,17 @@ def video_generate():
             return jsonify({'success': False, 'error': f'不支持的视频比例: {ratio}'}), 400
         if video_mode not in {'keyframe', 'reference'}:
             return jsonify({'success': False, 'error': f'不支持的视频模式: {video_mode}'}), 400
+        staged_video_paths = []
         try:
-            files_data = _parse_files(has_files, video_mode, model_spec)
+            files_data = _parse_files(has_files, video_mode, model_spec, data=data)
+            staged_video_paths = files_data.pop('_staged_video_paths', [])
             if video_mode == 'keyframe' and (request.form.get('canvas_workflow_id') if has_files else data.get('canvas_workflow_id')) and not files_data.get('first_frame'):
+                _cleanup_staged_videos(staged_video_paths)
                 return jsonify({'success': False, 'error': '画布首尾帧模式必须提供首帧；无图片时请选择全能参考'}), 400
+        except _ReferenceMediaError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), ve.status
         except ValueError as ve:
             return jsonify({'success': False, 'error': str(ve)}), 400
-
-        # JSON body 中的预上传视频 URL
-        if not has_files:
-            ref_video_urls = data.get('ref_video_urls', [])
-            if not isinstance(ref_video_urls, list):
-                return jsonify({'success': False, 'error': 'ref_video_urls 必须是数组'}), 400
-            if any(not isinstance(url, str) or not url.strip() for url in ref_video_urls):
-                return jsonify({'success': False, 'error': 'ref_video_urls 包含无效地址'}), 400
-            if ref_video_urls:
-                files_data['ref_videos'] = ref_video_urls
 
         app.logger.warning(
             'Video generate [%s/%s]: ratio=%s, duration=%s, resolution=%s, fast=%s, '
@@ -3014,14 +3312,17 @@ def video_generate():
             video_mode, fast, files_data,
         )
         if settings_error:
+            _cleanup_staged_videos(staged_video_paths)
             return jsonify({'success': False, 'error': settings_error}), 400
 
         if not prompt and not files_data:
+            _cleanup_staged_videos(staged_video_paths)
             return jsonify({'success': False, 'error': '请提供 prompt 或参考素材'}), 400
 
         api_key = prov.get('api_key', '')
         endpoint = prov.get('endpoint', '')
         if not api_key:
+            _cleanup_staged_videos(staged_video_paths)
             return jsonify({'success': False, 'error': f'{provider} 未配置 API Key'}), 400
 
         body = _build_ark_body(
@@ -3034,6 +3335,7 @@ def video_generate():
             json.dumps(body, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
         )
         if request_body_bytes > ARK_VIDEO_MAX_REQUEST_BYTES:
+            _cleanup_staged_videos(staged_video_paths)
             return jsonify({'success': False, 'error': '提交给 Ark 的请求体不能超过 64 MB'}), 400
 
         params = {
