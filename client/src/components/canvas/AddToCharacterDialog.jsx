@@ -3,11 +3,12 @@ import {UserRound} from 'lucide-react'
 import LibraryDialog from '../library/LibraryDialog'
 import {CharacterKindSelect,CharacterNameInput,CharacterDescriptionInput} from '../library/CharacterFields'
 import {listCharacters,createCharacter,addCanvasImage} from '../../lib/characterApi'
+import {notifyLibraryChanged} from '../../lib/librarySync'
 import {CHARACTER_IMAGE_LIMIT,CHARACTER_DESCRIPTION_MAX,characterNameError,characterErrorMessage,descriptionLength} from '../../lib/characterRules'
 import '../library/library.css'
 import '../library/characterLibrary.css'
 // Canvas node context menu → “加入角色卡”: copy the node's image into an existing or new character.
-// The server registers it as a local asset and the character references it; the canvas node is unchanged.
+// The server registers it into 「角色卡 / <name>」 and the character references it; the canvas node is unchanged.
 export default function AddToCharacterDialog({workflowId,asset,onClose}){
  const [characters,setCharacters]=useState(null),[mode,setMode]=useState('existing'),[chosen,setChosen]=useState(''),[name,setName]=useState(''),[kind,setKind]=useState('character'),[description,setDescription]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[done,setDone]=useState('')
  useEffect(()=>{let active=true;listCharacters().then(list=>{if(!active)return;setCharacters(list);if(!list.length)setMode('new');else setChosen(list.find(c=>(c.images||[]).length<CHARACTER_IMAGE_LIMIT)?.id||'')}).catch(e=>{if(active){setCharacters([]);setError(characterErrorMessage(e,'角色卡列表加载失败'))}});return()=>{active=false}},[])
@@ -21,15 +22,16 @@ export default function AddToCharacterDialog({workflowId,asset,onClose}){
   setBusy(true)
   let character=target
   try{
-   if(mode==='new'){character=await createCharacter({name:name.trim(),description,kind});setCharacters(v=>[...(v||[]),character]);setChosen(character.id);setMode('existing')}
+   if(mode==='new'){character=await createCharacter({name:name.trim(),description,kind});setCharacters(v=>[...(v||[]),character]);setChosen(character.id);setMode('existing');notifyLibraryChanged({source:'character'})}
    await addCanvasImage(character.id,workflowId,asset.id)
-   setDone(`已把图片加入角色卡“${character.name}”（已登记为本地素材并由角色卡引用，画布节点不变）`)
+   notifyLibraryChanged({source:'character'})
+   setDone(`已把图片加入角色卡“${character.name}”，并归入素材库「角色卡 / ${character.name}」子文件夹（画布节点不变）。`)
   }catch(e){setError(mode==='new'&&character&&character!==target?`已新建角色卡“${character.name}”，但加入图片失败：${characterErrorMessage(e)}`:characterErrorMessage(e,'加入角色卡失败'))}
   finally{setBusy(false)}
  }
  if(done)return <LibraryDialog title="加入角色卡" cancelLabel="关闭" onClose={onClose}><p role="status">{done}</p></LibraryDialog>
  return <LibraryDialog title="加入角色卡" busy={busy} error={error&&error!==nameError?error:''} confirmLabel={mode==='new'?'新建并加入':'加入角色卡'} disabled={!characters||mode==='existing'&&(!target||full(target))||mode==='new'&&!!nameError} onClose={onClose} onConfirm={confirm}>
-  <div className="cl-pick-preview">{asset.url&&<img src={asset.thumbnail_url||asset.url} alt=""/>}<span>把这张图片登记为本地素材，并作为角色卡参考图引用。</span></div>
+  <div className="cl-pick-preview">{asset.url&&<img src={asset.thumbnail_url||asset.url} alt=""/>}<span>把这张图片归入「角色卡 / 角色名」子文件夹并作为角色卡参考图引用（生成历史原项会以硬链接独立复制，画布节点不变）。</span></div>
   <div className="cl-pick-mode" role="group" aria-label="加入方式"><button aria-pressed={mode==='existing'} disabled={busy||!list.length} onClick={()=>{setMode('existing');setError('')}}>选择已有角色卡</button><button aria-pressed={mode==='new'} disabled={busy} onClick={()=>{setMode('new');setError('')}}>新建角色卡</button></div>
   {!characters?<p role="status">正在载入角色卡…</p>:mode==='existing'?<ul className="cl-pick" role="radiogroup" aria-label="选择角色卡">{list.map(c=>{const cover=[...(c.images||[])].sort((a,b)=>(a.position??0)-(b.position??0))[0];return <li key={c.id}><button role="radio" aria-checked={c.id===chosen} disabled={busy||full(c)} aria-label={`${c.name}${full(c)?`（已满 ${CHARACTER_IMAGE_LIMIT} 张）`:''}`} onClick={()=>setChosen(c.id)}>{cover?<img src={cover.thumbnail_url||cover.url} alt="" width={36} height={36} style={{objectFit:'cover',borderRadius:6}}/>:<UserRound size={20} aria-hidden="true"/>}<span>{c.name}</span><small className="ul-muted">{(c.images||[]).length}/{CHARACTER_IMAGE_LIMIT}{full(c)?' · 已满':''}</small></button></li>})}</ul>
   :<><CharacterKindSelect value={kind} disabled={busy} onChange={setKind}/><CharacterNameInput autoFocus value={name} kind={kind} error={nameError} onChange={v=>{setName(v);setError('')}} onEnter={confirm}/><CharacterDescriptionInput value={description} kind={kind} onChange={setDescription}/></>}

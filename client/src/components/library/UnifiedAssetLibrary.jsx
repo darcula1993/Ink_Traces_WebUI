@@ -20,12 +20,13 @@ import Select from '../ui/Select'
 import {listMedia,listMediaFolders,selectMediaIds,lookupMedia,uploadMedia,moveMedia,mediaDownloadUrl,listMediaGroups,getMediaGroup,updateMediaGroup} from '../../lib/libraryApi'
 import {notifyLibraryChanged} from '../../lib/librarySync'
 import {downloadAsset} from '../../lib/canvasAssetVersions'
-import {mediaItem,originLabel,placeFilters,placeTitle,folderChildren,uploadFolderOptions,uploadTargetFor,GENERATED,libraryErrorText,transferLabel,transferMode,MEDIA_SORT_OPTIONS,LIBRARY_MEDIA_DRAG,formatMediaSpec,formatFileSize,validateDragDrop,formatDragDropNotice} from './mediaLibrary'
+import {mediaItem,originLabel,placeFilters,placeTitle,folderChildren,uploadFolderOptions,uploadTargetFor,GENERATED,CHARACTERS,isGeneratedFolder,isCharacterFolder,isInCharacterFolder,CHARACTER_DUPLICATE_MOVE_DISABLED_TITLE,canMoveDuplicates,characterDeleteWorkflowIds,libraryErrorText,transferLabel,transferMode,MEDIA_SORT_OPTIONS,LIBRARY_MEDIA_DRAG,formatMediaSpec,formatFileSize,validateDragDrop,formatDragDropNotice} from './mediaLibrary'
 import {Download,Trash2,Upload,LayoutGrid,ExternalLink,FolderInput,ChevronLeft,UserRound,X,Lock} from 'lucide-react'
 import {LibraryEmptyArt,MediaUnavailableArt} from '../art/CanvasLibraryArt'
 const ImageAssetEditor=React.lazy(()=>import('../image-editor/ImageAssetEditor'))
 const kinds={all:'全部',image:'图片',video:'视频',audio:'音频'}
 const LIMIT=40
+const CHARACTER_MOVE_DISABLED_TITLE='角色卡文件夹中的素材由角色卡管理，请在角色卡界面移除后自动回到根目录'
 const mediaQueryParams=({folder_id,include_subfolders,kind,q,sort,project_id,workflow_id,finalized_only}={})=>({
  ...(folder_id?{folder_id}:{}),
  ...(folder_id&&include_subfolders?{include_subfolders:1}:{}),
@@ -62,15 +63,14 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
  const [groups,setGroups]=useState(null),[groupId,setGroupId]=useState(null),[groupDetail,setGroupDetail]=useState(null)
  const [selected,setSelected]=useState([]),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[queryError,setQueryError]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[revision,setRevision]=useState(0)
  const [action,setAction]=useState(null),[moving,setMoving]=useState(null),[editing,setEditing]=useState(null),[preview,setPreview]=useState(null),[uploadOptions,setUploadOptions]=useState(false),[uploadChoice,setUploadChoice]=useState(null),[picker,setPicker]=useState(null),[charactersBusy,setCharactersBusy]=useState(false),[expanded,setExpanded]=useState(()=>new Set()),[duplicates,setDuplicates]=useState(null),[dropTarget,setDropTarget]=useState(null),[dragHint,setDragHint]=useState('')
- const focus=useRef(new Set(focusMediaIds||[])),allNotice=useRef(''),scrollRef=useRef(null),uploadTrigger=useRef(null),fileRef=useRef(null),alive=useRef(true),lock=useRef(false),restoreEdit=useRef(null),draggingRef=useRef(null),dropTargetRef=useRef(null),lastForbiddenDropRef=useRef(0)
+ const focus=useRef(new Set(focusMediaIds||[])),allNotice=useRef(''),scrollRef=useRef(null),uploadTrigger=useRef(null),fileRef=useRef(null),alive=useRef(true),lock=useRef(false),restoreEdit=useRef(null),draggingRef=useRef(null),dropTargetRef=useRef(null),lastForbiddenDropRef=useRef(null)
  useEffect(()=>{alive.current=true;return()=>{alive.current=false}},[])
  const message=e=>libraryErrorText(e)
- const generatedFolder=folders.find(f=>f.system_key===GENERATED)
  const currentFolder=folders.find(f=>f.id===place)
- const isGeneratedView=view==='media'&&Boolean(currentFolder?.system_key===GENERATED||currentFolder?.system_key?.startsWith(`${GENERATED}_`))
+ const isGeneratedView=view==='media'&&isGeneratedFolder(currentFolder)
  const hasHistoryFilter=Boolean(isGeneratedView&&(historyProjectId||historyWorkflowId||finalizedOnly))
  // Folders and the navigation totals (全部素材 / 根目录) follow every mutation.
- useEffect(()=>{let active=true;Promise.all([listMediaFolders(),listMedia({},{limit:1}),listMedia({folder_id:'root'},{limit:1})]).then(([list,all,root])=>{if(!active)return;setFolders(list);setCounts({all:all.total,root:root.total});setFoldersReady(true);const generated=list.find(f=>f.system_key===GENERATED);if(generated)setExpanded(v=>v.size?v:new Set([generated.id]));setPlace(current=>current==='@generated'?generated?.id||'all':current!=='all'&&current!=='root'&&!list.some(f=>f.id===current)?'all':current)}).catch(e=>{if(active){setError(message(e));setFoldersReady(true)}});return()=>{active=false}},[revision])
+ useEffect(()=>{let active=true;Promise.all([listMediaFolders(),listMedia({},{limit:1}),listMedia({folder_id:'root'},{limit:1})]).then(([list,all,root])=>{if(!active)return;setFolders(list);setCounts({all:all.total,root:root.total});setFoldersReady(true);const generated=list.find(f=>f.system_key===GENERATED),characters=list.find(f=>f.system_key===CHARACTERS);const initialExpanded=[generated?.id,characters?.id].filter(Boolean);if(initialExpanded.length)setExpanded(v=>v.size?v:new Set(initialExpanded));setPlace(current=>current==='@generated'?generated?.id||'all':current!=='all'&&current!=='root'&&!list.some(f=>f.id===current)?'all':current)}).catch(e=>{if(active){setError(message(e));setFoldersReady(true)}});return()=>{active=false}},[revision])
  // Read-only filter options for 生成历史 (projects / workflows); cleared when leaving 生成历史.
  useEffect(()=>{
   if(!foldersReady)return
@@ -133,7 +133,7 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   if(outcome.error)throw outcome.error})}
  async function saveEdited(file){const key=editing.id,r=await uploadMedia(file,{folderId:uploadTargetFor(folders,editing.folder_id)||null,origin:'save_as'});if(alive.current){restoreEdit.current={key,reload:true};setNotice(r.deduplicated?'编辑后的图片与库中已有素材相同，未重复保存。':'已另存编辑后的图片，原图与画布保持不变。');refresh()}}
  function locateDuplicates(){const {items}=duplicates,folder=items[0].folder_id||'root',ids=items.filter(m=>(m.folder_id||'root')===folder).map(m=>m.id);focus.current=new Set(ids);focusPending.current='focus';setQuery('');setKind('all');goPlace(folder);refresh()}
- function moveDuplicates(){const {items,target}=duplicates;run(async()=>{const ids=items.map(m=>m.id),moved=await moveMedia(ids,target);if(!alive.current)return;const copied=moved.filter(m=>!ids.includes(m.id)).length;setDuplicates(null);focus.current=new Set(moved.map(m=>m.id));setSelected(current=>current.map(i=>{const m=moved.find(x=>x.id===i.key);return m?mediaItem(m):i}));setNotice(copied?`已把 ${moved.length} 项放到「${placeTitle(folders,target||'root')}」（其中 ${copied} 项生成结果为复制，原结果留在生成历史）`:`已把 ${moved.length} 项移到「${placeTitle(folders,target||'root')}」`);refresh()})}
+ function moveDuplicates(){const {items,target}=duplicates;if(!canMoveDuplicates(folders,items)){setError(CHARACTER_DUPLICATE_MOVE_DISABLED_TITLE);return}run(async()=>{const ids=items.map(m=>m.id),moved=await moveMedia(ids,target);if(!alive.current)return;const copied=moved.filter(m=>!ids.includes(m.id)).length;setDuplicates(null);focus.current=new Set(moved.map(m=>m.id));setSelected(current=>current.map(i=>{const m=moved.find(x=>x.id===i.key);return m?mediaItem(m):i}));setNotice(copied?`已把 ${moved.length} 项放到「${placeTitle(folders,target||'root')}」（其中 ${copied} 项生成结果为复制，原结果留在生成历史）`:`已把 ${moved.length} 项移到「${placeTitle(folders,target||'root')}」`);refresh()})}
  async function removeFromGroup(ids){await run(async()=>{await updateMediaGroup(groupId,{remove:ids});if(alive.current){setNotice(`已从素材组移除 ${ids.length} 项`);refresh()}})}
  const folderTitle=id=>id?folders.find(f=>f.id===id)?.title||'文件夹':'根目录'
  const characterView=view==='characters'&&browseOnly
@@ -146,7 +146,7 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   return [{value:'',label:'所有画布'},...list.map(w=>({value:w.id,label:historyProjectId?w.title:`${projById.get(w.project_id)||''}${projById.get(w.project_id)?' / ':''}${w.title}`}))]
  },[historyFilterOptions.workflows,historyFilterOptions.projects,historyProjectId])
  const resetHistoryFilters=()=>{setHistoryProjectId('');setHistoryWorkflowId('');setFinalizedOnly(false);setPage(1);dropAllNotice()}
- const showFolderColumn=place==='all'||currentFolder?.system_key===GENERATED
+ const showFolderColumn=place==='all'||currentFolder?.system_key===GENERATED||currentFolder?.system_key===CHARACTERS
  const groupItems=groupDetail?.items||[],okGroupItems=groupItems.filter(i=>i.status==='ok').map(i=>mediaItem(i.media)),deadGroupItems=groupItems.filter(i=>i.status!=='ok')
  const pageMediaItems=result.items.map(mediaItem)
  const openItemPreview=item=>{const source=view==='groups'?okGroupItems:pageMediaItems;setPreview(withPreviewPages(libraryPreviewAsset(item),source.map(libraryPreviewAsset)))}
@@ -157,14 +157,15 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   const dragItems=selectedKeys.has(item.key)&&selected.length>1?selected:[item]
   const assets=dragItems.map(entry=>entry.asset)
   draggingRef.current=assets
-  lastForbiddenDropRef.current=0
+  lastForbiddenDropRef.current=null
   try{event.dataTransfer.setData(LIBRARY_MEDIA_DRAG,JSON.stringify({ids:assets.map(a=>a.id)}));event.dataTransfer.effectAllowed='copyMove'}catch{/* synthetic drag */}
  }
  function handleItemDragEnd(){
-  if(dropTargetRef.current?.forbidden||(lastForbiddenDropRef.current&&Date.now()-lastForbiddenDropRef.current<350)){
-   setError('生成历史只接收新生成的结果，上传素材不可移入生成历史')
-  }
-  lastForbiddenDropRef.current=0
+  const forbiddenMsg=dropTargetRef.current?.forbidden
+   ?dropTargetRef.current.message
+   :(lastForbiddenDropRef.current&&Date.now()-lastForbiddenDropRef.current.at<350?lastForbiddenDropRef.current.message:'')
+  if(forbiddenMsg)setError(forbiddenMsg)
+  lastForbiddenDropRef.current=null
   draggingRef.current=null
   updateDropTarget(null)
   setDragHint('')
@@ -189,13 +190,23 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   const id=targetFolder?targetFolder.id:'root'
   if(targetFolder?.system_key){
    event.dataTransfer.dropEffect='none'
-   lastForbiddenDropRef.current=Date.now()
-   if(dropTargetRef.current?.id!==id||!dropTargetRef.current?.forbidden)updateDropTarget({id,forbidden:true})
-   setDragHint('不可移入生成历史（仅接收新生成的结果）')
+   const charTarget=isCharacterFolder(targetFolder)
+   const errMsg=charTarget?'角色卡文件夹由角色卡自动管理，请在角色卡界面添加素材':'生成历史只接收新生成的结果，上传素材不可移入生成历史'
+   lastForbiddenDropRef.current={at:Date.now(),message:errMsg}
+   if(dropTargetRef.current?.id!==id||!dropTargetRef.current?.forbidden||dropTargetRef.current?.message!==errMsg)updateDropTarget({id,forbidden:true,message:errMsg})
+   setDragHint(charTarget?'不可移入角色卡文件夹（请在角色卡界面添加素材）':'不可移入生成历史（仅接收新生成的结果）')
    return
   }
-  lastForbiddenDropRef.current=0
   const assets=draggingRef.current||[]
+  if(assets.some(a=>isInCharacterFolder(folders,a))){
+   event.dataTransfer.dropEffect='none'
+   const errMsg=CHARACTER_MOVE_DISABLED_TITLE
+   lastForbiddenDropRef.current={at:Date.now(),message:errMsg}
+   if(dropTargetRef.current?.id!==id||!dropTargetRef.current?.forbidden||dropTargetRef.current?.message!==errMsg)updateDropTarget({id,forbidden:true,message:errMsg})
+   setDragHint('角色卡文件夹中的素材请在角色卡界面移除')
+   return
+  }
+  lastForbiddenDropRef.current=null
   const mode=assets.length?transferMode(folders,assets):'move'
   event.dataTransfer.dropEffect=mode==='copy'?'copy':'move'
   if(dropTargetRef.current?.id!==id||dropTargetRef.current?.forbidden)updateDropTarget({id,forbidden:false})
@@ -212,7 +223,7 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   event.stopPropagation()
   const assets=draggedAssetsFrom(event)
   draggingRef.current=null
-  lastForbiddenDropRef.current=0
+  lastForbiddenDropRef.current=null
   updateDropTarget(null)
   setDragHint('')
   const plan=validateDragDrop(folders,assets,targetFolder)
@@ -228,7 +239,8 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
    refresh()
   })
  }
- const itemTools=item=><><button disabled={busy} onClick={()=>openItemPreview(item)}>预览</button>{item.asset.kind==='image'&&<button disabled={busy||!canEditLibraryImage(item.asset)} title={canEditLibraryImage(item.asset)?'编辑图片（另存为新素材）':'此格式暂不支持浏览器编辑，请下载原图后转换格式'} aria-label={`编辑图片 ${item.asset.name}`} onClick={()=>setEditing(item.asset)}>编辑</button>}<button aria-label={`查看引用位置 ${item.asset.name}`} disabled={busy} onClick={()=>openAction({kind:'references',item:item.asset})}>查看引用位置</button><button aria-label={`重命名 ${item.asset.name}`} disabled={busy} onClick={()=>openAction({kind:'renameMedia',item:item.asset})}>重命名</button><button aria-label={`${transferLabel(folders,[item.asset])} ${item.asset.name}`} disabled={busy} onClick={()=>setMoving([item.asset])}>{transferLabel(folders,[item.asset])}</button><button aria-label={`下载 ${item.asset.name}`} disabled={busy} onClick={()=>run(()=>downloadAsset({...item.asset,url:mediaDownloadUrl(item.media_id)}))}>下载</button>{view==='groups'&&groupId&&<button aria-label={`从素材组移除 ${item.asset.name}`} disabled={busy} onClick={()=>removeFromGroup([item.media_id])}>从素材组移除</button>}<button className="is-danger" aria-label={`删除素材 ${item.asset.name}`} disabled={busy} onClick={()=>openAction({kind:'remove',items:[item]})}>删除</button></>
+ const selectedHasCharacterItem=selected.some(i=>isInCharacterFolder(folders,i.asset))
+ const itemTools=item=>{const inCharFolder=isInCharacterFolder(folders,item.asset);return <><button disabled={busy} onClick={()=>openItemPreview(item)}>预览</button>{item.asset.kind==='image'&&<button disabled={busy||!canEditLibraryImage(item.asset)} title={canEditLibraryImage(item.asset)?'编辑图片（另存为新素材）':'此格式暂不支持浏览器编辑，请下载原图后转换格式'} aria-label={`编辑图片 ${item.asset.name}`} onClick={()=>setEditing(item.asset)}>编辑</button>}<button aria-label={`查看引用位置 ${item.asset.name}`} disabled={busy} onClick={()=>openAction({kind:'references',item:item.asset})}>查看引用位置</button><button aria-label={`重命名 ${item.asset.name}`} disabled={busy} onClick={()=>openAction({kind:'renameMedia',item:item.asset})}>重命名</button><button aria-label={`${transferLabel(folders,[item.asset])} ${item.asset.name}`} title={inCharFolder?CHARACTER_MOVE_DISABLED_TITLE:undefined} disabled={busy||inCharFolder} onClick={()=>setMoving([item.asset])}>{transferLabel(folders,[item.asset])}</button><button aria-label={`下载 ${item.asset.name}`} disabled={busy} onClick={()=>run(()=>downloadAsset({...item.asset,url:mediaDownloadUrl(item.media_id)}))}>下载</button>{view==='groups'&&groupId&&<button aria-label={`从素材组移除 ${item.asset.name}`} disabled={busy} onClick={()=>removeFromGroup([item.media_id])}>从素材组移除</button>}<button className="is-danger" aria-label={`删除素材 ${item.asset.name}`} disabled={busy} onClick={()=>openAction({kind:'remove',items:[item]})}>删除</button></>}
  const provenanceBadges=item=>{
   if(!isGeneratedView)return null
   const prov=item.asset.source_provenance
@@ -249,15 +261,15 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   {onRemote&&<button className="ul-remote-link" disabled={busy} onClick={onRemote}>Cupsy 远端素材<ExternalLink size={14} aria-hidden="true"/></button>}</div></>}
  footer={characterView?<><span className="ul-muted">角色卡全局共用，不属于任何项目；在画布提示词中输入 @角色卡名 引用。</span><span style={{flex:1}}/><button disabled={charactersBusy} onClick={close}>完成</button></>:<><div className="ul-selected" aria-label="已选素材">{selected.slice(0,60).map(item=><button key={item.key} title={`取消选择 ${item.asset.name}`} aria-label={`取消选择 ${item.asset.name}`} disabled={busy} onClick={()=>toggle(item)}><LibraryThumbnail asset={item.asset} thumbnail={item.thumbnail_url}/></button>)}{selected.length>60&&<small>+{selected.length-60}</small>}</div><span>已选 {selected.length}</span>
   {selected.length>0&&<button disabled={busy} onClick={clearSelection}>清空选择</button>}
-  <button className="btn btn-icon btn-outlined" aria-label={selected.length?transferLabel(folders,selected.map(i=>i.asset)):'移动到文件夹'} title={selected.length&&transferMode(folders,selected.map(i=>i.asset))!=='move'?'把已选素材放到文件夹：生成历史中的结果复制一份，其余移动':'把已选素材移动到文件夹（不复制文件）'} disabled={busy||!selected.length} onClick={()=>setMoving(selected.map(i=>i.asset))}><FolderInput size={16}/></button>
+  <button className="btn btn-icon btn-outlined" aria-label={selected.length?transferLabel(folders,selected.map(i=>i.asset)):'移动到文件夹'} title={selectedHasCharacterItem?CHARACTER_MOVE_DISABLED_TITLE:selected.length&&transferMode(folders,selected.map(i=>i.asset))!=='move'?'把已选素材放到文件夹：生成历史中的结果复制一份，其余移动':'把已选素材移动到文件夹（不复制文件）'} disabled={busy||!selected.length||selectedHasCharacterItem} onClick={()=>setMoving(selected.map(i=>i.asset))}><FolderInput size={16}/></button>
   <button className="btn btn-icon btn-outlined" aria-label="加入素材组" title="把已选素材加入新的或已有的全局素材组" disabled={busy||!selected.length} onClick={()=>openAction({kind:'group'})}><LayoutGrid size={16}/></button>
   <button className="btn btn-icon btn-outlined btn-danger" aria-label="删除" title="永久删除已选素材（删除前预览受影响画布）" disabled={busy||!selected.length} onClick={()=>openAction({kind:'remove'})}><Trash2 size={16}/></button>
   <button className="btn btn-icon btn-outlined" aria-label="下载" title="下载已选素材" disabled={busy||!selected.length} onClick={()=>run(async()=>{for(const item of selected)await downloadAsset({...item.asset,url:mediaDownloadUrl(item.media_id)})})}><Download size={16}/></button>
   <button disabled={busy} onClick={close}>{browseOnly?'完成':'取消'}</button>
   {(!browseOnly||canAddToCanvas)&&<button className="btn btn-primary" disabled={busy||!selected.length} onClick={()=>run(async()=>{check(selected);await onApply(selected)})}>{busy?'处理中…':applyLabel||(browseOnly?'添加到当前画布':'添加为节点参考')}</button>}</>}
  >
- {characterView?<><div className="ul-title"><h3>角色卡</h3></div><CharacterLibrary onBusy={setCharactersBusy} openPicker={setPicker}/></>:<>
- <div className="ul-title">{view==='groups'&&groupId&&<button aria-label="返回素材组列表" title="返回素材组列表" disabled={busy} onClick={()=>goGroups()}><ChevronLeft size={15} aria-hidden="true"/></button>}<h3>{heading}</h3>{currentFolder?.system_key&&view==='media'&&<span className="ul-system-hint"><Lock size={12} data-system-lock="true" aria-hidden="true"/>系统文件夹 · 不可重命名或删除</span>}
+ {characterView?<><div className="ul-title"><h3>角色卡</h3></div><CharacterLibrary onBusy={setCharactersBusy} openPicker={setPicker} onBeforeDelete={onBeforeDelete} onChanged={()=>{refresh();notifyLibraryChanged({source:'character'})}} onDeleted={(res,meta)=>{const deletedIds=res?.deleted_media_ids||[];if(deletedIds.length){const workflowIds=characterDeleteWorkflowIds(res,meta?.preview);onDeleted?.({...res,deleted_ids:deletedIds,workflow_ids:workflowIds})}notifyLibraryChanged({source:'character_delete',deletedIds});refresh()}}/></>:<>
+ <div className="ul-title">{view==='groups'&&groupId&&<button aria-label="返回素材组列表" title="返回素材组列表" disabled={busy} onClick={()=>goGroups()}><ChevronLeft size={15} aria-hidden="true"/></button>}<h3>{heading}</h3>{currentFolder?.system_key&&view==='media'&&<span className="ul-system-hint"><Lock size={12} data-system-lock="true" aria-hidden="true"/>{isCharacterFolder(currentFolder)?'角色卡托管文件夹 · 由角色卡自动管理':'系统文件夹 · 不可重命名或删除'}</span>}
   {view==='media'&&<span className="ul-kinds" role="group" aria-label="媒体类型">{Object.entries(kinds).map(([key,label])=><button key={key} disabled={busy} aria-pressed={kind===key} onClick={()=>filter(setKind,key)}>{label}</button>)}</span>}</div>
  {view==='media'&&<div className="ul-tools"><input aria-label="搜索素材" placeholder="搜索素材名称" value={query} disabled={busy} maxLength={200} onChange={e=>filter(setQuery,e.target.value)}/>
   <Select ariaLabel="排序方式" className="ul-sort-select" value={sort} onChange={value=>filter(setSort,value)} options={MEDIA_SORT_OPTIONS} disabled={busy}/>
@@ -271,7 +283,7 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
  </div>}
  {view==='groups'&&groupId&&groupDetail&&<div className="ul-tools"><button disabled={busy||!okGroupItems.length} onClick={()=>{try{const usable=browseOnly?okGroupItems:okGroupItems.filter(allowed);selectItems(usable);setNotice(`已选择组内 ${usable.length} 项`)}catch(e){setError(message(e))}}}>选择组内全部可用素材</button>{deadGroupItems.length>0&&<button disabled={busy} onClick={()=>removeFromGroup(deadGroupItems.map(i=>i.media_id))}>移除 {deadGroupItems.length} 个“已删除”占位</button>}<span style={{flex:1}}/><button disabled={busy} onClick={()=>openAction({kind:'groupEdit',item:groupDetail.group})}>重命名</button><button className="is-danger" disabled={busy} onClick={()=>openAction({kind:'deleteGroup',item:groupDetail.group})}>删除素材组</button></div>}
  {error&&<p className="ul-error" role="alert">{error}</p>}{notice&&<p className="ul-notice" role="status">{notice}</p>}{dragHint&&<p className={`ul-drag-hint${dropTarget?.forbidden?' is-forbidden':''}`} role="status" data-testid="library-drag-hint">{dragHint}</p>}
- {duplicates&&<div className="ul-duplicate" role="status" aria-label="内容重复的上传"><p>{duplicates.items.length===1?'上传的内容已在库中：':`${duplicates.items.length} 项上传的内容已在库中：`}{duplicates.items.slice(0,3).map((m,i)=><React.Fragment key={m.id}>{i?'；':''}「{m.name}」已在「{placeTitle(folders,m.folder_id||'root')}」中</React.Fragment>)}{duplicates.items.length>3&&` 等 ${duplicates.items.length} 项`}。未重复保存，也未自动移动。</p><button disabled={busy} title={`打开「${placeTitle(folders,duplicates.items[0].folder_id||'root')}」并高亮该素材`} onClick={locateDuplicates}>定位</button><button disabled={busy} title={`移到「${placeTitle(folders,duplicates.target||'root')}」（只改变所在文件夹，不复制文件）`} onClick={moveDuplicates}>移到当前文件夹</button><button className="btn btn-icon" aria-label="关闭重复提示" title="关闭重复提示" disabled={busy} onClick={dismissDuplicates}><X size={14}/></button></div>}
+ {duplicates&&(()=>{const dupMovable=canMoveDuplicates(folders,duplicates.items),dupAllChar=duplicates.items.length>0&&duplicates.items.every(m=>isInCharacterFolder(folders,m));return <div className="ul-duplicate" role="status" aria-label="内容重复的上传"><p>{duplicates.items.length===1?'上传的内容已在库中：':`${duplicates.items.length} 项上传的内容已在库中：`}{duplicates.items.slice(0,3).map((m,i)=><React.Fragment key={m.id}>{i?'；':''}「{m.name}」已在「{placeTitle(folders,m.folder_id||'root')}」中</React.Fragment>)}{duplicates.items.length>3&&` 等 ${duplicates.items.length} 项`}{dupAllChar?'。未重复保存；角色卡文件夹中的素材不可手动移出，可直接引用或点「定位」查看。':!dupMovable?'。未重复保存，也未自动移动（含角色卡文件夹中的素材，不可手动移出）。':'。未重复保存，也未自动移动。'}</p><button disabled={busy} title={`打开「${placeTitle(folders,duplicates.items[0].folder_id||'root')}」并高亮该素材`} onClick={locateDuplicates}>定位</button><button disabled={busy||!dupMovable} title={dupMovable?`移到「${placeTitle(folders,duplicates.target||'root')}」（只改变所在文件夹，不复制文件）`:CHARACTER_DUPLICATE_MOVE_DISABLED_TITLE} onClick={moveDuplicates}>移到当前文件夹</button><button className="btn btn-icon" aria-label="关闭重复提示" title="关闭重复提示" disabled={busy} onClick={dismissDuplicates}><X size={14}/></button></div>})()}
  <div className="ul-scroll" ref={scrollRef} aria-busy={loading}>{loading?<p role="status">正在载入素材…</p>:queryError?<div role="alert" className="ul-error">{queryError}<button onClick={refresh}>重试加载</button></div>
  :view==='groups'?(groupId?groupDetail&&<>
   <LibraryGrid items={okGroupItems} selectedKeys={selectedKeys} onToggle={toggle} busy={busy} isDisabled={item=>!browseOnly&&!allowed(item)} primaryActions={0} onPreview={openItemPreview} mediaSpec={item=>formatMediaSpec(item.asset)} metadata={metadata} tools={itemTools} draggable onItemDragStart={handleItemDragStart} onItemDragEnd={handleItemDragEnd}>
@@ -282,9 +294,9 @@ export default function UnifiedAssetLibrary({browseOnly=false,canAddToCanvas=fal
   {groups&&!groups.length&&<div className="ul-empty-center ila-empty-block" role="status"><LibraryEmptyArt kind="groups"/><p className="ul-muted">还没有素材组。在素材中选中素材后点底部“加入素材组”。素材组为全局，所有项目可用。</p></div>}</>)
  :<>
  <LibraryGrid items={pageMediaItems} itemClass={item=>focus.current.has(item.media_id)?'is-focus':''} selectedKeys={selectedKeys} onToggle={toggle} busy={busy} isDisabled={item=>!browseOnly&&!allowed(item)} primaryActions={0} onPreview={openItemPreview} mediaSpec={item=>formatMediaSpec(item.asset)} badges={provenanceBadges} metadata={metadata} tools={itemTools} draggable onItemDragStart={handleItemDragStart} onItemDragEnd={handleItemDragEnd}>
-  {childFolders.map(f=><article className={`ul-item ul-folder${dropTarget?.id===f.id?' is-drop-target':''}`} key={f.id} data-folder-id={f.id} onDragOver={e=>handleFolderDragOver(e,f)} onDragLeave={e=>handleFolderDragLeave(e,f)} onDrop={e=>handleFolderDrop(e,f)}><button className="ul-card" onClick={()=>goPlace(f.id)} aria-label={`打开文件夹 ${f.title}`}><span className="ul-folder-icon" aria-hidden="true">{React.createElement(folderIcon(f),{size:20,strokeWidth:1.6})}</span><strong title={f.title}>{f.title}</strong></button><small>{f.media_count}</small></article>)}
+  {childFolders.map(f=><article className={`ul-item ul-folder${dropTarget?.id===f.id?(dropTarget.forbidden?' is-drop-forbidden':' is-drop-target'):''}`} key={f.id} data-folder-id={f.id} onDragOver={e=>handleFolderDragOver(e,f)} onDragLeave={e=>handleFolderDragLeave(e,f)} onDrop={e=>handleFolderDrop(e,f)}><button className="ul-card" onClick={()=>goPlace(f.id)} aria-label={`打开文件夹 ${f.title}`}><span className="ul-folder-icon" aria-hidden="true">{React.createElement(folderIcon(f),{size:20,strokeWidth:1.6})}</span><strong title={f.title}>{f.title}</strong></button><small>{f.media_count}</small></article>)}
  </LibraryGrid>
- {!result.items.length&&!childFolders.length&&<div className="ul-empty-center ila-empty-block"><LibraryEmptyArt kind={query||kind!=='all'||hasHistoryFilter?'search':currentFolder?.system_key?'generated':'folder'}/><p className="ul-muted">{hasHistoryFilter?'没有符合当前筛选的生成结果。':currentFolder?.system_key?'这里还没有生成结果。':'没有符合当前筛选的素材'}{(query||kind!=='all'||hasHistoryFilter)&&<button onClick={()=>{setQuery('');setKind('all');setHistoryProjectId('');setHistoryWorkflowId('');setFinalizedOnly(false);setPage(1);dropAllNotice()}}>清除筛选</button>}</p></div>}
+ {!result.items.length&&!childFolders.length&&<div className="ul-empty-center ila-empty-block"><LibraryEmptyArt kind={query||kind!=='all'||hasHistoryFilter?'search':currentFolder?.system_key&&!isCharacterFolder(currentFolder)?'generated':'folder'}/><p className="ul-muted">{hasHistoryFilter?'没有符合当前筛选的生成结果。':isCharacterFolder(currentFolder)?'这里还没有角色卡素材。':currentFolder?.system_key?'这里还没有生成结果。':'没有符合当前筛选的素材'}{(query||kind!=='all'||hasHistoryFilter)&&<button onClick={()=>{setQuery('');setKind('all');setHistoryProjectId('');setHistoryWorkflowId('');setFinalizedOnly(false);setPage(1);dropAllNotice()}}>清除筛选</button>}</p></div>}
  <div className="ul-pager"><button disabled={page<=1||busy} onClick={()=>setPage(page-1)}>上一页</button><span>{result.total} 项 · 第 {page} / {Math.max(1,Math.ceil(result.total/LIMIT))} 页</span><button disabled={page*LIMIT>=result.total||busy} onClick={()=>setPage(page+1)}>下一页</button></div></>}
  </div></>}<input ref={fileRef} type="file" multiple accept="image/*,video/*,audio/*" hidden onChange={e=>{const files=[...e.target.files];e.target.value='';upload(files)}}/>
  </LibraryShell>

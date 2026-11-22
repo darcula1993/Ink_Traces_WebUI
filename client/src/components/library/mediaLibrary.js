@@ -11,7 +11,22 @@ export const FOLDER_ICONS={folder:'文件夹',music:'音效',character:'角色',
 
 export const isSystemFolder=folder=>!!folder?.system_key
 export const GENERATED='generated'
+export const CHARACTERS='characters'
 export const generatedKindKey=kind=>`generated_${kind}`
+export const isGeneratedFolder=folder=>folder?.system_key===GENERATED||!!folder?.system_key?.startsWith(`${GENERATED}_`)
+export const isCharacterFolder=folder=>folder?.system_key===CHARACTERS||!!folder?.system_key?.startsWith('character:')
+export const characterFolderIds=folders=>new Set(folders.filter(f=>f.system_key?.startsWith('character:')).map(f=>f.id))
+export const isInCharacterFolder=(folders,item)=>{const fid=mediaFolderId(item);return !!fid&&characterFolderIds(folders).has(fid)}
+export const CHARACTER_DUPLICATE_MOVE_DISABLED_TITLE='角色卡文件夹中的素材由角色卡管理，不可手动移出；如需使用可直接引用或点「定位」查看'
+export const canMoveDuplicates=(folders,items)=>Array.isArray(items)&&items.length>0&&!items.some(m=>isInCharacterFolder(folders,m))
+// CHAR-FOLDERS-20261122 D3: resolve affected workflow IDs from DELETE /api/characters/<id>?delete_media=1,
+// preferring server-returned workflow_ids or post-flush affected_workflows over the pre-delete preview.
+export function characterDeleteWorkflowIds(res,preview=null){
+ const raw=Array.isArray(res?.workflow_ids)
+  ?res.workflow_ids
+  :(Array.isArray(res?.affected_workflows)?res.affected_workflows:preview?.affected_workflows||[]).map(w=>w?.workflow_id)
+ return [...new Set(raw.filter(Boolean))]
+}
 export const LIBRARY_MEDIA_DRAG='application/x-ink-library-move'
 
 export const MEDIA_SORT_OPTIONS=[
@@ -55,11 +70,18 @@ export function formatMediaSpec(asset){
  return [dims,dur].filter(Boolean).join(' · ')
 }
 
-// P1-TASK-LIBRARY-FLOW-20261120: drag-to-folder transfer plan enforcing 2026-11-19 lifecycle rules.
+// P1-TASK-LIBRARY-FLOW-20261120: drag-to-folder transfer plan enforcing 2026-11-19 lifecycle rules
+// and CHAR-FOLDERS-20261122 managed character folder rules.
 export function validateDragDrop(folders,items,targetFolder){
  if(!Array.isArray(items)||!items.length)return {allowed:false,code:'empty',message:'没有可移动的素材'}
  if(targetFolder?.system_key){
+  if(isCharacterFolder(targetFolder)){
+   return {allowed:false,code:'folder_character_managed',message:'角色卡文件夹由角色卡自动管理，请在角色卡界面添加素材'}
+  }
   return {allowed:false,code:'folder_generated_only',message:'生成历史只接收新生成的结果，上传素材不可移入生成历史'}
+ }
+ if(items.some(item=>isInCharacterFolder(folders,item))){
+  return {allowed:false,code:'folder_character_managed',message:'角色卡文件夹中的素材由角色卡管理，请在角色卡界面移除后自动回到根目录'}
  }
  const targetId=targetFolder?targetFolder.id:null
  const targetName=targetFolder?targetFolder.title:'根目录'
@@ -89,8 +111,8 @@ export function folderPath(folders,id){const byId=new Map(folders.map(f=>[f.id,f
 export function descendants(folders,id){const children=folderChildren(folders),out=new Set(),stack=[id];while(stack.length){for(const c of children.get(stack.pop())||[])if(!out.has(c.id)){out.add(c.id);stack.push(c.id)}}return out}
 // Depth-first list with depth, for indented pickers (stable hierarchy order, cycle-safe).
 export function flattenFolders(folders,{filter=()=>true}={}){const children=folderChildren(folders),out=[],seen=new Set(),walk=(parent,depth)=>{for(const f of children.get(parent)||[]){if(seen.has(f.id)||!filter(f))continue;seen.add(f.id);out.push({...f,depth});walk(f.id,depth+1)}};walk('',0);return out}
-// Count shown beside a folder: its own items, plus the subfolders for the locked “生成历史”.
-export function folderCount(folders,folder){if(folder.system_key!==GENERATED)return folder.media_count||0;return (folder.media_count||0)+folders.filter(f=>f.parent_id===folder.id).reduce((n,f)=>n+(f.media_count||0),0)}
+// Count shown beside a folder: its own items, plus the direct subfolders for locked “生成历史” and “角色卡”.
+export function folderCount(folders,folder){if(folder.system_key!==GENERATED&&folder.system_key!==CHARACTERS)return folder.media_count||0;return (folder.media_count||0)+folders.filter(f=>f.parent_id===folder.id).reduce((n,f)=>n+(f.media_count||0),0)}
 
 // Upload / new-folder / parent targets: root and user folders (system folders only receive generation results).
 // Labels are full parent paths (“父 / 子”) so same-named folders in different places stay distinguishable (LIBRARY-OPS-FIX E9).
@@ -123,14 +145,14 @@ export function folderNameIssue(folders,title,parentId,selfId=null){
  return ''
 }
 // Chinese text for library API errors: the server message when present, else a fallback by error code.
-const ERROR_CODES={folder_generated_only:'生成历史只接收生成结果，上传素材不能移入',folder_target_invalid:'生成历史下的图片/视频/音频只接收对应类型的生成结果',folder_name_conflict:'同一位置已有同名文件夹',invalid_name:'名称无效',folder_cycle:'文件夹不能移动到自身或子文件夹中',folder_not_empty:'文件夹非空，请先移出素材和子文件夹'}
+const ERROR_CODES={folder_generated_only:'生成历史只接收生成结果，上传素材不能移入',folder_target_invalid:'生成历史下的图片/视频/音频只接收对应类型的生成结果',folder_character_managed:'角色卡文件夹由角色卡自动管理，请在角色卡界面增删素材',folder_name_conflict:'同一位置已有同名文件夹',invalid_name:'名称无效',folder_cycle:'文件夹不能移动到自身或子文件夹中',folder_not_empty:'文件夹非空，请先移出素材和子文件夹'}
 export function libraryErrorText(e,fallback='操作失败'){const data=e?.response?.data;if(data?.error)return data.error;if(data?.code&&ERROR_CODES[data.code])return ERROR_CODES[data.code];if(e?.response?.status===409)return fallback;return e?.message||fallback}
 // The folder every item is in now ('' = root); null when they are in different folders or unknown (V2-FIX F7).
 export function currentFolderOf(media){if(!media.length||media.some(m=>mediaFolderId(m)===undefined))return null;const own=[...new Set(media.map(m=>mediaFolderId(m)||''))];return own.length===1?own[0]:null}
 // Where an upload lands when started from the current view: the current user folder, otherwise root.
 export function uploadTargetFor(folders,place){const folder=folders.find(f=>f.id===place);return folder&&!folder.system_key?folder.id:''}
-// List filters for a navigation place: 'all' | 'root' | folder id. “生成历史” lists its three subfolders flat.
-export function placeFilters(folders,place){if(place==='all')return {};if(place==='root')return {folder_id:'root'};const folder=folders.find(f=>f.id===place);return {folder_id:place,include_subfolders:folder?.system_key===GENERATED}}
+// List filters for a navigation place: 'all' | 'root' | folder id. “生成历史” and “角色卡” list their subfolders flat.
+export function placeFilters(folders,place){if(place==='all')return {};if(place==='root')return {folder_id:'root'};const folder=folders.find(f=>f.id===place);return {folder_id:place,include_subfolders:folder?.system_key===GENERATED||folder?.system_key===CHARACTERS}}
 export function placeTitle(folders,place){if(place==='all')return '全部素材';if(place==='root')return '根目录';const path=folderPath(folders,place);return path.length?path.map(f=>f.title).join(' / '):'文件夹'}
 
 // Human summary of a delete preview (counts only; the dialog also lists each canvas by name).

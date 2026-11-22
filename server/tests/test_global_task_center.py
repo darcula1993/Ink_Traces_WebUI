@@ -165,12 +165,15 @@ def test_unified_trash_single_type_isolation_and_all_types_empty_preserves_copie
     t_aud, m_aud, f_aud = make_generated('audio', 'red', media_samples=media_files)
     t_lay, _, f_lay = make_generated('layer', 'white', media_samples=media_files)
 
-    # Reference image in canvas, group, and character card
+    # Reference image in canvas, group, and character card (CHAR-FOLDERS-20261122:
+    # adding a 生成历史 result to a character hard-link copies it into 角色卡/<name>).
     asset = {k: v for k, v in media.public(media.get_media(m_img)).items() if k in ('id', 'url', 'name', 'kind', 'mime_type', 'size_bytes')}
     doc_with_reference(workflow, asset)
     grp = c.post('/api/canvas/media/groups', json={'title': '角色组', 'media_ids': [m_img]}).json['group']
     ch = characters.create_character({'name': '主角甲', 'kind': 'character', 'description': 'd'})
-    characters.add_images(ch['id'], data={'source': 'media', 'media_id': m_img})
+    _, char_added = characters.add_images(ch['id'], data={'source': 'media', 'media_id': m_img})
+    char_copy_id = char_added[0]['media_id']
+    assert char_copy_id != m_img
 
     # Copy m_img out of 生成历史 to a user folder + upload an unrelated user file
     user_folder = c.post('/api/canvas/media/folders', json={'title': '归档'}).json['folder']
@@ -181,11 +184,12 @@ def test_unified_trash_single_type_isolation_and_all_types_empty_preserves_copie
     r_trash = c.post('/api/tasks/batch/delete', json={'ids': [t_img, t_vid, t_aud, t_lay], 'type': 'all'})
     assert r_trash.status_code == 200 and sorted(r_trash.json['trashed_ids']) == sorted([t_img, t_vid, t_aud, t_lay])
 
-    # All 生成历史 results are hidden while trashed; copy & upload remain visible
+    # All 生成历史 results are hidden while trashed; copies (归档 + 角色卡/主角甲) & upload remain visible
     assert c.get(f'/api/canvas/media/{m_img}').status_code == 409
     assert c.get(f'/api/canvas/media/{m_vid}').status_code == 409
     assert c.get(f'/api/canvas/media/{m_aud}').status_code == 409
     assert c.get(f'/api/canvas/media/{copy_id}').status_code == 200
+    assert c.get(f'/api/canvas/media/{char_copy_id}').status_code == 200
     assert c.get(f'/api/canvas/media/{upload_id}').status_code == 200
 
     # Batch restore single type only restores matching type
@@ -197,15 +201,16 @@ def test_unified_trash_single_type_isolation_and_all_types_empty_preserves_copie
     # Move t_vid back to trash for empty-trash tests
     assert c.post('/api/tasks/batch/delete', json={'ids': [t_vid], 'type': 'video'}).json['trashed'] == 1
 
-    # 1) Single-type empty trash (type='image'): previews affected canvas/group/character, only deletes image!
+    # 1) Single-type empty trash (type='image'): previews affected canvas/group, only deletes image;
+    #    both copies (归档 + 角色卡/主角甲) are kept independently!
     prev_img = c.post('/api/tasks/delete-preview', json={'type': 'image'}).json
     assert prev_img['success'] and prev_img['type'] == 'image'
     assert prev_img['task_ids'] == [t_img]
     assert prev_img['types_breakdown'] == {'image': 1}
-    assert prev_img['media']['count'] == 1 and prev_img['media']['copies_kept'] == 1
+    assert prev_img['media']['count'] == 1 and prev_img['media']['copies_kept'] == 2
     assert [w['workflow_id'] for w in prev_img['media']['affected_workflows']] == [workflow]
     assert [g['id'] for g in prev_img['media']['media_groups']] == [grp['id']]
-    assert [x['name'] for x in prev_img['media']['characters']] == ['主角甲']
+    assert prev_img['media']['characters'] == []
 
     emp_img = c.post('/api/tasks/trash/empty', json={'type': 'image'}).json
     assert emp_img['success'] and emp_img['deleted_ids'] == [t_img] and emp_img['media_deleted'] == 1
@@ -213,8 +218,9 @@ def test_unified_trash_single_type_isolation_and_all_types_empty_preserves_copie
     assert not f_img.exists() and c.get(f'/api/canvas/media/{m_img}').status_code == 410
     # Other trashed types MUST remain untouched!
     assert tasks.get_task(t_vid) is not None and tasks.get_task(t_aud) is not None and tasks.get_task(t_lay) is not None
-    # Copy & upload MUST survive!
+    # Copies (归档 + 角色卡/主角甲) & upload MUST survive!
     assert c.get(f'/api/canvas/media/{copy_id}').status_code == 200
+    assert c.get(f'/api/canvas/media/{char_copy_id}').status_code == 200
     assert c.get(f'/api/canvas/media/{upload_id}').status_code == 200
 
     # 2) All-types empty trash (type='all'): previews remaining video + audio + layer, empties all of them!

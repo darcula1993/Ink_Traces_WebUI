@@ -3,7 +3,7 @@ import LibraryDialog from './LibraryDialog'
 import FolderSelect from './FolderSelect'
 import {listMediaFolders,lookupMedia,moveMedia} from '../../lib/libraryApi'
 import {notifyLibraryChanged} from '../../lib/librarySync'
-import {moveFolderOptions,currentFolderOf,folderPathLabel,libraryErrorText,transferMode,TRANSFER_TITLES,generatedFolderIds,mediaFolderId} from './mediaLibrary'
+import {moveFolderOptions,currentFolderOf,folderPathLabel,libraryErrorText,transferMode,TRANSFER_TITLES,generatedFolderIds,mediaFolderId,isInCharacterFolder} from './mediaLibrary'
 import './library.css'
 // Unified “移动到文件夹 / 复制到文件夹” dialog shared by the global library, canvas sidebar, canvas node menu
 // and task center. Items in “生成历史” (or task results without a known user folder) are copied (hard link;
@@ -23,12 +23,13 @@ export default function MoveToFolderDialog({media,overlay=false,showOutcome=fals
  // V2-FIX F7: start from the folder the items are in now (a user folder); items from different folders, unknown
  // folders, or in “生成历史” (which takes nothing), start empty and must pick one.
  const options=folders&&kinds?moveFolderOptions(folders,kinds):null,current=known&&currentFolderOf(known)
+ const hasCharacterManaged=Boolean(folders&&known&&known.some(m=>isInCharacterFolder(folders,m)))
  const mode=folders&&known?transferMode(folders,known):'move'
  const copies=folders&&known?known.filter(m=>{const fid=mediaFolderId(m);return fid===undefined||generatedFolderIds(folders).has(fid)}).length:0
  const mixedFolders=known&&known.length>1&&new Set(known.map(m=>mediaFolderId(m)||'')).size>1
  useEffect(()=>{if(options&&current!==null&&current!==undefined&&target===null&&options.some(o=>o.value===current&&!o.disabled))setTarget(current)},[!!options,current])
  async function run(){
-  if(target===null)return
+  if(target===null||hasCharacterManaged)return
   setBusy(true);setError('')
   try{
    const moved=await moveMedia(ids,target||null)
@@ -41,14 +42,14 @@ export default function MoveToFolderDialog({media,overlay=false,showOutcome=fals
    onDone?.(summary)
   }catch(e){if(alive.current)setError(libraryErrorText(e,mode==='copy'?'复制失败':'移动失败'))}finally{if(alive.current)setBusy(false)}
  }
- return <LibraryDialog title={TRANSFER_TITLES[mode]} className={overlay?'ul-subdialog-top':''} busy={busy} error={error} onClose={onClose} onConfirm={outcome?null:run} disabled={!folders||!kinds||!ids.length||target===null} confirmLabel={mode==='copy'?'复制':mode==='mixed'?'移动/复制':'移动'} cancelLabel={outcome?'完成':'取消'}>
-  {outcome?<p ref={outcomeRef} role="status" data-testid="move-to-folder-outcome"><strong>{outcome}</strong></p>:<>
+ return <LibraryDialog title={TRANSFER_TITLES[mode]} className={overlay?'ul-subdialog-top':''} busy={busy} error={error} onClose={onClose} onConfirm={outcome?null:run} disabled={!folders||!kinds||!ids.length||target===null||hasCharacterManaged} confirmLabel={mode==='copy'?'复制':mode==='mixed'?'移动/复制':'移动'} cancelLabel={outcome?'完成':'取消'}>
+  {outcome?<p ref={outcomeRef} role="status" data-testid="move-to-folder-outcome"><strong>{outcome}</strong></p>:hasCharacterManaged?<p className="ul-error" role="alert">角色卡文件夹中的素材由角色卡管理，请在角色卡界面移除后自动回到根目录。</p>:<>
    {mode==='copy'?<p data-testid="transfer-copy-note">将所选 {ids.length} 项生成结果复制到目标文件夹：生成独立的新素材（硬链接，不额外占空间），原结果仍留在“生成历史”并随任务删除，复制出的不受影响。</p>
     :mode==='mixed'?<p data-testid="transfer-mixed-note">所选 {ids.length} 项中，{copies} 项生成结果复制到目标文件夹（原结果仍留在“生成历史”并随任务删除，复制出的不受影响），其余 {ids.length-copies} 项移动过去。</p>
     :<p>将所选 {ids.length} 项移动到目标文件夹。只改变素材所在文件夹，不复制文件；画布与任务中的引用保持不变。</p>}
    {folders&&kinds?<FolderSelect label="目标文件夹" folders={folders} options={options} value={target} placeholder="请选择目标文件夹" onChange={setTarget} onCreated={loadFolders} disabled={busy}/>:!error&&<p role="status">正在载入文件夹…</p>}
    {options&&target===null&&<p className="ul-muted" role="status">{mixedFolders?'所选素材位于不同文件夹，请选择目标文件夹。':'请选择目标文件夹。'}</p>}
-   {mode==='move'&&<p className="ul-muted">“生成历史”只接收新生成的结果，不可移入。</p>}
+   {mode==='move'&&<p className="ul-muted">“生成历史”只接收新生成的结果，“角色卡”文件夹由角色卡自动管理，均不可移入。</p>}
   </>}
  </LibraryDialog>
 }

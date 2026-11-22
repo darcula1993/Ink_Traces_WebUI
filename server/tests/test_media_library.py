@@ -44,6 +44,8 @@ def test_schema_system_and_default_folders_idempotent():
     assert folders['生成历史']['system_key'] == 'generated' and folders['生成历史']['parent_id'] is None
     for key, title in (('generated_image', '图片'), ('generated_video', '视频'), ('generated_audio', '音频')):
         assert folders[title]['id'] == SYSTEM[key] and folders[title]['parent_id'] == SYSTEM['generated']
+    assert folders['角色卡']['system_key'] == 'characters' and folders['角色卡']['parent_id'] is None
+    assert folders['角色卡']['id'] == media.system_folder_id('characters') and folders['角色卡']['icon'] == 'character'
     for title in ('音效', '角色', '场景', '物品', '风格'):
         assert folders[title]['parent_id'] is None and folders[title]['system_key'] is None
     # A deleted default is never recreated; re-running init (API + Worker) is harmless.
@@ -51,7 +53,7 @@ def test_schema_system_and_default_folders_idempotent():
     tasks.init_db()
     media_schema.create(tasks.get_db(), tasks._ensure_columns)
     titles = [f['title'] for f in client().get('/api/canvas/media/folders').json['folders']]
-    assert '风格' not in titles and titles.count('生成历史') == 1
+    assert '风格' not in titles and titles.count('生成历史') == 1 and titles.count('角色卡') == 1
     assert 'media_id' in {r['name'] for r in tasks.get_db().execute('PRAGMA table_info(task_assets)')}
 
 
@@ -82,6 +84,9 @@ def test_upload_errors_and_folder_targets():
     assert empty.status_code == 400 and empty.json['code'] in ('empty_file', 'unsupported_media')
     system = c.post('/api/canvas/media', data={'file': (io.BytesIO(image_bytes('red')), 'a.png'), 'folder_id': SYSTEM['generated_image']})
     assert system.status_code == 409 and system.json['code'] == 'folder_generated_only'
+    char_root = c.post('/api/canvas/media', data={'file': (io.BytesIO(image_bytes('red')), 'a.png'),
+                                                  'folder_id': media.system_folder_id('characters')})
+    assert char_root.status_code == 409 and char_root.json['code'] == 'folder_character_managed'
     missing = c.post('/api/canvas/media', data={'file': (io.BytesIO(image_bytes('red')), 'a.png'), 'folder_id': '0' * 32})
     assert missing.status_code == 404 and missing.json['code'] == 'folder_not_found'
     folder = c.post('/api/canvas/media/folders', json={'title': '分镜'}).json['folder']
@@ -126,6 +131,10 @@ def test_folder_rules():
     for key in SYSTEM.values():
         assert c.patch('/api/canvas/media/folders/' + key, json={'title': 'x'}).json['code'] == 'folder_system'
         assert c.delete('/api/canvas/media/folders/' + key).json['code'] == 'folder_system'
+    char_root_id = media.system_folder_id('characters')
+    assert c.patch('/api/canvas/media/folders/' + char_root_id, json={'title': 'x'}).json['code'] == 'folder_character_managed'
+    assert c.delete('/api/canvas/media/folders/' + char_root_id).json['code'] == 'folder_character_managed'
+    assert c.post('/api/canvas/media/folders', json={'title': 'x', 'parent_id': char_root_id}).json['code'] == 'folder_character_managed'
     assert c.post('/api/canvas/media/folders', json={'title': 'x', 'parent_id': SYSTEM['generated']}).json['code'] == 'folder_target_invalid'
     assert c.post('/api/canvas/media/folders', json={'title': ' '}).json['code'] == 'invalid_name'
     assert c.delete('/api/canvas/media/folders/' + a['id']).json['code'] == 'folder_not_empty'

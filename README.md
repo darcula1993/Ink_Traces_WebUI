@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-2ea44f?style=flat-square" alt="License: MIT" />
-  <img src="https://img.shields.io/badge/version-2.5.0-1f6feb?style=flat-square" alt="Version 2.5.0" />
+  <img src="https://img.shields.io/badge/version-2.5.1-1f6feb?style=flat-square" alt="Version 2.5.1" />
   <img src="https://img.shields.io/badge/stack-React%2018%20%2B%20Flask%20%2B%20SQLite-24292f?style=flat-square" alt="Tech Stack: React 18 + Flask + SQLite" />
   <img src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=flat-square" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/node-18%2B-339933?style=flat-square" alt="Node.js 18+" />

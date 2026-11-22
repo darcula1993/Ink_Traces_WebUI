@@ -13,6 +13,7 @@ SYSTEM_FOLDERS = (
     ('generated_image', '图片', 'generated'),
     ('generated_video', '视频', 'generated'),
     ('generated_audio', '音频', 'generated'),
+    ('characters', '角色卡', None),
 )
 DEFAULT_FOLDERS = (('音效', 'music'), ('角色', 'character'), ('场景', 'scene'), ('物品', 'prop'), ('风格', 'style'))
 
@@ -70,8 +71,9 @@ def create(db, ensure_columns):
     db.execute('CREATE INDEX IF NOT EXISTS idx_task_assets_media ON task_assets(media_id)')
     now = datetime.now(timezone.utc).isoformat()
     for key, title, parent in SYSTEM_FOLDERS:
+        icon = 'character' if key == 'characters' else 'folder'
         db.execute('INSERT OR IGNORE INTO media_folders VALUES (?,?,?,?,?,?,?)',
-                   (stable_id('system', key), title, stable_id('system', parent) if parent else None, key, 'folder', now, now))
+                   (stable_id('system', key), title, stable_id('system', parent) if parent else None, key, icon, now, now))
     # Defaults are seeded once; a user who deletes one never sees it recreated.
     if db.execute("INSERT OR IGNORE INTO media_meta VALUES ('defaults_seeded', ?)", (now,)).rowcount:
         for title, icon in DEFAULT_FOLDERS:

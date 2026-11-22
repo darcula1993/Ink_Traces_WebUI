@@ -7,7 +7,9 @@ import {CharacterKindSelect,CharacterNameInput,CharacterInitialImagesField,DESCR
 import MediaPreview from '../canvas/MediaPreview'
 import {withPreviewPages} from '../canvas/previewPages'
 import askConfirm from '../ui/askConfirm'
-import {listCharacters,getCharacter,createCharacter,updateCharacter,deleteCharacter,uploadCharacterImage,addLibraryImage,deleteCharacterImage,reorderCharacterImages,uploadVoiceAudio,addLibraryVoiceAudio,clearVoice,audioDuration,characterDescription} from '../../lib/characterApi'
+import {listCharacters,getCharacter,createCharacter,updateCharacter,previewDeleteCharacter,deleteCharacter,uploadCharacterImage,addLibraryImage,deleteCharacterImage,reorderCharacterImages,uploadVoiceAudio,addLibraryVoiceAudio,clearVoice,audioDuration,characterDescription} from '../../lib/characterApi'
+import {notifyLibraryChanged} from '../../lib/librarySync'
+import {deletePlanLines} from './mediaLibrary'
 import {CHARACTER_IMAGE_LIMIT,CHARACTER_DESCRIPTION_MAX,CHARACTER_VOICE_MAX_SECONDS,characterKindLabel,characterNameError,characterErrorMessage,descriptionLength,normalizeCharacterKind,voiceIsAudio} from '../../lib/characterRules'
 import './characterLibrary.css'
 
@@ -30,7 +32,7 @@ function CharacterDescriptionField({value,onChange,disabled=false,kind='characte
 
 // Global character library: name, text description, up to 8 reference images and one reference audio.
 // openPicker({title,kinds,limit,onApply}) opens the asset library as a nested picker (provided by UnifiedAssetLibrary).
-export default function CharacterLibrary({openPicker,onBusy}){
+export default function CharacterLibrary({openPicker,onBusy,onChanged,onBeforeDelete,onDeleted}){
  const [characters,setCharacters]=useState([]),[loading,setLoading]=useState(true),[loadError,setLoadError]=useState(''),[activeId,setActiveId]=useState(null),[detail,setDetail]=useState(null)
  const [busy,setBusyState]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[revision,setRevision]=useState(0)
  const [creating,setCreating]=useState(false),[confirmDelete,setConfirmDelete]=useState(false),[nameDraft,setNameDraft]=useState(''),[descriptionDraft,setDescriptionDraft]=useState('')
@@ -148,6 +150,7 @@ export default function CharacterLibrary({openPicker,onBusy}){
  async function run(operation,success=''){if(lock.current){setError('请等待当前操作完成后再试');return false}lock.current=true;setBusy(true);setError('');setNotice('');try{await operation();if(alive.current&&success)setNotice(success);return true}catch(e){if(alive.current)setError(characterErrorMessage(e));return false}finally{lock.current=false;if(alive.current)setBusy(false)}}
  // Every mutation re-reads the character from the server; the server is the source of truth.
  async function reload(id=character?.id){const fresh=await getCharacter(id);if(!alive.current)return;setDetail(fresh);setCharacters(list=>list.map(c=>c.id===id?{...c,...fresh}:c))}
+ function syncLibrary(){onChanged?.();notifyLibraryChanged({source:'character'})}
  function saveChanges(){
   if(!character||!hasUnsavedChanges)return
   const patch={}
@@ -160,18 +163,19 @@ export default function CharacterLibrary({openPicker,onBusy}){
    if(descriptionLength(descriptionDraft)>CHARACTER_DESCRIPTION_MAX){setError(`文字描述最多 ${CHARACTER_DESCRIPTION_MAX} 字`);return}
    patch.description=descriptionDraft
   }
+  const renamed=nameDirty
   const msg=nameDirty&&descriptionDirty?'已保存角色卡修改':nameDirty?'已保存角色卡名称':'已保存文字描述'
-  run(async()=>{await updateCharacter(character.id,patch);await reload()},msg)
+  run(async()=>{await updateCharacter(character.id,patch);await reload();if(renamed)syncLibrary()},msg)
  }
  function saveKind(nextKind){const value=normalizeCharacterKind(nextKind);if(value===normalizeCharacterKind(character?.kind))return;run(async()=>{await updateCharacter(character.id,{kind:value});await reload()},`已切换为${characterKindLabel(value)}模板`)}
  function remaining(){return CHARACTER_IMAGE_LIMIT-images.length}
  async function uploadImages(files){const images=files.filter(f=>f.type.startsWith('image/'));if(images.length<files.length){setError('只能上传图片文件');if(!images.length)return}
   if(images.length>remaining()){setError(`每个角色卡最多 ${CHARACTER_IMAGE_LIMIT} 张图，还可添加 ${remaining()} 张`);return}
-  let done=0;await run(async()=>{try{for(const file of images){await uploadCharacterImage(character.id,file);done++}}finally{await reload()}},`已上传 ${images.length} 张角色卡图`)
+  let done=0;await run(async()=>{try{for(const file of images){await uploadCharacterImage(character.id,file);done++}}finally{await reload();if(done>0)syncLibrary()}},`已上传 ${images.length} 张角色卡图`)
   if(done<images.length&&alive.current)setNotice(`已上传 ${done} 张，未处理 ${images.length-done} 张；请核对后再决定是否重新上传`)}
  function pickImages(){const left=remaining();if(left<=0){setError(`每个角色卡最多 ${CHARACTER_IMAGE_LIMIT} 张图`);return}
-  openPicker({title:`为“${character.name}”选择角色卡图`,applyLabel:'加入角色卡图',kinds:['image'],limit:left,onApply:async items=>{const id=character.id;let done=0;try{for(const item of items){await attachPicked(item,selection=>addLibraryImage(id,selection));done++}}finally{if(alive.current)await reload(id).catch(()=>{})}if(alive.current)setNotice(`已从素材库加入 ${done} 张角色卡图`)}})}
- function removeImage(image){run(async()=>{await deleteCharacterImage(character.id,image.asset_id);await reload()},'已删除角色卡图')}
+  openPicker({title:`为“${character.name}”选择角色卡图`,applyLabel:'加入角色卡图',kinds:['image'],limit:left,onApply:async items=>{const id=character.id;let done=0;try{for(const item of items){await attachPicked(item,selection=>addLibraryImage(id,selection));done++}}finally{if(alive.current)await reload(id).catch(()=>{});if(done>0)syncLibrary()}if(alive.current)setNotice(`已从素材库加入 ${done} 张角色卡图`)}})}
+ function removeImage(image){run(async()=>{await deleteCharacterImage(character.id,image.asset_id);await reload();syncLibrary()},'已从角色卡移除图片（素材已保留并移回根目录）')}
  function move(from,to){if(to<0||to>=images.length||from===to)return;const order=images.map(i=>i.asset_id),[item]=order.splice(from,1);order.splice(to,0,item);const optimistic=order.map((asset_id,position)=>({...images.find(i=>i.asset_id===asset_id),position}));setDetail(d=>({...d,images:optimistic}));run(async()=>{await reorderCharacterImages(character.id,order);await reload()}).then(ok=>{if(!ok&&alive.current)reload().catch(()=>{})})}
  function openImagePreview(image){
   const pages=images.map((item,idx)=>({id:item.asset_id,url:item.url,name:item.name||`${character?.name||'角色卡'} 图 ${idx+1}`,kind:'image'}))
@@ -179,9 +183,9 @@ export default function CharacterLibrary({openPicker,onBusy}){
   if(current)setPreview(withPreviewPages(current,pages))
  }
  async function checkDuration(src){let seconds;try{seconds=await audioDuration(src)}catch(e){throw e}if(!Number.isFinite(seconds))throw new Error('无法确认音频时长，请换用 wav 或 mp3 文件');if(seconds>CHARACTER_VOICE_MAX_SECONDS+0.05)throw new Error(`参考音频最长 ${CHARACTER_VOICE_MAX_SECONDS} 秒（当前约 ${seconds.toFixed(1)} 秒）`);return seconds}
- function uploadAudio(file){if(!audioAllowed(file)){setError('参考音频仅支持 wav 或 mp3');return}run(async()=>{await checkDuration(file);await uploadVoiceAudio(character.id,file);await reload()},'已设置参考音频')}
- function pickAudio(){openPicker({title:`为“${character.name}”选择参考音频`,applyLabel:'设为参考音频',kinds:['audio'],limit:1,onApply:async([item])=>{const id=character.id,known=Number(item.asset.duration);if(Number.isFinite(known)&&known>0){if(known>CHARACTER_VOICE_MAX_SECONDS+0.05)throw new Error(`参考音频最长 ${CHARACTER_VOICE_MAX_SECONDS} 秒（所选约 ${known.toFixed(1)} 秒）`)}else await checkDuration(item.asset.url);await attachPicked(item,selection=>addLibraryVoiceAudio(id,selection));if(alive.current){await reload(id);setNotice('已设置参考音频')}}})}
- function removeVoice(){run(async()=>{await clearVoice(character.id);await reload()},'已移除参考音频')}
+ function uploadAudio(file){if(!audioAllowed(file)){setError('参考音频仅支持 wav 或 mp3');return}run(async()=>{await checkDuration(file);await uploadVoiceAudio(character.id,file);await reload();syncLibrary()},'已设置参考音频')}
+ function pickAudio(){openPicker({title:`为“${character.name}”选择参考音频`,applyLabel:'设为参考音频',kinds:['audio'],limit:1,onApply:async([item])=>{const id=character.id,known=Number(item.asset.duration);if(Number.isFinite(known)&&known>0){if(known>CHARACTER_VOICE_MAX_SECONDS+0.05)throw new Error(`参考音频最长 ${CHARACTER_VOICE_MAX_SECONDS} 秒（所选约 ${known.toFixed(1)} 秒）`)}else await checkDuration(item.asset.url);await attachPicked(item,selection=>addLibraryVoiceAudio(id,selection));if(alive.current){await reload(id);syncLibrary();setNotice('已设置参考音频')}}})}
+ function removeVoice(){run(async()=>{await clearVoice(character.id);await reload();syncLibrary()},'已移除参考音频（素材已保留并移回根目录）')}
 
  const isFiltered=Boolean(trimmedQuery||kindFilter!=='all')
 
@@ -242,7 +246,7 @@ export default function CharacterLibrary({openPicker,onBusy}){
        <button type="button" className="btn btn-secondary btn-sm" disabled={busy||remaining()<=0} onClick={pickImages}><Images size={14}/>从素材库选择</button>
       </div>
      </div>
-     <p className="cl-hint">点击缩略图查看大图，拖动或用左右按钮调整顺序；第一张作为角色卡首图。</p>
+     <p className="cl-hint">点击缩略图查看大图，拖动或用左右按钮调整顺序；第一张作为角色卡首图。素材统一归入「角色卡 / {character.name}」子文件夹，移除单张后素材保留并移回根目录。</p>
      {images.length?<ol className="cl-images" aria-label="角色卡图（按顺序）">{images.map((image,index)=><li key={image.asset_id} className={`cl-image${index===0?' is-cover':''}${dragging===image.asset_id?' is-dragging':''}${dropIndex===index&&dragging!==image.asset_id?' is-drop':''}`} draggable={!busy} onDragStart={e=>{setDragging(image.asset_id);e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',image.asset_id)}} onDragOver={e=>{if(!dragging)return;e.preventDefault();setDropIndex(index)}} onDragLeave={()=>setDropIndex(v=>v===index?null:v)} onDrop={e=>{e.preventDefault();const from=images.findIndex(i=>i.asset_id===dragging);setDragging(null);setDropIndex(null);move(from,index)}} onDragEnd={()=>{setDragging(null);setDropIndex(null)}} data-character-image={image.asset_id}>
       <button type="button" className="cl-image-preview-btn" aria-label={`预览角色卡图 第 ${index+1} 张 ${image.name||''}`.trim()} title={image.name?`${image.name}（点击查看大图）`:'点击查看大图'} onClick={()=>openImagePreview(image)}>
        <img src={image.thumbnail_url||image.url} alt="" draggable={false}/>
@@ -260,15 +264,15 @@ export default function CharacterLibrary({openPicker,onBusy}){
        {voiceIsAudio(character.voice)&&<button type="button" className="btn btn-ghost btn-sm btn-danger" disabled={busy} onClick={removeVoice}>移除声音</button>}
       </div>
      </div>
-     <p className="cl-hint">参考音频支持 wav / mp3，{CHARACTER_VOICE_MAX_SECONDS} 秒以内；上传后同步入本地素材库。</p>
+     <p className="cl-hint">参考音频支持 wav / mp3，{CHARACTER_VOICE_MAX_SECONDS} 秒以内；统一归入「角色卡 / {character.name}」子文件夹，移除后保留并移回根目录。</p>
      {voiceIsAudio(character.voice)?<div className="cl-voice"><div className="cl-voice-info"><span className="cl-voice-badge" aria-hidden="true"><AudioLines size={15}/></span><span className="cl-voice-name" title={character.voice.name}>{character.voice.name||'参考音频'}{Number.isFinite(Number(character.voice.duration))&&Number(character.voice.duration)>0?` · ${Number(character.voice.duration).toFixed(1)} 秒`:''}</span></div><audio key={character.voice.url} controls preload="metadata" src={character.voice.url} aria-label={`试听 ${character.name} 的参考音频`}/></div>:<div className="cl-slot-empty cl-slot-empty-compact"><p className="ul-muted">未设置声音。</p></div>}
     </div>
    </>}
   </section>
   <input ref={imageInput} type="file" accept="image/*" multiple hidden onChange={e=>{const files=[...e.target.files];e.target.value='';if(files.length)uploadImages(files)}}/>
   <input ref={audioInput} type="file" accept=".wav,.mp3,audio/wav,audio/mpeg" hidden onChange={e=>{const file=e.target.files[0];e.target.value='';if(file)uploadAudio(file)}}/>
-  {creating&&<CreateCharacterDialog characters={characters} openPicker={openPicker} libraryRootRef={rootRef} onClose={partial=>{setCreating(false);if(partial){setCharacters(list=>list.some(c=>c.id===partial.id)?list.map(c=>c.id===partial.id?{...c,...partial}:c):[...list,partial]);setActiveId(partial.id);setNotice(`角色卡“${partial.name}”已创建，可在详情页继续补充参考图`);setRevision(v=>v+1)}}} onCreated={(c,{imageCount=0}={})=>{setCreating(false);setCharacters(list=>list.some(item=>item.id===c.id)?list.map(item=>item.id===c.id?{...item,...c}:item):[...list,c]);setActiveId(c.id);setNotice(imageCount?`已新建角色卡“${c.name}”（已绑定 ${imageCount} 张参考图）`:`已新建角色卡“${c.name}”`);setRevision(v=>v+1)}}/>}
-  {confirmDelete&&character&&<DeleteCharacterDialog character={character} onClose={()=>setConfirmDelete(false)} onDeleted={()=>{setConfirmDelete(false);setActiveId(null);setNotice(`已删除角色卡“${character.name}”`);setRevision(v=>v+1)}}/>}
+  {creating&&<CreateCharacterDialog characters={characters} openPicker={openPicker} libraryRootRef={rootRef} onClose={partial=>{setCreating(false);if(partial){setCharacters(list=>list.some(c=>c.id===partial.id)?list.map(c=>c.id===partial.id?{...c,...partial}:c):[...list,partial]);setActiveId(partial.id);setNotice(`角色卡“${partial.name}”已创建，可在详情页继续补充参考图`);setRevision(v=>v+1);syncLibrary()}}} onCreated={(c,{imageCount=0}={})=>{setCreating(false);setCharacters(list=>list.some(item=>item.id===c.id)?list.map(item=>item.id===c.id?{...item,...c}:item):[...list,c]);setActiveId(c.id);setNotice(imageCount?`已新建角色卡“${c.name}”（已绑定 ${imageCount} 张参考图）`:`已新建角色卡“${c.name}”`);setRevision(v=>v+1);syncLibrary()}}/>}
+  {confirmDelete&&character&&<DeleteCharacterDialog character={character} onBeforeDelete={onBeforeDelete} onClose={()=>setConfirmDelete(false)} onDeleted={(result,{deleteMedia=false,preview:plan=null,mediaCount=0}={})=>{setConfirmDelete(false);setActiveId(null);const deletedIds=result?.deleted_media_ids||[];const deletedCount=deletedIds.length||mediaCount;setNotice(deleteMedia?`已删除角色卡“${character.name}”并彻底删除其文件夹下的 ${deletedCount} 个素材`:`已删除角色卡“${character.name}”，原素材已移回素材库根目录`);setRevision(v=>v+1);if(onDeleted)onDeleted(result,{deleteMedia,preview:plan});else{notifyLibraryChanged({source:'character_delete',deletedIds});onChanged?.()}}}/>}
   {preview&&createPortal(<div className="ul-preview-host"><MediaPreview key={preview.id||preview.url} asset={preview} onClose={()=>setPreview(null)}/></div>,document.body)}
  </div>
 }
@@ -391,7 +395,62 @@ export function CreateCharacterDialog({characters,openPicker,libraryRootRef,onCl
  </>
 }
 
-function DeleteCharacterDialog({character,onClose,onDeleted}){
- const [busy,setBusy]=useState(false),[error,setError]=useState('')
- return <LibraryDialog title={`删除角色卡“${character.name}”？`} busy={busy} error={error} confirmLabel="删除角色卡" danger onClose={onClose} onConfirm={async()=>{setBusy(true);setError('');try{await deleteCharacter(character.id);onDeleted()}catch(e){setError(characterErrorMessage(e,'删除失败'));setBusy(false)}}}><p>将删除角色卡“{character.name}”，无法撤销。</p><p className="ul-muted">角色卡引用的 {(character.images||[]).length} 张图片{character.voice?'和参考音频':''}仍保留在本地素材中；画布节点里已导入的素材保留，引用该角色卡的节点会提示角色卡已删除。</p></LibraryDialog>
+function DeleteCharacterDialog({character,onBeforeDelete,onClose,onDeleted}){
+ const [busy,setBusy]=useState(false),[error,setError]=useState(''),[deleteMedia,setDeleteMedia]=useState(false)
+ const [loadingPreview,setLoadingPreview]=useState(true),[previewData,setPreviewData]=useState(null),[previewError,setPreviewError]=useState('')
+ useEffect(()=>{
+  let alive=true
+  setLoadingPreview(true);setPreviewError('');setPreviewData(null)
+  previewDeleteCharacter(character.id).then(data=>{
+   if(alive)setPreviewData(data)
+  }).catch(e=>{
+   if(alive)setPreviewError(characterErrorMessage(e,'无法加载素材删除预览'))
+  }).finally(()=>{
+   if(alive)setLoadingPreview(false)
+  })
+  return()=>{alive=false}
+ },[character.id])
+ const folderTitle=previewData?.folder_title||`角色卡 / ${character.name}`
+ const rawPlan=previewData?.preview||null
+ const mediaCount=previewData?Number(previewData.media_count??rawPlan?.items?.length??0):((character.images||[]).length+(voiceIsAudio(character.voice)?1:0))
+ const safePlan=rawPlan?{
+  items:rawPlan.items||[],
+  missing:rawPlan.missing||[],
+  affected_workflows:rawPlan.affected_workflows||[],
+  characters:rawPlan.characters||[],
+  media_groups:rawPlan.media_groups||[],
+  task_ids:rawPlan.task_ids||[],
+ }:null
+ async function handleConfirm(){
+  setBusy(true);setError('')
+  try{
+   if(deleteMedia)await onBeforeDelete?.()
+   const result=await deleteCharacter(character.id,{deleteMedia})
+   onDeleted(result,{deleteMedia,preview:safePlan,mediaCount})
+  }catch(e){
+   setError(characterErrorMessage(e,'删除失败'))
+   setBusy(false)
+  }
+ }
+ return <LibraryDialog title={`删除角色卡“${character.name}”？`} busy={busy} error={error} confirmLabel={deleteMedia?'删除角色卡并彻底删除素材':'删除角色卡'} disabled={deleteMedia&&(loadingPreview||!safePlan)} danger onClose={onClose} onConfirm={handleConfirm}>
+  <p>将删除角色卡“{character.name}”，无法撤销。</p>
+  {loadingPreview?<p className="ul-muted" role="status">正在统计角色卡文件夹素材…</p>
+   :previewError?<p className="ul-muted">未能获取素材删除预览（{previewError}）。默认仍可安全删除角色卡，保留原素材并移回素材库根目录。</p>
+   :mediaCount===0?<p className="ul-muted">该角色卡文件夹内没有素材，删除后将自动清理空的「{folderTitle}」子文件夹。</p>
+   :<>
+    {!deleteMedia&&<p className="ul-muted">默认保留「{folderTitle}」下的 {mediaCount} 个素材并移回素材库根目录，自动清理空子文件夹；画布中已导入的素材不受影响。</p>}
+    <div className={`cl-delete-media-toggle${deleteMedia?' is-checked':''}`}>
+     <label>
+      <input type="checkbox" checked={deleteMedia} disabled={busy} onChange={e=>{setDeleteMedia(e.target.checked);setError('')}}/>
+      <span>同时彻底删除「{folderTitle}」文件夹下的 {mediaCount} 个素材（不可恢复）</span>
+     </label>
+    </div>
+    {deleteMedia&&safePlan&&<div className="cl-delete-preview" role="status" data-testid="character-delete-preview">
+     {deletePlanLines(safePlan).map((line,i)=><p key={i}>{line}</p>)}
+     {safePlan.affected_workflows.length>0&&<ul className="ul-delete-workflows" aria-label="受影响的画布">{safePlan.affected_workflows.map(w=><li key={w.workflow_id} data-workflow-id={w.workflow_id}><b>{w.project_title||'项目已删除'}</b> / <b>{w.workflow_title||w.workflow_id}</b>：{w.placeholder_nodes||0} 个“已删除”占位，{w.stripped_nodes||0} 个节点移除引用</li>)}</ul>}
+     <p className="ul-muted">“已删除”：节点保留原位置和名称并显示为“已删除”，可重新选择素材替换；归档的画布不改写。</p>
+     <p><strong>此操作不可恢复。</strong>Cupsy 远端素材不受影响。</p>
+    </div>}
+   </>}
+ </LibraryDialog>
 }

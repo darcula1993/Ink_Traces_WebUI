@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.5.1 - 2026-11-22
+
+Managed character-card library subfolders (`角色卡/<name>`), automatic placement & startup migration, and two-mode character deletion with impact preview.
+
+- **Managed `角色卡 / <name>` Folder Tree**:
+  - Added a fixed top-level system folder **`角色卡`** (`system_key='characters'`) alongside `生成历史` while keeping the pre-seeded user `角色` folder untouched.
+  - Creating or renaming a character card automatically creates or renames its managed subfolder `角色卡/<name>` (blocking `/` and `\` in character names); manual drag/move/rename/delete/subfolder creation inside `角色卡` is guarded (`409 folder_character_managed`) in both the Global Library and Canvas sidebar tree, and duplicate uploads matching character-folder items disable 「移到当前文件夹」 while preserving 「定位」.
+- **Automatic Media Placement, Hard-Link Protection & Startup Migration**:
+  - Direct character image/voice uploads land directly in `角色卡/<name>`; media picked from root or normal user folders moves into `角色卡/<name>` preserving `media_id` and canvas references; media from `生成历史` or another character card is hard-link copied as an independent library item (zero extra disk space, idempotent within the same character, surviving task trash emptying).
+  - Removing a single image, clearing voice, or replacing voice returns the unlinked media item to library root without deleting files or breaking canvas references.
+  - Added idempotent startup migration (`ensure_character_folders`) that organizes existing character cards and their media into `角色卡/<name>` while safely skipping any missing legacy files on disk.
+- **Character Deletion Preview & Optional Permanent Media Delete**:
+  - Added `GET /api/characters/<id>/delete-preview` and extended `DELETE /api/characters/<id>?delete_media=1`: by default deleting a character preserves its media (moving items back to library root) and removes the empty subfolder; checking **「同时彻底删除该角色文件夹下的素材」** previews affected canvases/groups and performs a crash-safe two-phase deletion with canvas revision sync.
+
 ## 2.5.0 - 2026-11-22
 
 Cinema Obsidian & Amber darkroom theme, unified 14px smoked Liquid Glass architecture, Ink-Trace launch ritual, zero-flash mode navigation, and comprehensive real-device UI polish.

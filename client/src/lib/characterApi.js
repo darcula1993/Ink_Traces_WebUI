@@ -9,7 +9,8 @@ export const listCharacters=async signal=>{const body=await data(axios.get(base,
 export const getCharacter=async id=>one(await data(axios.get(`${base}/${id}`)))
 export const createCharacter=async({name,description='',kind='character'})=>one(await data(axios.post(base,{name,[DESCRIPTION_FIELD]:description,...(kind&&kind!=='character'?{kind}:{})})))
 export const updateCharacter=async(id,patch)=>{const body={...patch};if('description' in body){body[DESCRIPTION_FIELD]=body.description;if(DESCRIPTION_FIELD!=='description')delete body.description}return one(await data(axios.patch(`${base}/${id}`,body)))}
-export const deleteCharacter=id=>data(axios.delete(`${base}/${id}`))
+export const previewDeleteCharacter=id=>data(axios.get(`${base}/${id}/delete-preview`))
+export const deleteCharacter=(id,{deleteMedia=false}={})=>data(axios.delete(`${base}/${id}${deleteMedia?'?delete_media=1':''}`))
 export async function uploadCharacterImage(id,file){const body=new FormData();body.append('file',file);return data(axios.post(`${base}/${id}/images`,body))}
 // asset_ref is the library selection {source,id}: {source:'media',id:<media id>} references the global
 // library item directly (S6c); legacy local/library/workflow/task keys resolve through aliases, cupsy is copied in.

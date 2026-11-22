@@ -1,19 +1,19 @@
 import React from 'react'
 import {ChevronRight,ChevronDown,Folder,Lock,Music,Users,Mountain,Box,Palette,Library,Inbox,History,FolderPlus} from 'lucide-react'
 import LibraryMore from './LibraryMore'
-import {folderChildren,folderCount,GENERATED} from './mediaLibrary'
+import {folderChildren,folderCount,GENERATED,isCharacterFolder} from './mediaLibrary'
 const ICONS={music:Music,character:Users,scene:Mountain,prop:Box,style:Palette}
-export const folderIcon=folder=>folder?.system_key===GENERATED?History:ICONS[folder?.icon]||Folder
-// Left navigation of the global library: 全部素材, the folder tree (locked system “生成历史” first,
+export const folderIcon=folder=>folder?.system_key===GENERATED?History:isCharacterFolder(folder)?Users:ICONS[folder?.icon]||Folder
+// Left navigation of the global library: 全部素材, the folder tree (locked system “生成历史” and “角色卡” first,
 // then user folders and subfolders) and 根目录 (items not in any folder).
 export default function MediaFolderTree({folders,place,active,onPlace,expanded,onToggle,onAction,counts,busy,dropTarget=null,onFolderDragOver,onFolderDragLeave,onFolderDrop}){
  const children=folderChildren(folders)
  const dropClass=id=>dropTarget?.id===id?(dropTarget.forbidden?' is-drop-forbidden':' is-drop-target'):''
- const row=(folder,depth)=>{const kids=children.get(folder.id)||[],open=expanded.has(folder.id),system=!!folder.system_key,Icon=folderIcon(folder),current=active&&place===folder.id
+ const row=(folder,depth)=>{const kids=children.get(folder.id)||[],open=expanded.has(folder.id),system=!!folder.system_key,characterManaged=isCharacterFolder(folder),Icon=folderIcon(folder),current=active&&place===folder.id
   return <li key={folder.id} role="none">
    <div className={`ul-tree-row${current?' is-current':''}${system?' is-system':''}${dropClass(folder.id)}`} style={{'--depth':depth}} data-folder-id={folder.id} data-system-folder={system?'true':undefined} onDragOver={onFolderDragOver?e=>onFolderDragOver(e,folder):undefined} onDragLeave={onFolderDragLeave?e=>onFolderDragLeave(e,folder):undefined} onDrop={onFolderDrop?e=>onFolderDrop(e,folder):undefined}>
     {kids.length?<button className="ul-tree-toggle" aria-label={`${open?'收起':'展开'} ${folder.title}`} aria-expanded={open} disabled={busy} onClick={()=>onToggle(folder.id)}>{open?<ChevronDown size={14} aria-hidden="true"/>:<ChevronRight size={14} aria-hidden="true"/>}</button>:<span className="ul-tree-toggle" aria-hidden="true"/>}
-    <button className="ul-tree-item" aria-current={current?'true':undefined} aria-label={`文件夹 ${folder.title}${system?'（系统文件夹）':''}`} title={system?`${folder.title}：系统文件夹，不可重命名或删除；内部结果可移走或删除`:folder.title} disabled={busy} onClick={()=>onPlace(folder.id)}>
+    <button className="ul-tree-item" aria-current={current?'true':undefined} aria-label={`文件夹 ${folder.title}${system?'（系统文件夹）':''}`} title={characterManaged?`${folder.title}：角色卡托管文件夹，由角色卡自动同步，请在角色卡界面增删素材或改名`:system?`${folder.title}：系统文件夹，不可重命名或删除；内部结果可复制或删除`:folder.title} disabled={busy} onClick={()=>onPlace(folder.id)}>
      <Icon size={15} strokeWidth={1.7} aria-hidden="true"/><span>{folder.title}</span>{system&&<Lock className="ul-tree-lock" data-system-lock="true" size={12} aria-label="系统文件夹（已锁定）"/>}<small>{folderCount(folders,folder)}</small>
     </button>
     {!system&&<LibraryMore menu name={`文件夹 ${folder.title}`}><button onClick={()=>onAction({kind:'newFolder',item:{parent_id:folder.id}})}>新建子文件夹</button><button onClick={()=>onAction({kind:'folder',item:folder})}>重命名／移动</button><button className="is-danger" onClick={()=>onAction({kind:'deleteFolder',item:folder})}>删除文件夹</button></LibraryMore>}

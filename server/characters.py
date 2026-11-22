@@ -23,6 +23,7 @@ preview and removes the reference from them (``usage``/``unlink_local``).
 """
 import io
 import json
+import logging
 import re
 import sqlite3
 import subprocess
@@ -34,14 +35,130 @@ import canvas_store as store
 import media_library as media
 import tasks
 
+LOG = logging.getLogger(__name__)
 MAX_IMAGES = 8
 MAX_VOICE_SECONDS = 30.0
 MAX_DESCRIPTION = 300
 KINDS = ('character', 'prop')
-NAME_FORBIDDEN = re.compile(r'[\s@\[\]()（）]')
+NAME_FORBIDDEN = re.compile(r'[\s@\[\]()（）/\\]')
 NAME_RESERVED = re.compile(r'^(图片|视频|音频)\d+$')
 HEX_ID = re.compile(r'^[0-9a-f]{32}$')
 VOICE_MIMES = ('audio/wav', 'audio/mpeg')
+
+
+def _ensure_character_folder(db, character_id, name, now=None):
+    """Ensure the system root 角色卡 and this character's 角色卡/<name> subfolder exist."""
+    ts = now or tasks.utcnow()
+    root_id = media.system_folder_id(media.CHARACTER_ROOT_KEY)
+    db.execute(
+        'INSERT OR IGNORE INTO media_folders VALUES (?,?,?,?,?,?,?)',
+        (root_id, '角色卡', None, media.CHARACTER_ROOT_KEY, 'character', ts, ts),
+    )
+    fid = media.character_folder_id(character_id)
+    sys_key = f'character:{character_id}'
+    existing = db.execute('SELECT title, parent_id, system_key FROM media_folders WHERE id=?', (fid,)).fetchone()
+    if existing is None:
+        db.execute(
+            'INSERT INTO media_folders VALUES (?,?,?,?,?,?,?)',
+            (fid, name, root_id, sys_key, 'character', ts, ts),
+        )
+    elif existing['title'] != name or existing['parent_id'] != root_id or existing['system_key'] != sys_key:
+        db.execute(
+            'UPDATE media_folders SET title=?, parent_id=?, system_key=?, updated_at=? WHERE id=?',
+            (name, root_id, sys_key, tasks.utcnow(), fid),
+        )
+    return fid
+
+
+def _place_for_character(db, character_id, row, char_folder_id, created_files):
+    """Place a validated media row into 角色卡/<name>: move from root/user folder, hard-link copy from 生成历史 or another character."""
+    if row['folder_id'] == char_folder_id:
+        return row
+    in_generated = row['folder_id'] in media.GENERATED_FOLDERS
+    source_folder_key = None
+    if row['folder_id']:
+        src = db.execute('SELECT system_key FROM media_folders WHERE id=?', (row['folder_id'],)).fetchone()
+        source_folder_key = src['system_key'] if src else None
+    in_other_char = bool(
+        source_folder_key
+        and source_folder_key.startswith('character:')
+        and source_folder_key != f'character:{character_id}'
+    )
+    used_by_other_char = bool(
+        db.execute(
+            'SELECT 1 FROM character_media WHERE local_id=? AND character_id!=?',
+            (row['id'], character_id),
+        ).fetchone()
+    )
+    if in_generated or in_other_char or used_by_other_char:
+        new_id = media._copy_item(db, row, char_folder_id, created_files)
+        return dict(db.execute('SELECT * FROM media WHERE id=?', (new_id,)).fetchone())
+    db.execute('UPDATE media SET folder_id=? WHERE id=?', (char_folder_id, row['id']))
+    return dict(db.execute('SELECT * FROM media WHERE id=?', (row['id'],)).fetchone())
+
+
+def ensure_character_folders():
+    """Startup auto-migration (CHAR-FOLDERS-20261122): idempotently align 角色卡/<name> folders and media placement."""
+    db = tasks.get_db()
+    tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {'media_folders', 'media', 'characters', 'character_media'} <= tables:
+        return
+    created_files = []
+    try:
+        with store.write_transaction() as wdb:
+            now = tasks.utcnow()
+            root_id = media.system_folder_id(media.CHARACTER_ROOT_KEY)
+            wdb.execute(
+                'INSERT OR IGNORE INTO media_folders VALUES (?,?,?,?,?,?,?)',
+                (root_id, '角色卡', None, media.CHARACTER_ROOT_KEY, 'character', now, now),
+            )
+            char_rows = wdb.execute('SELECT id, name, created_at FROM characters ORDER BY created_at, id').fetchall()
+            live_ids = set()
+            for crow in char_rows:
+                cid = crow['id']
+                live_ids.add(cid)
+                fid = _ensure_character_folder(wdb, cid, crow['name'], crow['created_at'])
+                cm_rows = wdb.execute(
+                    'SELECT local_id FROM character_media WHERE character_id=? ORDER BY role, position, created_at, local_id',
+                    (cid,),
+                ).fetchall()
+                for cm in cm_rows:
+                    mrow = wdb.execute('SELECT * FROM media WHERE id=?', (cm['local_id'],)).fetchone()
+                    if mrow is None:
+                        continue
+                    if mrow['folder_id'] != fid:
+                        old_id = mrow['id']
+                        try:
+                            placed = _place_for_character(wdb, cid, dict(mrow), fid, created_files)
+                        except (media.MediaError, OSError) as err:
+                            LOG.warning('character_folder_migration_skip character=%s media=%s err=%s', cid, old_id, err)
+                            continue
+                        if placed['id'] != old_id:
+                            if wdb.execute(
+                                'SELECT 1 FROM character_media WHERE character_id=? AND local_id=?',
+                                (cid, placed['id']),
+                            ).fetchone():
+                                wdb.execute(
+                                    'DELETE FROM character_media WHERE character_id=? AND local_id=?',
+                                    (cid, old_id),
+                                )
+                            else:
+                                wdb.execute(
+                                    'UPDATE character_media SET local_id=? WHERE character_id=? AND local_id=?',
+                                    (placed['id'], cid, old_id),
+                                )
+            for folder in wdb.execute("SELECT id, system_key FROM media_folders WHERE system_key LIKE 'character:%'").fetchall():
+                cid = folder['system_key'][len('character:'):]
+                if cid not in live_ids:
+                    has_media = wdb.execute('SELECT 1 FROM media WHERE folder_id=? LIMIT 1', (folder['id'],)).fetchone()
+                    has_child = wdb.execute('SELECT 1 FROM media_folders WHERE parent_id=? LIMIT 1', (folder['id'],)).fetchone()
+                    if not has_media and not has_child:
+                        wdb.execute('DELETE FROM media_folders WHERE id=?', (folder['id'],))
+        created_files.clear()
+    except BaseException:
+        for path in created_files:
+            path.unlink(missing_ok=True)
+        raise
 
 
 def init_characters_db():
@@ -64,6 +181,7 @@ def init_characters_db():
     if 'kind' not in columns:
         db.execute("ALTER TABLE characters ADD COLUMN kind TEXT NOT NULL DEFAULT 'character'")
     db.commit()
+    ensure_character_folders()
 
 
 # ---- validation -------------------------------------------------------------------
@@ -75,7 +193,7 @@ def name_value(value):
     if not 1 <= len(name) <= 24:
         raise store.CanvasError('角色名须为1至24个字符')
     if NAME_FORBIDDEN.search(name) or any(ord(c) < 32 for c in name):
-        raise store.CanvasError('角色名不能包含空白、@、方括号或圆括号')
+        raise store.CanvasError('角色名不能包含空白、@、方括号、圆括号或斜杠')
     if NAME_RESERVED.fullmatch(name):
         raise store.CanvasError('角色名不能为“图片N”“视频N”“音频N”形式')
     return name
@@ -170,15 +288,16 @@ def voice_public(row):
             'mime_type': row['mime_type'], 'duration': row['duration']}
 
 
-MEDIA_SQL = '''SELECT m.*, x.name, x.mime_type, x.kind, x.relpath FROM character_media m
+MEDIA_SQL = '''SELECT m.*, x.name, x.mime_type, x.kind, x.relpath, x.sha256 FROM character_media m
                JOIN media x ON x.id=m.local_id'''
 
 
-def _public(row, media):
-    images = sorted((m for m in media if m['role'] == 'image'), key=lambda m: (m['position'], m['created_at'], m['local_id']))
-    voice = next((m for m in media if m['role'] == 'voice'), None)
+def _public(row, media_rows):
+    images = sorted((m for m in media_rows if m['role'] == 'image'), key=lambda m: (m['position'], m['created_at'], m['local_id']))
+    voice = next((m for m in media_rows if m['role'] == 'voice'), None)
     kind = row['kind'] if 'kind' in row.keys() and row['kind'] in KINDS else 'character'
     return {'id': row['id'], 'name': row['name'], 'description': row['description'], 'kind': kind,
+            'folder_id': media.character_folder_id(row['id']),
             'voice': voice_public(voice) if voice else None, 'images': [image_public(m) for m in images],
             'created_at': row['created_at'], 'updated_at': row['updated_at']}
 
@@ -234,8 +353,8 @@ def list_characters(asset_ref=None):
             return []
         only = {r[0] for r in db.execute('SELECT character_id FROM character_media WHERE local_id=?', (ident,))}
     grouped = {}
-    for media in db.execute(MEDIA_SQL + ' ORDER BY m.position,m.created_at,m.local_id'):
-        grouped.setdefault(media['character_id'], []).append(dict(media))
+    for item in db.execute(MEDIA_SQL + ' ORDER BY m.position,m.created_at,m.local_id'):
+        grouped.setdefault(item['character_id'], []).append(dict(item))
     return [_public(row, grouped.get(row['id'], []))
             for row in db.execute('SELECT * FROM characters ORDER BY updated_at DESC,id')
             if only is None or row['id'] in only]
@@ -259,8 +378,8 @@ def _touch(db, character_id):
 def _renumber(db, character_id):
     rows = db.execute("SELECT local_id FROM character_media WHERE character_id=? AND role='image' "
                       'ORDER BY position,created_at,local_id', (character_id,)).fetchall()
-    for position, media in enumerate(rows):
-        db.execute('UPDATE character_media SET position=? WHERE character_id=? AND local_id=?', (position, character_id, media[0]))
+    for position, item in enumerate(rows):
+        db.execute('UPDATE character_media SET position=? WHERE character_id=? AND local_id=?', (position, character_id, item[0]))
 
 
 # ---- used by media_library / local_delete deletion ---------------------------------------------------------
@@ -357,12 +476,14 @@ def _resolve_sources(uploads, data):
     raise store.CanvasError('素材来源须为 multipart 上传、media、library 或 canvas')
 
 
-def _media_rows(db, sources):
-    """Inside the write transaction: register uploads/copies in the library root and load rows."""
+def _media_rows(db, sources, folder_id=None):
+    """Inside the write transaction: register uploads/copies in the target folder and load rows."""
     rows = []
     for source in sources:
         if source[0] in ('upload', 'copy'):
-            media_id = media.save_upload(source[1], source[2], origin='upload')[0]['id']
+            media_id = media.save_upload(
+                source[1], source[2], folder_id=folder_id, origin='upload', allow_character_folder=bool(folder_id),
+            )[0]['id']
         else:
             media_id = source[1]
         row = db.execute('SELECT * FROM media WHERE id=?', (media_id,)).fetchone()
@@ -390,6 +511,7 @@ def create_character(data):
             _ensure_unique(db, name)
             db.execute('INSERT INTO characters (id, name, name_key, description, kind, created_at, updated_at) VALUES (?,?,?,?,?,?,?)',
                        (ident, name, name.casefold(), description, kind, now, now))
+            _ensure_character_folder(db, ident, name, now)
     except sqlite3.IntegrityError as error:
         raise store.CanvasError('角色名已存在', 409) from error
     return get_character(ident)
@@ -407,6 +529,7 @@ def update_character(character_id, data):
                 _ensure_unique(db, name, exclude=character_id)
                 if name != row['name']:
                     db.execute('UPDATE characters SET name=?,name_key=? WHERE id=?', (name, name.casefold(), character_id))
+                    _ensure_character_folder(db, character_id, name, tasks.utcnow())
                     changed = True
             if 'description' in data:
                 description = description_value(data['description'])
@@ -424,7 +547,10 @@ def update_character(character_id, data):
                 voice = data['voice']
                 if voice is None:
                     if current:
+                        char_folder_id = media.character_folder_id(character_id)
+                        old_voice_id = current[0]['local_id']
                         db.execute("DELETE FROM character_media WHERE character_id=? AND role='voice'", (character_id,))
+                        db.execute('UPDATE media SET folder_id=NULL WHERE id=? AND folder_id=?', (old_voice_id, char_folder_id))
                         changed = True
                 elif not (isinstance(voice, dict) and voice.get('type') == 'audio' and current
                           and _canonical(db, character_id, voice.get('asset_id')) == current[0]['local_id']):
@@ -449,14 +575,107 @@ def update_character(character_id, data):
     return get_character(character_id)
 
 
-def delete_character(character_id):
-    """Delete the character and its references only; media items are kept."""
-    with store.write_transaction() as db:
-        _row(db, character_id)
-        count = db.execute('DELETE FROM character_media WHERE character_id=?', (character_id,)).rowcount
-        db.execute('DELETE FROM characters WHERE id=?', (character_id,))
-        db.execute('DELETE FROM canvas_asset_copies WHERE source_key=?', ('character:' + character_id,))
-    return {'deleted_id': character_id, 'references_removed': count}
+def delete_character_preview(character_id):
+    """Read-only preview of deleting a character card and optionally its media."""
+    db = tasks.get_db()
+    owns = not db.in_transaction
+    if owns:
+        db.execute('BEGIN')
+    try:
+        row = _row(db, character_id)
+        char_folder_id = media.character_folder_id(character_id)
+        char_media_ids = [r[0] for r in db.execute(
+            'SELECT local_id FROM character_media WHERE character_id=? ORDER BY role, position, created_at, local_id',
+            (character_id,),
+        ).fetchall()]
+        folder_media_ids = [r[0] for r in db.execute(
+            'SELECT id FROM media WHERE folder_id=? ORDER BY created_at DESC, id',
+            (char_folder_id,),
+        ).fetchall()]
+        media_ids = list(dict.fromkeys(char_media_ids + folder_media_ids))
+        if media_ids:
+            summary = media._plan(db, media_ids)['summary']
+            summary['characters'] = [c for c in summary['characters'] if c['id'] != character_id]
+        else:
+            summary = {
+                'items': [],
+                'missing': [],
+                'affected_workflows': [],
+                'characters': [],
+                'asset_groups': 0,
+                'media_groups': [],
+                'task_ids': [],
+            }
+        return {
+            'character': {'id': row['id'], 'name': row['name'], 'folder_id': char_folder_id},
+            'folder_title': f"角色卡 / {row['name']}",
+            'media_count': len(summary['items']),
+            'preview': summary,
+        }
+    finally:
+        if owns:
+            db.rollback()
+
+
+def delete_character(character_id, delete_media=False):
+    """Delete a character card: keep media moved back to root (default) or permanently delete media too."""
+    _check_id(character_id)
+    char_folder_id = media.character_folder_id(character_id)
+    if not delete_media:
+        with store.write_transaction() as db:
+            _row(db, character_id)
+            count = db.execute('DELETE FROM character_media WHERE character_id=?', (character_id,)).rowcount
+            moved = db.execute('UPDATE media SET folder_id=NULL WHERE folder_id=?', (char_folder_id,)).rowcount
+            db.execute('DELETE FROM characters WHERE id=?', (character_id,))
+            db.execute('DELETE FROM canvas_asset_copies WHERE source_key=?', ('character:' + character_id,))
+            db.execute('DELETE FROM media_folders WHERE id=?', (char_folder_id,))
+        return {
+            'deleted_id': character_id,
+            'references_removed': count,
+            'media_moved_to_root': moved,
+            'deleted_media_ids': [],
+            'files_removed': 0,
+        }
+
+    staged, token = [], uuid.uuid4().hex
+    try:
+        with store.write_transaction() as db:
+            _row(db, character_id)
+            char_media_ids = [r[0] for r in db.execute(
+                'SELECT local_id FROM character_media WHERE character_id=? ORDER BY role, position, created_at, local_id',
+                (character_id,),
+            ).fetchall()]
+            folder_media_ids = [r[0] for r in db.execute(
+                'SELECT id FROM media WHERE folder_id=? ORDER BY created_at DESC, id',
+                (char_folder_id,),
+            ).fetchall()]
+            media_ids = list(dict.fromkeys(char_media_ids + folder_media_ids))
+            count = db.execute('DELETE FROM character_media WHERE character_id=?', (character_id,)).rowcount
+            db.execute('DELETE FROM characters WHERE id=?', (character_id,))
+            db.execute('DELETE FROM canvas_asset_copies WHERE source_key=?', ('character:' + character_id,))
+            if media_ids:
+                plan = media._plan(db, media_ids)
+                media.apply_delete(db, plan, staged, token)
+                summary = plan['summary']
+                deleted_ids = [r['id'] for r in plan['rows']]
+            else:
+                summary = {'affected_workflows': [], 'media_groups': [], 'task_ids': []}
+                deleted_ids = []
+            db.execute('UPDATE media SET folder_id=NULL WHERE folder_id=?', (char_folder_id,))
+            db.execute('DELETE FROM media_folders WHERE id=?', (char_folder_id,))
+    except BaseException:
+        media.undo_delete(staged)
+        raise
+    removed_files = media.finish_delete(staged)
+    return {
+        'deleted_id': character_id,
+        'references_removed': count,
+        'media_moved_to_root': 0,
+        'deleted_media_ids': deleted_ids,
+        'files_removed': removed_files,
+        'affected_workflows': summary['affected_workflows'],
+        'media_groups': summary['media_groups'],
+    }
 
 
 def add_images(character_id, uploads=None, data=None):
@@ -464,40 +683,93 @@ def add_images(character_id, uploads=None, data=None):
     if uploads is not None and (not uploads or len(uploads) > MAX_IMAGES):
         raise store.CanvasError(f'请选择1至{MAX_IMAGES}张角色图')
     sources = _resolve_sources(uploads, data)
+    created_files = []
     try:
         added = []
         with store.write_transaction() as db:
-            _row(db, character_id)
-            rows = _media_rows(db, sources)
-            existing = {m['local_id']: m['role'] for m in _media(db, character_id)}
-            fresh = list(dict.fromkeys(r['id'] for r in rows if r['id'] not in existing))
-            count = len([r for r in existing.values() if r == 'image'])
-            if count + len(fresh) > MAX_IMAGES:
-                raise store.CanvasError(f'每个角色最多{MAX_IMAGES}张图片')
-            now = tasks.utcnow()
+            char_row = _row(db, character_id)
+            char_folder_id = _ensure_character_folder(db, character_id, char_row['name'])
+            rows = _media_rows(db, sources, folder_id=char_folder_id)
+            current_media = _media(db, character_id)
+            existing_by_id = {m['local_id']: m['role'] for m in current_media}
+            existing_image_by_sha = {m['sha256']: m['local_id'] for m in current_media if m['role'] == 'image'}
+            existing_voice_by_sha = {m['sha256']: m['local_id'] for m in current_media if m['role'] == 'voice'}
+
+            # Validate ALL incoming rows before mutating any folder_id or copying files.
+            plan = []
+            new_rows = []
+            seen_new_ids = set()
+            seen_new_sha = {}
             for row in rows:
-                if existing.get(row['id']) == 'voice':
+                rid = row['id']
+                sha = row['sha256']
+                if existing_by_id.get(rid) == 'voice' or sha in existing_voice_by_sha:
                     raise store.CanvasError('该素材已用作角色声音')
-                if row['id'] not in existing:
-                    width, height, _ = _media_facts(row, 'image')
+                if rid in existing_by_id:
+                    plan.append(('existing', rid))
+                    continue
+                if sha in existing_image_by_sha:
+                    plan.append(('existing', existing_image_by_sha[sha]))
+                    continue
+                if rid in seen_new_ids:
+                    plan.append(('batch_dup', rid))
+                    continue
+                if sha in seen_new_sha:
+                    plan.append(('batch_dup', seen_new_sha[sha]))
+                    continue
+                seen_new_ids.add(rid)
+                seen_new_sha[sha] = rid
+                new_rows.append(row)
+                plan.append(('new', row))
+
+            count = sum(1 for role in existing_by_id.values() if role == 'image')
+            if count + len(new_rows) > MAX_IMAGES:
+                raise store.CanvasError(f'每个角色最多{MAX_IMAGES}张图片')
+
+            facts = {}
+            for row in new_rows:
+                width, height, _ = _media_facts(row, 'image')
+                facts[row['id']] = (width, height)
+
+            now = tasks.utcnow()
+            placed_by_orig_id = {}
+            added_ids = set()
+            for tag, payload in plan:
+                if tag == 'existing':
+                    target_id = payload
+                elif tag == 'batch_dup':
+                    target_id = placed_by_orig_id[payload]
+                else:
+                    row = payload
+                    width, height = facts[row['id']]
+                    placed = _place_for_character(db, character_id, row, char_folder_id, created_files)
+                    target_id = placed['id']
+                    placed_by_orig_id[row['id']] = target_id
                     db.execute('INSERT INTO character_media VALUES (?,?,?,?,?,?,?,?)',
-                               (character_id, row['id'], 'image', count, width, height, None, now))
-                    existing[row['id']] = 'image'
+                               (character_id, target_id, 'image', count, width, height, None, now))
                     count += 1
-                if row['id'] not in {a['asset_id'] for a in added}:
-                    added.append(image_public(get_media(character_id, row['id'])))
-            if fresh:
+                if target_id not in added_ids:
+                    added_ids.add(target_id)
+                    added.append(image_public(get_media(character_id, target_id)))
+            if new_rows:
                 _touch(db, character_id)
-        return get_character(character_id), added
+        created_files.clear()
+    except BaseException:
+        for path in created_files:
+            path.unlink(missing_ok=True)
+        raise
     finally:
         _discard(sources)
+    return get_character(character_id), added
 
 
 def delete_image(character_id, local_id):
-    """Remove the reference only; the media item is kept."""
+    """Remove the reference and move the media item back to library root; the media item is kept."""
     with store.write_transaction() as db:
         local_id = get_media(character_id, local_id, 'image')['local_id']
+        char_folder_id = media.character_folder_id(character_id)
         db.execute('DELETE FROM character_media WHERE character_id=? AND local_id=?', (character_id, local_id))
+        db.execute('UPDATE media SET folder_id=NULL WHERE id=? AND folder_id=?', (local_id, char_folder_id))
         _renumber(db, character_id)
         _touch(db, character_id)
     return get_character(character_id)
@@ -506,24 +778,35 @@ def delete_image(character_id, local_id):
 def set_voice(character_id, upload=None, data=None):
     _row(tasks.get_db(), character_id)
     sources = _resolve_sources([upload] if upload is not None else None, data)
+    created_files = []
     try:
         with store.write_transaction() as db:
-            _row(db, character_id)
-            row = _media_rows(db, sources)[0]
+            char_row = _row(db, character_id)
+            char_folder_id = _ensure_character_folder(db, character_id, char_row['name'])
+            row = _media_rows(db, sources, folder_id=char_folder_id)[0]
             current = _media(db, character_id, 'voice')
-            if current and current[0]['local_id'] == row['id']:
-                return get_character(character_id)
-            if db.execute("SELECT 1 FROM character_media WHERE character_id=? AND local_id=? AND role='image'",
-                          (character_id, row['id'])).fetchone():
-                raise store.CanvasError('该素材已用作角色图')
-            _, _, duration = _media_facts(row, 'voice')
-            db.execute("DELETE FROM character_media WHERE character_id=? AND role='voice'", (character_id,))
-            db.execute('INSERT INTO character_media VALUES (?,?,?,?,?,?,?,?)',
-                       (character_id, row['id'], 'voice', 0, None, None, duration, tasks.utcnow()))
-            _touch(db, character_id)
-        return get_character(character_id)
+            if not (current and (current[0]['local_id'] == row['id'] or current[0]['sha256'] == row['sha256'])):
+                if db.execute("SELECT 1 FROM character_media WHERE character_id=? AND local_id=? AND role='image'",
+                              (character_id, row['id'])).fetchone():
+                    raise store.CanvasError('该素材已用作角色图')
+                _, _, duration = _media_facts(row, 'voice')
+                placed = _place_for_character(db, character_id, row, char_folder_id, created_files)
+                if current:
+                    old_voice_id = current[0]['local_id']
+                    db.execute("DELETE FROM character_media WHERE character_id=? AND role='voice'", (character_id,))
+                    if old_voice_id != placed['id']:
+                        db.execute('UPDATE media SET folder_id=NULL WHERE id=? AND folder_id=?', (old_voice_id, char_folder_id))
+                db.execute('INSERT INTO character_media VALUES (?,?,?,?,?,?,?,?)',
+                           (character_id, placed['id'], 'voice', 0, None, None, duration, tasks.utcnow()))
+                _touch(db, character_id)
+        created_files.clear()
+    except BaseException:
+        for path in created_files:
+            path.unlink(missing_ok=True)
+        raise
     finally:
         _discard(sources)
+    return get_character(character_id)
 
 
 def import_to_workflow(workflow_id, data):
@@ -584,7 +867,29 @@ def register_routes(bp, body):
         if request.method == 'PATCH':
             return jsonify(success=True, character=update_character(character_id, body()))
         require_same_origin(request, json_body=False)
-        return jsonify(success=True, **delete_character(character_id))
+        raw_q = request.args.get('delete_media')
+        delete_media_flag = False
+        if raw_q is not None:
+            norm = raw_q.strip().lower()
+            if norm in ('1', 'true', 'yes'):
+                delete_media_flag = True
+            elif norm in ('0', 'false', ''):
+                delete_media_flag = False
+            else:
+                raise store.CanvasError('delete_media 参数无效', 400)
+        if request.is_json and request.content_length != 0:
+            data = body()
+            if set(data) - {'delete_media'}:
+                raise store.CanvasError('删除参数字段无效', 400)
+            if 'delete_media' in data:
+                if type(data['delete_media']) is not bool:
+                    raise store.CanvasError('delete_media 必须为布尔值', 400)
+                delete_media_flag = data['delete_media']
+        return jsonify(success=True, **delete_character(character_id, delete_media=delete_media_flag))
+
+    @bp.get('/api/characters/<character_id>/delete-preview')
+    def character_api_delete_preview(character_id):
+        return jsonify(success=True, **delete_character_preview(character_id))
 
     @bp.post('/api/characters/<character_id>/images')
     def character_api_images(character_id):

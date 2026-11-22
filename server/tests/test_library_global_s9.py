@@ -140,7 +140,7 @@ def test_default_folders_keep_declared_order(world, tmp_path):
         return [f['title'] for f in client().get('/api/canvas/media/folders').json['folders']
                 if f['parent_id'] is None and f['system_key'] is None]
     system = [f['system_key'] for f in client().get('/api/canvas/media/folders').json['folders'] if f['system_key']]
-    assert system == ['generated', 'generated_image', 'generated_video', 'generated_audio']
+    assert system == ['generated', 'generated_image', 'generated_video', 'generated_audio', 'characters']
     assert roots()[:5] == DEFAULTS
     run(tmp_path)  # migrated library: same order
     assert roots()[:5] == DEFAULTS

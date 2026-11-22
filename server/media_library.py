@@ -71,6 +71,17 @@ def root():
     return path
 
 
+CHARACTER_ROOT_KEY = 'characters'
+
+
+def is_character_system_key(key):
+    return key == CHARACTER_ROOT_KEY or (isinstance(key, str) and key.startswith('character:'))
+
+
+def character_folder_id(character_id):
+    return media_schema.stable_id('character', character_id)
+
+
 def system_folder_id(key):
     if key not in {k for k, _, _ in media_schema.SYSTEM_FOLDERS}:
         raise ValueError(key)
@@ -369,18 +380,25 @@ def _folder(db, folder_id):
     return dict(row)
 
 
-def _placement(db, folder_id, kind=None, origin=None, move=False):
+def _placement(db, folder_id, kind=None, origin=None, move=False, allow_character_folder=False):
     """Target folder for items: root, a user folder, or the system subfolder of the same kind.
 
     生成历史 and its type subfolders only take generation results (origin generated, user
     decision 2026-11-17). ``move`` (GEN-RESULT-LIFECYCLE-20261119): nothing is moved into
     生成历史 any more; it only receives new results (a copy moved back would share its
     task's life cycle again).
+    角色卡 and its ``character:*`` subfolders are managed automatically by character cards;
+    manual uploads/moves are refused unless ``allow_character_folder=True`` targets a
+    ``character:*`` subfolder.
     """
     if folder_id is None:
         return None
     folder = _folder(db, folder_id)
     if folder['system_key']:
+        if is_character_system_key(folder['system_key']):
+            if allow_character_folder and folder['system_key'].startswith('character:'):
+                return folder_id
+            raise MediaError('角色卡文件夹由角色卡自动管理，请在角色卡界面添加素材', 409, 'folder_character_managed')
         if move:
             raise MediaError('生成历史只接收新生成的结果，不能移入或复制进来', 409, 'folder_generated_only')
         if origin != 'generated':
@@ -395,17 +413,28 @@ def folder_public(db, row):
     return {**{k: row[k] for k in ('id', 'title', 'parent_id', 'system_key', 'icon', 'created_at', 'updated_at')}, 'media_count': count}
 
 
+def _folder_sort_key(row):
+    fid = row['id']
+    if row['system_key'] is not None:
+        if fid in _SYSTEM_ORDER:
+            return (0, _SYSTEM_ORDER[fid], '', '')
+        return (1, 0, row['created_at'], fid)
+    if fid in _DEFAULT_ORDER:
+        return (2, _DEFAULT_ORDER[fid], '', '')
+    return (3, 0, row['created_at'], fid)
+
+
 def list_folders():
     db = tasks.get_db()
     rows = db.execute('SELECT * FROM media_folders ORDER BY system_key IS NULL, created_at, id').fetchall()
-    # Seeded folders share one timestamp: keep their declared order (S9 O1), others by time then id.
-    rows.sort(key=lambda r: (r['system_key'] is None, r['created_at'], _SEED_ORDER.get(r['id'], len(_SEED_ORDER)), r['id']))
+    # System folders in declared order, then character:* subfolders by created_at/id, then seeded defaults, then user folders.
+    rows.sort(key=_folder_sort_key)
     return [folder_public(db, r) for r in rows]
 
 
-_SEED_ORDER = {media_schema.stable_id('system', key): index for index, (key, _, _) in enumerate(media_schema.SYSTEM_FOLDERS)}
-_SEED_ORDER.update({media_schema.stable_id('default', title): len(_SEED_ORDER) + index
-                    for index, (title, _) in enumerate(media_schema.DEFAULT_FOLDERS)})
+_SYSTEM_ORDER = {media_schema.stable_id('system', key): index for index, (key, _, _) in enumerate(media_schema.SYSTEM_FOLDERS)}
+_DEFAULT_ORDER = {media_schema.stable_id('default', title): index for index, (title, _) in enumerate(media_schema.DEFAULT_FOLDERS)}
+_SEED_ORDER = {**_SYSTEM_ORDER, **{fid: len(_SYSTEM_ORDER) + index for fid, index in _DEFAULT_ORDER.items()}}
 
 
 def _save_folder(data, folder_id=None):
@@ -414,6 +443,8 @@ def _save_folder(data, folder_id=None):
     with store.write_transaction() as db:
         old = _folder(db, folder_id) if folder_id else None
         if old and old['system_key']:
+            if is_character_system_key(old['system_key']):
+                raise MediaError('角色卡文件夹由角色卡自动管理，不能手动修改', 409, 'folder_character_managed')
             raise MediaError('系统文件夹不能修改', 409, 'folder_system')
         icon = data.get('icon', old['icon'] if old else 'folder')
         if icon not in ICONS:
@@ -428,7 +459,10 @@ def _save_folder(data, folder_id=None):
             raise MediaError('文件夹名称不能包含“/”', 400, 'invalid_name')
         parent_id = data.get('parent_id', old['parent_id'] if old else None)
         if parent_id is not None:
-            if _folder(db, parent_id)['system_key']:
+            parent_folder = _folder(db, parent_id)
+            if parent_folder['system_key']:
+                if is_character_system_key(parent_folder['system_key']):
+                    raise MediaError('角色卡文件夹由角色卡自动管理，不能手动新建或移入子文件夹', 409, 'folder_character_managed')
                 raise MediaError('系统文件夹下不能新建或移入文件夹', 409, 'folder_target_invalid')
             ancestor, seen = parent_id, set()
             while ancestor is not None:
@@ -461,7 +495,10 @@ def update_folder(folder_id, data):
 def delete_folder(folder_id):
     """Never deletes media: a non-empty folder is refused."""
     with store.write_transaction() as db:
-        if _folder(db, folder_id)['system_key']:
+        folder = _folder(db, folder_id)
+        if folder['system_key']:
+            if is_character_system_key(folder['system_key']):
+                raise MediaError('角色卡文件夹由角色卡自动管理，不能手动删除', 409, 'folder_character_managed')
             raise MediaError('系统文件夹不能删除', 409, 'folder_system')
         if db.execute('SELECT 1 FROM media_folders WHERE parent_id=? LIMIT 1', (folder_id,)).fetchone() or \
                 db.execute('SELECT 1 FROM media WHERE folder_id=? LIMIT 1', (folder_id,)).fetchone():
@@ -582,7 +619,7 @@ def register_generated(task_id, path, kind, *, name=None):
     return media_id
 
 
-def save_upload(stream, name, *, folder_id=None, origin='upload'):
+def save_upload(stream, name, *, folder_id=None, origin='upload', allow_character_folder=False):
     """Upload bytes into the library -> (public media, deduplicated)."""
     if origin not in UPLOAD_ORIGINS:
         raise MediaError('素材来源无效')
@@ -608,7 +645,7 @@ def save_upload(stream, name, *, folder_id=None, origin='upload'):
         checksum = digest.hexdigest()
         with store.write_transaction() as db:
             kind = mime.split('/')[0]
-            folder_id = _placement(db, folder_id, kind, origin)
+            folder_id = _placement(db, folder_id, kind, origin, allow_character_folder=allow_character_folder)
             existing = _existing(db, checksum, origin)
             if existing:
                 # Dedup returns the existing item unchanged (folder, name, origin), also when it is a
@@ -1024,6 +1061,10 @@ def move_media(ids, folder_id):
                 raise MediaError('所选生成结果的任务在回收站，恢复任务后才能操作', 409, 'media_trashed')
             result, copied = [], []
             for row in rows:
+                if row['folder_id']:
+                    src_folder = db.execute('SELECT system_key FROM media_folders WHERE id=?', (row['folder_id'],)).fetchone()
+                    if src_folder and is_character_system_key(src_folder['system_key']):
+                        raise MediaError('角色卡文件夹中的素材由角色卡管理，请在角色卡界面移除后自动回到根目录', 409, 'folder_character_managed')
                 if row['folder_id'] == folder_id:
                     result.append(row['id'])
                     continue
